@@ -74,6 +74,28 @@ export async function saveExtractionErrorArtifact(
   });
 }
 
+export async function saveFallbackArtifact(
+  artifact: UploadArtifact,
+  payload: unknown
+) {
+  await writeArtifactJson(artifact.dir, "fallback.json", {
+    artifact: publicUploadArtifact(artifact),
+    savedAt: new Date().toISOString(),
+    payload
+  });
+}
+
+export async function saveFinalExtractionArtifact(
+  artifact: UploadArtifact,
+  payload: unknown
+) {
+  await writeArtifactJson(artifact.dir, "final-extraction.json", {
+    artifact: publicUploadArtifact(artifact),
+    savedAt: new Date().toISOString(),
+    payload
+  });
+}
+
 export function publicUploadArtifact(
   artifact: UploadArtifact
 ): PublicUploadArtifact {

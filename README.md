@@ -8,6 +8,7 @@ A Bun + Next.js app for turning credit card and bank statement PDFs into editabl
 - Next.js App Router for the UI and server routes
 - OpenRouter chat completions with PDF file input and JSON schema output
 - Notion REST API with `data_source_id` page creation
+- `pdftotext` as a local fallback when the LLM returns statement metadata but no transaction rows
 
 ## Setup
 
@@ -18,6 +19,8 @@ bun run dev
 ```
 
 Open `http://localhost:3000`.
+
+The fallback parser expects `pdftotext` from Poppler to be available on the host. On many Linux systems this is provided by `poppler-utils`.
 
 ## Environment
 
@@ -70,3 +73,5 @@ If the data source is missing optional expense columns, the app will add them be
 5. Save selected rows to Notion.
 
 The UI starts with sample rows so review and editing can be exercised before credentials are configured.
+
+Uploads are saved to `/tmp/statement-ledger/uploads/<upload-id>/` with the original PDF, OpenRouter response, fallback output when used, and the final extraction JSON.

@@ -2,8 +2,11 @@ import {
   publicUploadArtifact,
   saveExtractionArtifact,
   saveExtractionErrorArtifact,
+  saveFallbackArtifact,
+  saveFinalExtractionArtifact,
   saveUploadedPdf
 } from "@/lib/artifacts";
+import { extractFallbackExpensesFromPdf } from "@/lib/fallbackExtractor";
 import {
   extractStatementFromPdf,
   IntegrationError
@@ -47,9 +50,24 @@ export async function POST(request: Request) {
         bytes: artifact.bytes,
         onDebug: (payload) => saveExtractionArtifact(artifact, payload)
       });
+      const finalExtraction = await applyFallbackIfNeeded(
+        artifact.pdfPath,
+        extraction
+      );
+
+      if (finalExtraction !== extraction) {
+        await saveFallbackArtifact(artifact, {
+          reason: "openrouter-empty-expenses",
+          extraction: finalExtraction
+        });
+      }
+
+      await saveFinalExtractionArtifact(artifact, {
+        extraction: finalExtraction
+      });
 
       return Response.json({
-        extraction,
+        extraction: finalExtraction,
         artifact: publicUploadArtifact(artifact)
       });
     } catch (error) {
@@ -70,4 +88,27 @@ export async function POST(request: Request) {
 
 function isPdf(file: File) {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+async function applyFallbackIfNeeded(
+  pdfPath: string,
+  extraction: Awaited<ReturnType<typeof extractStatementFromPdf>>
+) {
+  if (extraction.expenses.length > 0) {
+    return extraction;
+  }
+
+  const fallback = await extractFallbackExpensesFromPdf(
+    pdfPath,
+    extraction.statement
+  );
+
+  if (fallback.expenses.length === 0) {
+    return extraction;
+  }
+
+  return {
+    ...extraction,
+    expenses: fallback.expenses
+  };
 }
