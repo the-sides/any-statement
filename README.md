@@ -1,26 +1,54 @@
 # Statement Ledger
 
-A Bun + Next.js app for turning credit card and bank statement PDFs into editable expense rows, then saving approved rows into a Notion data source.
+Statement Ledger is a local-first Bun + Next.js app for turning credit card and bank statement PDFs into editable expense rows, then saving approved rows into a Notion data source.
+
+The current flow is intentionally simple:
+
+1. Upload a PDF statement.
+2. Extract statement metadata and expense rows.
+3. Review and edit the rows in the table.
+4. Select approved rows.
+5. Save selected rows to Notion.
+
+## Current Status
+
+- Working local app at `http://127.0.0.1:3000`.
+- OpenRouter is the primary extraction path.
+- Text-bearing PDF fallback is implemented for cases where OpenRouter returns metadata but no rows.
+- Notion save is wired to a data source through `NOTION_DATA_SOURCE_ID`.
+- Uploaded PDFs and extraction artifacts are persisted under `/tmp/statement-ledger/uploads/<upload-id>/`.
 
 ## Stack
 
-- Bun for package management and scripts
-- Next.js App Router for the UI and server routes
-- OpenRouter chat completions with PDF file input and JSON schema output
-- Notion REST API with `data_source_id` page creation
-- `pdftotext` as a local fallback when the LLM returns statement metadata but no transaction rows
+- Bun for package management and scripts.
+- Next.js App Router for the UI and server routes.
+- OpenRouter chat completions with PDF file input and JSON schema output.
+- Notion REST API with `data_source_id` page creation.
+- `pdftotext` from Poppler as a local fallback when the LLM returns statement metadata but no transaction rows.
+
+## Project Layout
+
+- `components/StatementWorkspace.tsx` - main upload, review, edit, and save UI.
+- `app/api/extract/route.ts` - PDF upload/extraction route.
+- `app/api/notion/save/route.ts` - selected-expense save route.
+- `lib/openrouter.ts` - OpenRouter request and JSON parsing.
+- `lib/fallbackExtractor.ts` - deterministic `pdftotext` fallback for Amex-style `New Charges Details` tables.
+- `lib/artifacts.ts` - upload/debug artifact persistence under `/tmp`.
+- `lib/notion.ts` - Notion schema reconciliation and page creation.
+- `lib/extractionSchema.ts` - structured-output JSON schema.
+- `lib/categories.ts` - app category and enum vocabulary.
 
 ## Setup
 
 ```bash
 bun install
 cp .env.example .env.local
-bun run dev
+bun run dev --hostname 127.0.0.1
 ```
 
-Open `http://localhost:3000`.
+Open `http://127.0.0.1:3000`.
 
-The fallback parser expects `pdftotext` from Poppler to be available on the host. On many Linux systems this is provided by `poppler-utils`.
+On this machine, the sandbox may block binding to localhost. Running the dev server may require approval/escalation.
 
 ## Environment
 
@@ -32,13 +60,20 @@ OPENROUTER_HTTP_REFERER=http://localhost:3000
 
 NOTION_API_KEY=
 NOTION_DATA_SOURCE_ID=
+STATEMENT_LEDGER_ARTIFACT_DIR=/tmp/statement-ledger
 ```
+
+`.env.local` is ignored by git and contains the real local credentials. Do not commit API keys.
 
 `OPENROUTER_PDF_ENGINE=cloudflare-ai` is the no-cost parser. Use `mistral-ocr` for scanned statements if extraction quality is poor.
 
+The fallback parser expects `pdftotext` from Poppler to be available on the host. On many Linux systems this is provided by `poppler-utils`.
+
 ## Notion Data Source
 
-Create or share a Notion data source. The app uses the data source's existing title column and writes generated categories to `Expense Category` if `Category` is already used for a relation.
+The app uses the data source's existing title column and writes generated categories to `Expense Category` if `Category` is already used for a relation.
+
+Expected writable properties:
 
 | Property | Type |
 | --- | --- |
@@ -60,18 +95,57 @@ Create or share a Notion data source. The app uses the data source's existing ti
 | Confidence | Number |
 | Notes | Text |
 
-Share the data source with your Notion integration and copy its data source ID into `.env.local`.
+If the data source is missing optional expense columns, the app adds them before saving rows. It does not delete or overwrite existing columns. An existing `Category` relation can stay in place; the app leaves it alone.
 
-If the data source is missing optional expense columns, the app will add them before saving rows. It will not delete or overwrite existing columns. An existing `Category` relation can stay in place; the app leaves it alone.
+## Extraction Artifacts
 
-## Flow
+Every upload creates a directory like:
 
-1. Pick a statement PDF.
-2. Extract expenses with OpenRouter.
-3. Edit statement metadata and expense rows.
-4. Select approved rows.
-5. Save selected rows to Notion.
+```text
+/tmp/statement-ledger/uploads/2026-06-12T07-22-09-272Z-b60e64de/
+```
 
-The UI starts with sample rows so review and editing can be exercised before credentials are configured.
+Files may include:
 
-Uploads are saved to `/tmp/statement-ledger/uploads/<upload-id>/` with the original PDF, OpenRouter response, fallback output when used, and the final extraction JSON.
+- Original uploaded PDF.
+- `upload.json` with upload metadata.
+- `extraction.json` with OpenRouter provider response and normalized extraction.
+- `fallback.json` when the local text fallback was used.
+- `final-extraction.json` with the payload returned to the UI.
+- `error.json` if extraction fails.
+
+For the reproduced American Express statement bug, the fallback parser found 41 rows totaling `$2,614.97`, matching the statement's `Total New Charges`.
+
+## Verification
+
+Run before committing:
+
+```bash
+bun run typecheck
+bun run lint
+BUN_INSTALL=/tmp/bun-install BUN_TMPDIR=/tmp/bun-tmp bun run build
+```
+
+Useful replay command for a saved PDF:
+
+```bash
+curl -s -o /tmp/statement-ledger-route-replay.json \
+  -F statementPdf=@/tmp/statement-ledger/uploads/<upload-id>/<file>.pdf \
+  http://127.0.0.1:3000/api/extract
+```
+
+Then summarize:
+
+```bash
+jq '{rows: (.extraction.expenses | length), total: (.extraction.expenses | map(.amount) | add), artifact: .artifact.dir}' /tmp/statement-ledger-route-replay.json
+```
+
+## Git Checkpoints
+
+Current checkpoint commits:
+
+- `f7f2eb9` - initial app baseline.
+- `1cde5d0` - persisted upload/extraction artifacts.
+- `7257a4e` - fallback parser for statement charges.
+
+Continue committing small, working checkpoints after meaningful changes.
