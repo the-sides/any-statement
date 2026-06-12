@@ -260,9 +260,7 @@ export function getDefaultCategoryName(categoryNames: readonly string[]) {
   return (
     categoryNames.find(
       (category) => category.toLowerCase() === FALLBACK_CATEGORY_NAME.toLowerCase()
-    ) ||
-    categoryNames[0] ||
-    FALLBACK_CATEGORY_NAME
+    ) || FALLBACK_CATEGORY_NAME
   );
 }
 

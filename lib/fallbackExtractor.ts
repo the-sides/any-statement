@@ -2,9 +2,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
-  coerceCategoryName,
+  getDefaultCategoryName,
   getEnabledCategoryNames,
-  type ExpenseCategory
 } from "@/lib/categories";
 import type { ExpenseItem, StatementSummary } from "@/lib/types";
 
@@ -105,7 +104,7 @@ function parseChargeLine(
     merchant,
     amount,
     currency: statement.currency || "USD",
-    category: coerceCategoryName(categorize(rawDescription), categoryNames),
+    category: categorize(rawDescription, categoryNames),
     subcategory: "",
     paymentMethod: "card",
     statementSection: type === "Cash Advance" ? "withdrawal" : "purchase",
@@ -126,17 +125,12 @@ function toIsoDate(value: string) {
   return `20${year}-${month}-${day}`;
 }
 
-function categorize(description: string): ExpenseCategory {
+function categorize(description: string, categoryNames: readonly string[]) {
   const value = description.toLowerCase();
 
   if (
     includesAny(value, [
-      "adobe",
-      "openai",
-      "notion",
-      "google",
       "youtube",
-      "discord",
       "crunchyroll",
       "hulu",
       "netflix",
@@ -145,26 +139,59 @@ function categorize(description: string): ExpenseCategory {
       "viz"
     ])
   ) {
-    return "Software";
+    return preferredCategory(categoryNames, [
+      "Entertainments",
+      "Subscription",
+      "Tech",
+      "Software"
+    ]);
+  }
+
+  if (
+    includesAny(value, ["adobe", "openai", "notion", "google", "discord"])
+  ) {
+    return preferredCategory(categoryNames, ["Tech", "Subscription", "Software"]);
   }
 
   if (includesAny(value, ["uber eats", "tst*", "restaurant", "resy"])) {
-    return "Meals";
+    return preferredCategory(categoryNames, ["Food", "Meals"]);
   }
 
   if (includesAny(value, ["uber trip", "parkmobile", "exxonmobil"])) {
-    return "Travel";
+    return preferredCategory(categoryNames, ["Transport", "Travel"]);
   }
 
   if (includesAny(value, ["amazon", "amzn.com"])) {
-    return "Supplies";
+    return preferredCategory(categoryNames, ["Shopping", "Supplies", "Office"]);
   }
 
   if (includesAny(value, ["dds", "dill"])) {
-    return "Professional Services";
+    return preferredCategory(categoryNames, ["Work", "Professional Services"]);
   }
 
-  return "Other";
+  if (includesAny(value, ["barber", "grooming", "salon", "vapor"])) {
+    return preferredCategory(categoryNames, ["Health & Wellness", "Shopping"]);
+  }
+
+  return getDefaultCategoryName(categoryNames);
+}
+
+function preferredCategory(
+  categoryNames: readonly string[],
+  preferredNames: readonly string[]
+) {
+  for (const preferredName of preferredNames) {
+    const match = categoryNames.find(
+      (categoryName) =>
+        categoryName.toLowerCase() === preferredName.toLowerCase()
+    );
+
+    if (match) {
+      return match;
+    }
+  }
+
+  return getDefaultCategoryName(categoryNames);
 }
 
 function includesAny(value: string, needles: string[]) {
