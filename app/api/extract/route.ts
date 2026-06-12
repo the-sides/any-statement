@@ -73,12 +73,14 @@ export async function POST(request: Request) {
       const finalExtraction = await applyFallbackIfNeeded(
         artifact.pdfPath,
         extraction,
-        extractionCategories.map((category) => category.name)
+        extractionCategories.map((category) => category.name),
+        categorizationNotes
       );
 
       if (finalExtraction !== extraction) {
         await saveFallbackArtifact(artifact, {
           reason: "openrouter-empty-expenses",
+          categorizationNotes,
           extraction: finalExtraction
         });
       }
@@ -156,7 +158,8 @@ function categoriesForExtraction(
 async function applyFallbackIfNeeded(
   pdfPath: string,
   extraction: Awaited<ReturnType<typeof extractStatementFromPdf>>,
-  categoryNames: readonly string[]
+  categoryNames: readonly string[],
+  categorizationNotes: string
 ) {
   if (extraction.expenses.length > 0) {
     return extraction;
@@ -165,7 +168,8 @@ async function applyFallbackIfNeeded(
   const fallback = await extractFallbackExpensesFromPdf(
     pdfPath,
     extraction.statement,
-    categoryNames
+    categoryNames,
+    { categorizationNotes }
   );
 
   if (fallback.expenses.length === 0) {

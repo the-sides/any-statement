@@ -15,15 +15,30 @@ export type FallbackExtractionResult = {
   textLength: number;
 };
 
+type CategorizationNoteRule = {
+  term: string;
+  category: string;
+};
+
+type CategoryResolution = {
+  category: string;
+  note?: string;
+};
+
 export async function extractFallbackExpensesFromPdf(
   pdfPath: string,
   statement: StatementSummary,
   categoryNames: readonly string[] = getEnabledCategoryNames(
     DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
-  )
+  ),
+  options: { categorizationNotes?: string } = {}
 ): Promise<FallbackExtractionResult> {
   const text = await extractPdfText(pdfPath);
-  const expenses = extractNewCharges(text, statement, categoryNames);
+  const noteRules = parseCategorizationNoteRules(
+    options.categorizationNotes || "",
+    categoryNames
+  );
+  const expenses = extractNewCharges(text, statement, categoryNames, noteRules);
 
   return {
     source: "pdftotext-new-charges",
@@ -48,7 +63,8 @@ async function extractPdfText(pdfPath: string) {
 function extractNewCharges(
   text: string,
   statement: StatementSummary,
-  categoryNames: readonly string[]
+  categoryNames: readonly string[],
+  noteRules: readonly CategorizationNoteRule[]
 ) {
   const lines = text.split(/\r?\n/);
   const startIndex = lines.findIndex((line) =>
@@ -69,7 +85,7 @@ function extractNewCharges(
       break;
     }
 
-    const parsed = parseChargeLine(line, statement, categoryNames);
+    const parsed = parseChargeLine(line, statement, categoryNames, noteRules);
     if (parsed) {
       expenses.push(parsed);
     }
@@ -81,7 +97,8 @@ function extractNewCharges(
 function parseChargeLine(
   line: string,
   statement: StatementSummary,
-  categoryNames: readonly string[]
+  categoryNames: readonly string[],
+  noteRules: readonly CategorizationNoteRule[]
 ): ExpenseItem | null {
   const match = line.match(
     /^\s*(\d{2}\/\d{2}\/\d{2})\s+(.+?)\s{2,}(Pay Over Time|Pay In Full|Cash Advance).*?\$([0-9,]+\.\d{2})\s*$/
@@ -95,6 +112,7 @@ function parseChargeLine(
   const merchant = cleanMerchant(rawDescription);
   const amount = Number(rawAmount.replace(/,/g, ""));
   const date = toIsoDate(rawDate);
+  const category = categorize(rawDescription, categoryNames, noteRules);
 
   return {
     id: `fallback-${date}-${merchant.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${rawAmount.replace(/[^0-9]/g, "")}`,
@@ -104,12 +122,14 @@ function parseChargeLine(
     merchant,
     amount,
     currency: statement.currency || "USD",
-    category: categorize(rawDescription, categoryNames),
+    category: category.category,
     subcategory: "",
     paymentMethod: "card",
     statementSection: type === "Cash Advance" ? "withdrawal" : "purchase",
     confidence: 0.78,
-    notes: "Parsed from statement text fallback"
+    notes: category.note
+      ? `Parsed from statement text fallback. ${category.note}`
+      : "Parsed from statement text fallback"
   };
 }
 
@@ -125,8 +145,20 @@ function toIsoDate(value: string) {
   return `20${year}-${month}-${day}`;
 }
 
-function categorize(description: string, categoryNames: readonly string[]) {
+function categorize(
+  description: string,
+  categoryNames: readonly string[],
+  noteRules: readonly CategorizationNoteRule[]
+): CategoryResolution {
   const value = description.toLowerCase();
+  const noteCategory = categoryFromNotes(description, noteRules);
+
+  if (noteCategory) {
+    return {
+      category: noteCategory.category,
+      note: `AI Notes: ${noteCategory.term} mapped to ${noteCategory.category}.`
+    };
+  }
 
   if (
     includesAny(value, [
@@ -139,41 +171,144 @@ function categorize(description: string, categoryNames: readonly string[]) {
       "viz"
     ])
   ) {
-    return preferredCategory(categoryNames, [
-      "Entertainments",
-      "Subscription",
-      "Tech",
-      "Software"
-    ]);
+    return {
+      category: preferredCategory(categoryNames, [
+        "Entertainments",
+        "Subscription",
+        "Tech",
+        "Software"
+      ])
+    };
   }
 
   if (
     includesAny(value, ["adobe", "openai", "notion", "google", "discord"])
   ) {
-    return preferredCategory(categoryNames, ["Tech", "Subscription", "Software"]);
+    return {
+      category: preferredCategory(categoryNames, [
+        "Tech",
+        "Subscription",
+        "Software"
+      ])
+    };
   }
 
   if (includesAny(value, ["uber eats", "tst*", "restaurant", "resy"])) {
-    return preferredCategory(categoryNames, ["Food", "Meals"]);
+    return { category: preferredCategory(categoryNames, ["Food", "Meals"]) };
   }
 
   if (includesAny(value, ["uber trip", "parkmobile", "exxonmobil"])) {
-    return preferredCategory(categoryNames, ["Transport", "Travel"]);
+    return {
+      category: preferredCategory(categoryNames, ["Transport", "Travel"])
+    };
   }
 
   if (includesAny(value, ["amazon", "amzn.com"])) {
-    return preferredCategory(categoryNames, ["Shopping", "Supplies", "Office"]);
+    return {
+      category: preferredCategory(categoryNames, [
+        "Shopping",
+        "Supplies",
+        "Office"
+      ])
+    };
   }
 
   if (includesAny(value, ["dds", "dill"])) {
-    return preferredCategory(categoryNames, ["Work", "Professional Services"]);
+    return {
+      category: preferredCategory(categoryNames, [
+        "Work",
+        "Professional Services"
+      ])
+    };
   }
 
   if (includesAny(value, ["barber", "grooming", "salon", "vapor"])) {
-    return preferredCategory(categoryNames, ["Health & Wellness", "Shopping"]);
+    return {
+      category: preferredCategory(categoryNames, [
+        "Health & Wellness",
+        "Shopping"
+      ])
+    };
   }
 
-  return getDefaultCategoryName(categoryNames);
+  return { category: getDefaultCategoryName(categoryNames) };
+}
+
+function categoryFromNotes(
+  description: string,
+  noteRules: readonly CategorizationNoteRule[]
+) {
+  const normalizedDescription = normalizeRuleText(description);
+
+  return noteRules.find((rule) =>
+    normalizedDescription.includes(normalizeRuleText(rule.term))
+  );
+}
+
+function parseCategorizationNoteRules(
+  notes: string,
+  categoryNames: readonly string[]
+): CategorizationNoteRule[] {
+  return notes
+    .split(/\r?\n/)
+    .flatMap((line) => rulesFromNoteLine(line, categoryNames));
+}
+
+function rulesFromNoteLine(
+  line: string,
+  categoryNames: readonly string[]
+): CategorizationNoteRule[] {
+  const normalizedLine = line.trim().replace(/[.]+$/g, "");
+
+  if (!normalizedLine || /\b(?:avoid|do not|don't|not to use)\b/i.test(normalizedLine)) {
+    return [];
+  }
+
+  const mapping =
+    normalizedLine.match(/^(.+?)\s+.*?\btherefore\s+(?:is|are)\s+(.+)$/i) ||
+    normalizedLine.match(/^(.+?)\s+(?:is|are)\s+also\s+(.+)$/i) ||
+    normalizedLine.match(/^(.+?)\s+(?:is|are)\s+(.+)$/i);
+
+  if (!mapping) {
+    return [];
+  }
+
+  const [, rawTerms, rawCategory] = mapping;
+  const category = matchCategoryName(rawCategory, categoryNames);
+
+  if (!category) {
+    return [];
+  }
+
+  return rawTerms
+    .split(/\s+(?:and|or)\s+|[,/]/i)
+    .map((term) => term.trim())
+    .filter((term) => normalizeRuleText(term).length >= 3)
+    .map((term) => ({
+      term,
+      category
+    }));
+}
+
+function matchCategoryName(
+  value: string,
+  categoryNames: readonly string[]
+) {
+  const normalizedValue = normalizeRuleText(value);
+
+  return categoryNames.find((categoryName) => {
+    const normalizedCategory = normalizeRuleText(categoryName);
+
+    return (
+      normalizedCategory === normalizedValue ||
+      normalizedCategory === `${normalizedValue}s` ||
+      `${normalizedCategory}s` === normalizedValue
+    );
+  });
+}
+
+function normalizeRuleText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 function preferredCategory(
