@@ -63,6 +63,10 @@ const CATEGORIZATION_NOTES_STORAGE_KEY =
   "statement-ledger.categorization-notes";
 const CATEGORIZATION_NOTES_STORAGE_EVENT =
   "statement-ledger-categorization-notes";
+const APP_CATEGORY_VISIBILITY_STORAGE_KEY =
+  "statement-ledger.include-app-categories";
+const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
+  "statement-ledger-include-app-categories";
 const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 
 export function StatementWorkspace() {
@@ -93,6 +97,11 @@ export function StatementWorkspace() {
     readCategorizationNotes,
     () => ""
   );
+  const appCategoriesPreference = useSyncExternalStore(
+    subscribeToAppCategoryVisibilityPreference,
+    readAppCategoryVisibilityPreference,
+    () => null
+  );
 
   const selectedItems = useMemo(
     () => items.filter((item) => selectedIds.has(item.id)),
@@ -101,9 +110,25 @@ export function StatementWorkspace() {
   const totalAmount = selectedItems.reduce((sum, item) => sum + item.amount, 0);
   const currency = extraction.statement.currency || "USD";
   const allSelected = items.length > 0 && selectedIds.size === items.length;
+  const notionCategoryCount = categories.filter(
+    (category) => category.source === "notion"
+  ).length;
+  const appCategoryCount = categories.filter(
+    (category) => category.source === "app"
+  ).length;
+  const hasNotionCategories = notionCategoryCount > 0;
+  const includeAppCategories =
+    !hasNotionCategories || (appCategoriesPreference ?? false);
+  const activeCategories = useMemo(
+    () =>
+      includeAppCategories
+        ? categories
+        : categories.filter((category) => category.source !== "app"),
+    [categories, includeAppCategories]
+  );
   const enabledCategoryNames = useMemo(
-    () => getEnabledCategoryNames(categories),
-    [categories]
+    () => getEnabledCategoryNames(activeCategories),
+    [activeCategories]
   );
   const controlsDisabled = busy !== "idle" || categoryBusy !== "idle";
 
@@ -161,6 +186,7 @@ export function StatementWorkspace() {
       if (notes) {
         formData.append("categorizationNotes", notes);
       }
+      formData.append("includeAppCategories", String(includeAppCategories));
 
       const response = await fetch("/api/extract", {
         method: "POST",
@@ -309,6 +335,15 @@ export function StatementWorkspace() {
       });
     } finally {
       setCategoryBusy("idle");
+    }
+  }
+
+  function toggleAppCategoryVisibility(enabled: boolean) {
+    if (!writeAppCategoryVisibilityPreference(enabled)) {
+      setNotice({
+        tone: "error",
+        message: "APP category preference could not be saved in this browser."
+      });
     }
   }
 
@@ -499,7 +534,7 @@ export function StatementWorkspace() {
               <h2>Categories</h2>
             </div>
             <span className="panel-count">
-              {enabledCategoryNames.length}/{categories.length}
+              {enabledCategoryNames.length}/{activeCategories.length}
             </span>
           </div>
 
@@ -518,8 +553,31 @@ export function StatementWorkspace() {
             Import
           </button>
 
+          <label
+            className={`category-source-toggle ${
+              includeAppCategories ? "enabled" : ""
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={includeAppCategories}
+              disabled={!hasNotionCategories || controlsDisabled}
+              onChange={(event) =>
+                toggleAppCategoryVisibility(event.target.checked)
+              }
+            />
+            <span className="category-source-copy">
+              <strong>APP categories</strong>
+              <small>
+                {hasNotionCategories
+                  ? `${appCategoryCount} built-in / ${notionCategoryCount} Notion`
+                  : `${appCategoryCount} built-in defaults`}
+              </small>
+            </span>
+          </label>
+
           <div className="category-list">
-            {categories.map((category) => (
+            {activeCategories.map((category) => (
               <label
                 className={`category-toggle ${category.enabled ? "enabled" : ""}`}
                 key={`${category.source}-${category.sourceId || category.name}`}
@@ -751,14 +809,15 @@ export function StatementWorkspace() {
                         })
                       }
                     >
-                      {categoryOptionsForItem(item.category, categories).map(
-                        (category) => (
-                          <option key={category.name} value={category.name}>
-                            {category.name}
-                            {category.enabled ? "" : " (off)"}
-                          </option>
-                        )
-                      )}
+                      {categoryOptionsForItem(
+                        item.category,
+                        activeCategories
+                      ).map((category) => (
+                        <option key={category.name} value={category.name}>
+                          {category.name}
+                          {category.enabled ? "" : " (off)"}
+                        </option>
+                      ))}
                     </select>
                   </td>
                   <td>
@@ -871,6 +930,73 @@ function writeCategorizationNotes(value: string) {
   try {
     window.localStorage.setItem(CATEGORIZATION_NOTES_STORAGE_KEY, value);
     window.dispatchEvent(new Event(CATEGORIZATION_NOTES_STORAGE_EVENT));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function subscribeToAppCategoryVisibilityPreference(onStoreChange: () => void) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === APP_CATEGORY_VISIBILITY_STORAGE_KEY) {
+      onStoreChange();
+    }
+  };
+
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(
+    APP_CATEGORY_VISIBILITY_STORAGE_EVENT,
+    onStoreChange
+  );
+
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(
+      APP_CATEGORY_VISIBILITY_STORAGE_EVENT,
+      onStoreChange
+    );
+  };
+}
+
+function readAppCategoryVisibilityPreference() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(
+      APP_CATEGORY_VISIBILITY_STORAGE_KEY
+    );
+
+    if (stored === "true") {
+      return true;
+    }
+
+    if (stored === "false") {
+      return false;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeAppCategoryVisibilityPreference(value: boolean) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    window.localStorage.setItem(
+      APP_CATEGORY_VISIBILITY_STORAGE_KEY,
+      String(value)
+    );
+    window.dispatchEvent(new Event(APP_CATEGORY_VISIBILITY_STORAGE_EVENT));
     return true;
   } catch {
     return false;

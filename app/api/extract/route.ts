@@ -7,6 +7,10 @@ import {
   saveUploadedPdf
 } from "@/lib/artifacts";
 import { loadCategoryCatalog } from "@/lib/categoryStore";
+import {
+  getEnabledCategoryDefinitions,
+  type ExpenseCategoryDefinition
+} from "@/lib/categories";
 import { extractFallbackExpensesFromPdf } from "@/lib/fallbackExtractor";
 import {
   extractStatementFromPdf,
@@ -26,6 +30,9 @@ export async function POST(request: Request) {
     const categorizationNotes = readOptionalFormString(
       formData.get("categorizationNotes"),
       MAX_CATEGORIZATION_NOTES_LENGTH
+    );
+    const includeAppCategories = readOptionalBoolean(
+      formData.get("includeAppCategories")
     );
 
     if (!(file instanceof File)) {
@@ -53,16 +60,20 @@ export async function POST(request: Request) {
 
     try {
       const categoryCatalog = await loadCategoryCatalog();
+      const extractionCategories = categoriesForExtraction(
+        categoryCatalog.categories,
+        includeAppCategories
+      );
       const extraction = await extractStatementFromPdf(file, {
         bytes: artifact.bytes,
-        categories: categoryCatalog.enabledCategories,
+        categories: extractionCategories,
         categorizationNotes,
         onDebug: (payload) => saveExtractionArtifact(artifact, payload)
       });
       const finalExtraction = await applyFallbackIfNeeded(
         artifact.pdfPath,
         extraction,
-        categoryCatalog.enabledCategories.map((category) => category.name)
+        extractionCategories.map((category) => category.name)
       );
 
       if (finalExtraction !== extraction) {
@@ -106,6 +117,40 @@ function readOptionalFormString(value: FormDataEntryValue | null, maxLength: num
   }
 
   return value.trim().slice(0, maxLength);
+}
+
+function readOptionalBoolean(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  if (value === "true") {
+    return true;
+  }
+
+  if (value === "false") {
+    return false;
+  }
+
+  return null;
+}
+
+function categoriesForExtraction(
+  categories: readonly ExpenseCategoryDefinition[],
+  includeAppCategories: boolean | null
+) {
+  const hasNotionCategories = categories.some(
+    (category) => category.source === "notion"
+  );
+  const shouldIncludeAppCategories =
+    includeAppCategories ?? !hasNotionCategories;
+  const sourceCategories = shouldIncludeAppCategories
+    ? categories
+    : categories.filter((category) => category.source !== "app");
+
+  return getEnabledCategoryDefinitions(
+    sourceCategories.length > 0 ? sourceCategories : categories
+  );
 }
 
 async function applyFallbackIfNeeded(
