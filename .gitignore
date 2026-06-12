@@ -1,0 +1,10 @@
+.next/
+node_modules/
+out/
+dist/
+coverage/
+.env
+.env*.local
+*.log
+*.tsbuildinfo
+bun.lockb
