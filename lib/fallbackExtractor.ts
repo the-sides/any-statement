@@ -1,6 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { ExpenseCategory } from "@/lib/categories";
+import {
+  DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
+  coerceCategoryName,
+  getEnabledCategoryNames,
+  type ExpenseCategory
+} from "@/lib/categories";
 import type { ExpenseItem, StatementSummary } from "@/lib/types";
 
 const execFileAsync = promisify(execFile);
@@ -13,10 +18,13 @@ export type FallbackExtractionResult = {
 
 export async function extractFallbackExpensesFromPdf(
   pdfPath: string,
-  statement: StatementSummary
+  statement: StatementSummary,
+  categoryNames: readonly string[] = getEnabledCategoryNames(
+    DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
+  )
 ): Promise<FallbackExtractionResult> {
   const text = await extractPdfText(pdfPath);
-  const expenses = extractNewCharges(text, statement);
+  const expenses = extractNewCharges(text, statement, categoryNames);
 
   return {
     source: "pdftotext-new-charges",
@@ -38,7 +46,11 @@ async function extractPdfText(pdfPath: string) {
   }
 }
 
-function extractNewCharges(text: string, statement: StatementSummary) {
+function extractNewCharges(
+  text: string,
+  statement: StatementSummary,
+  categoryNames: readonly string[]
+) {
   const lines = text.split(/\r?\n/);
   const startIndex = lines.findIndex((line) =>
     line.trim().startsWith("New Charges Details")
@@ -58,7 +70,7 @@ function extractNewCharges(text: string, statement: StatementSummary) {
       break;
     }
 
-    const parsed = parseChargeLine(line, statement);
+    const parsed = parseChargeLine(line, statement, categoryNames);
     if (parsed) {
       expenses.push(parsed);
     }
@@ -69,7 +81,8 @@ function extractNewCharges(text: string, statement: StatementSummary) {
 
 function parseChargeLine(
   line: string,
-  statement: StatementSummary
+  statement: StatementSummary,
+  categoryNames: readonly string[]
 ): ExpenseItem | null {
   const match = line.match(
     /^\s*(\d{2}\/\d{2}\/\d{2})\s+(.+?)\s{2,}(Pay Over Time|Pay In Full|Cash Advance).*?\$([0-9,]+\.\d{2})\s*$/
@@ -92,7 +105,7 @@ function parseChargeLine(
     merchant,
     amount,
     currency: statement.currency || "USD",
-    category: categorize(rawDescription),
+    category: coerceCategoryName(categorize(rawDescription), categoryNames),
     subcategory: "",
     paymentMethod: "card",
     statementSection: type === "Cash Advance" ? "withdrawal" : "purchase",

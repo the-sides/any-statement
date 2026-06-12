@@ -7,18 +7,24 @@ import {
   FileText,
   LoaderCircle,
   Plus,
+  RefreshCw,
   Save,
   Sparkles,
+  Tags,
   Trash2,
   Upload
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  EXPENSE_CATEGORIES,
+  DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
   PAYMENT_METHODS,
   STATEMENT_SECTIONS,
   STATEMENT_TYPES,
+  FALLBACK_CATEGORY_NAME,
+  getDefaultCategoryName,
+  getEnabledCategoryNames,
   type ExpenseCategory,
+  type ExpenseCategoryDefinition,
   type PaymentMethod,
   type StatementSection,
   type StatementType
@@ -44,6 +50,13 @@ type ExtractionResponse = {
   };
 };
 
+type CategoryResponse = {
+  categories: ExpenseCategoryDefinition[];
+  enabledCategories?: ExpenseCategoryDefinition[];
+  imported?: number;
+  error?: string;
+};
+
 const currencyNames = new Intl.DisplayNames(["en"], { type: "currency" });
 
 export function StatementWorkspace() {
@@ -58,6 +71,12 @@ export function StatementWorkspace() {
   );
   const [dataSourceId, setDataSourceId] = useState("");
   const [busy, setBusy] = useState<"idle" | "extracting" | "saving">("idle");
+  const [categoryBusy, setCategoryBusy] = useState<
+    "idle" | "loading" | "importing" | "updating"
+  >("loading");
+  const [categories, setCategories] = useState<ExpenseCategoryDefinition[]>(
+    DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
+  );
   const [notice, setNotice] = useState<Notice>({
     tone: "neutral",
     message: "Sample rows are loaded."
@@ -71,6 +90,47 @@ export function StatementWorkspace() {
   const totalAmount = selectedItems.reduce((sum, item) => sum + item.amount, 0);
   const currency = extraction.statement.currency || "USD";
   const allSelected = items.length > 0 && selectedIds.size === items.length;
+  const enabledCategoryNames = useMemo(
+    () => getEnabledCategoryNames(categories),
+    [categories]
+  );
+  const controlsDisabled = busy !== "idle" || categoryBusy !== "idle";
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCategories() {
+      try {
+        const response = await fetch("/api/categories");
+        const result = (await response.json()) as CategoryResponse;
+
+        if (!response.ok) {
+          throw new Error(result.error || "Category loading failed.");
+        }
+
+        if (active) {
+          setCategories(result.categories);
+        }
+      } catch {
+        if (active) {
+          setNotice({
+            tone: "neutral",
+            message: "Using built-in categories."
+          });
+        }
+      } finally {
+        if (active) {
+          setCategoryBusy("idle");
+        }
+      }
+    }
+
+    loadCategories();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function extractStatement() {
     if (!file) {
@@ -169,6 +229,73 @@ export function StatementWorkspace() {
     }
   }
 
+  async function importCategories() {
+    setCategoryBusy("importing");
+    setNotice({ tone: "neutral", message: "Importing categories..." });
+
+    try {
+      const response = await fetch("/api/categories/import", {
+        method: "POST"
+      });
+      const result = (await response.json()) as CategoryResponse;
+
+      if (!response.ok) {
+        throw new Error(result.error || "Category import failed.");
+      }
+
+      setCategories(result.categories);
+      setNotice({
+        tone: "success",
+        message: `Imported ${result.imported || 0} categories.`
+      });
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Category import failed."
+      });
+    } finally {
+      setCategoryBusy("idle");
+    }
+  }
+
+  async function toggleCategory(name: string, enabled: boolean) {
+    const previousCategories = categories;
+
+    setCategoryBusy("updating");
+    setCategories((current) =>
+      current.map((category) =>
+        category.name === name ? { ...category, enabled } : category
+      )
+    );
+
+    try {
+      const response = await fetch("/api/categories", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ name, enabled })
+      });
+      const result = (await response.json()) as CategoryResponse;
+
+      if (!response.ok) {
+        throw new Error(result.error || "Category update failed.");
+      }
+
+      setCategories(result.categories);
+    } catch (error) {
+      setCategories(previousCategories);
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Category update failed."
+      });
+    } finally {
+      setCategoryBusy("idle");
+    }
+  }
+
   function loadExtraction(nextExtraction: StatementExtraction) {
     setExtraction(nextExtraction);
     setItems(nextExtraction.expenses);
@@ -220,7 +347,7 @@ export function StatementWorkspace() {
       merchant: "",
       amount: 0,
       currency,
-      category: "Other",
+      category: getDefaultCategoryName(enabledCategoryNames),
       subcategory: "",
       paymentMethod: "unknown",
       statementSection: "purchase",
@@ -275,7 +402,7 @@ export function StatementWorkspace() {
             className="primary-button"
             type="button"
             title="Extract expenses"
-            disabled={busy !== "idle"}
+            disabled={controlsDisabled}
             onClick={extractStatement}
           >
             {busy === "extracting" ? (
@@ -304,7 +431,7 @@ export function StatementWorkspace() {
             className="secondary-button"
             type="button"
             title="Save selected expenses"
-            disabled={busy !== "idle"}
+            disabled={controlsDisabled}
             onClick={saveToNotion}
           >
             {busy === "saving" ? (
@@ -314,6 +441,55 @@ export function StatementWorkspace() {
             )}
             Save
           </button>
+        </section>
+
+        <section className="panel category-panel">
+          <div className="panel-heading panel-heading-split">
+            <div className="panel-heading-title">
+              <Tags size={18} aria-hidden="true" />
+              <h2>Categories</h2>
+            </div>
+            <span className="panel-count">
+              {enabledCategoryNames.length}/{categories.length}
+            </span>
+          </div>
+
+          <button
+            className="secondary-button"
+            type="button"
+            title="Import categories"
+            disabled={controlsDisabled}
+            onClick={importCategories}
+          >
+            {categoryBusy === "importing" ? (
+              <LoaderCircle className="spin" size={18} aria-hidden="true" />
+            ) : (
+              <RefreshCw size={18} aria-hidden="true" />
+            )}
+            Import
+          </button>
+
+          <div className="category-list">
+            {categories.map((category) => (
+              <label
+                className={`category-toggle ${category.enabled ? "enabled" : ""}`}
+                key={`${category.source}-${category.sourceId || category.name}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={category.enabled}
+                  disabled={categoryBusy !== "idle" || busy !== "idle"}
+                  onChange={(event) =>
+                    toggleCategory(category.name, event.target.checked)
+                  }
+                />
+                <span className="category-toggle-main">
+                  <strong>{category.name}</strong>
+                  <small>{category.source}</small>
+                </span>
+              </label>
+            ))}
+          </div>
         </section>
 
         <section className="panel statement-card">
@@ -526,11 +702,14 @@ export function StatementWorkspace() {
                         })
                       }
                     >
-                      {EXPENSE_CATEGORIES.map((category) => (
-                        <option key={category} value={category}>
-                          {category}
-                        </option>
-                      ))}
+                      {categoryOptionsForItem(item.category, categories).map(
+                        (category) => (
+                          <option key={category.name} value={category.name}>
+                            {category.name}
+                            {category.enabled ? "" : " (off)"}
+                          </option>
+                        )
+                      )}
                     </select>
                   </td>
                   <td>
@@ -598,6 +777,45 @@ export function StatementWorkspace() {
       </section>
     </main>
   );
+}
+
+function categoryOptionsForItem(
+  value: string,
+  categories: readonly ExpenseCategoryDefinition[]
+) {
+  const normalizedValue = value.trim().toLowerCase();
+  const options = categories.filter(
+    (category) =>
+      category.enabled || category.name.toLowerCase() === normalizedValue
+  );
+
+  if (
+    value &&
+    !options.some((category) => category.name.toLowerCase() === normalizedValue)
+  ) {
+    return [
+      ...options,
+      {
+        name: value,
+        enabled: false,
+        description: "",
+        source: "app" as const
+      }
+    ];
+  }
+
+  if (options.length > 0) {
+    return options;
+  }
+
+  return [
+    {
+      name: FALLBACK_CATEGORY_NAME,
+      enabled: true,
+      description: "",
+      source: "app" as const
+    }
+  ];
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

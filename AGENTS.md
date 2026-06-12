@@ -26,6 +26,7 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 - `/api/extract` accepts `statementPdf` as multipart form data.
 - `/api/extract` saves the original PDF and extraction artifacts to `/tmp/statement-ledger/uploads/<upload-id>/`.
 - OpenRouter is the primary extraction path.
+- Categories are app-managed, persisted locally, can be imported from `NOTION_CATEGORY_DATA_SOURCE_ID`, and disabled categories remain in the catalog.
 - If OpenRouter returns statement metadata but zero rows, `lib/fallbackExtractor.ts` uses `pdftotext -layout` to parse Amex-style `New Charges Details` tables.
 - `/api/notion/save` saves selected reviewed rows to Notion.
 - `lib/notion.ts` reconciles missing optional Notion properties before creating pages and leaves an existing `Category` relation untouched.
@@ -33,8 +34,11 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 ## Important Files
 
 - `components/StatementWorkspace.tsx` - client UI state, upload, row editing, and save flow.
+- `app/api/categories/route.ts` - category catalog read and enabled/disabled updates.
+- `app/api/categories/import/route.ts` - Notion category import route.
 - `app/api/extract/route.ts` - upload validation, artifact persistence, OpenRouter extraction, fallback application.
 - `app/api/notion/save/route.ts` - Notion save route.
+- `lib/categoryStore.ts` - local category catalog persistence.
 - `lib/openrouter.ts` - OpenRouter request, prompt, response parsing, debug payload.
 - `lib/fallbackExtractor.ts` - deterministic PDF text fallback.
 - `lib/artifacts.ts` - `/tmp` artifact persistence.

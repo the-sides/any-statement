@@ -1,5 +1,7 @@
 import {
-  EXPENSE_CATEGORIES,
+  coerceCategoryName,
+  getEnabledCategoryNames,
+  DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
   PAYMENT_METHODS,
   STATEMENT_SECTIONS,
   STATEMENT_TYPES
@@ -50,7 +52,13 @@ function asConfidence(value: unknown) {
   return Math.max(0, Math.min(1, number));
 }
 
-export function normalizeExtraction(input: unknown): StatementExtraction {
+export function normalizeExtraction(
+  input: unknown,
+  options: { categoryNames?: readonly string[] } = {}
+): StatementExtraction {
+  const categoryNames =
+    options.categoryNames ||
+    getEnabledCategoryNames(DEFAULT_EXPENSE_CATEGORY_DEFINITIONS);
   const record =
     input && typeof input === "object"
       ? (input as Record<string, unknown>)
@@ -87,7 +95,7 @@ export function normalizeExtraction(input: unknown): StatementExtraction {
       merchant: asString(item.merchant),
       amount: Math.abs(asNumber(item.amount, 0)),
       currency: asString(item.currency, statement.currency).toUpperCase(),
-      category: asEnum(item.category, EXPENSE_CATEGORIES, "Other"),
+      category: coerceCategoryName(item.category, categoryNames),
       subcategory: asString(item.subcategory),
       paymentMethod: asEnum(item.paymentMethod, PAYMENT_METHODS, "unknown"),
       statementSection: asEnum(

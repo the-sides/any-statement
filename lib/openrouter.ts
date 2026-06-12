@@ -1,4 +1,9 @@
-import { extractionResponseFormat } from "@/lib/extractionSchema";
+import {
+  DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
+  type ExpenseCategoryDefinitionInput,
+  getEnabledCategoryDefinitions
+} from "@/lib/categories";
+import { createExtractionResponseFormat } from "@/lib/extractionSchema";
 import { normalizeExtraction } from "@/lib/normalize";
 import type { StatementExtraction } from "@/lib/types";
 
@@ -6,7 +11,7 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "google/gemini-3.1-flash-lite";
 const DEFAULT_PDF_ENGINE = "cloudflare-ai";
 
-const extractionPrompt = `Extract business expenses from the attached credit card or bank statement.
+const extractionPromptBase = `Extract business expenses from the attached credit card or bank statement.
 
 Do not stop after statement metadata. Read every page and identify the transaction detail tables.
 
@@ -32,6 +37,7 @@ export async function extractStatementFromPdf(
   file: File,
   options: {
     bytes?: Buffer;
+    categories?: readonly ExpenseCategoryDefinitionInput[];
     onDebug?: (payload: ExtractionDebugPayload) => Promise<void>;
   } = {}
 ): Promise<StatementExtraction> {
@@ -48,6 +54,10 @@ export async function extractStatementFromPdf(
   const pdfEngine = process.env.OPENROUTER_PDF_ENGINE || DEFAULT_PDF_ENGINE;
   const bytes = options.bytes || Buffer.from(await file.arrayBuffer());
   const fileData = `data:application/pdf;base64,${bytes.toString("base64")}`;
+  const categoryDefinitions = getEnabledCategoryDefinitions(
+    options.categories || DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
+  );
+  const categoryNames = categoryDefinitions.map((category) => category.name);
 
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
@@ -71,7 +81,7 @@ export async function extractStatementFromPdf(
           content: [
             {
               type: "text",
-              text: extractionPrompt
+              text: buildExtractionPrompt(categoryDefinitions)
             },
             {
               type: "file",
@@ -91,7 +101,7 @@ export async function extractStatementFromPdf(
           }
         }
       ],
-      response_format: extractionResponseFormat,
+      response_format: createExtractionResponseFormat(categoryNames),
       temperature: 0.1,
       max_tokens: 8000,
       stream: false
@@ -106,6 +116,7 @@ export async function extractStatementFromPdf(
       model,
       pdfEngine,
       fileName: file.name || "statement.pdf",
+      categoryNames,
       providerPayload: payload
     });
     throw new IntegrationError(
@@ -117,19 +128,41 @@ export async function extractStatementFromPdf(
   const content = (payload as OpenRouterResponse).choices?.[0]?.message
     ?.content;
   const parsed = parseModelContent(content);
-  const extraction = normalizeExtraction(parsed);
+  const extraction = normalizeExtraction(parsed, { categoryNames });
 
   await options.onDebug?.({
     ok: true,
     model,
     pdfEngine,
     fileName: file.name || "statement.pdf",
+    categoryNames,
     providerPayload: payload,
     parsed,
     extraction
   });
 
   return extraction;
+}
+
+function buildExtractionPrompt(
+  categories: readonly ExpenseCategoryDefinitionInput[]
+) {
+  const categoryList = categories
+    .map((category) => {
+      const description = category.description
+        ? ` - ${category.description}`
+        : "";
+
+      return `- ${category.name}${description}`;
+    })
+    .join("\n");
+
+  return `${extractionPromptBase}
+
+Enabled expense categories:
+${categoryList}
+
+Return the category field as the exact name of one enabled category.`;
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -187,6 +220,7 @@ export type ExtractionDebugPayload = {
   model: string;
   pdfEngine: string;
   fileName: string;
+  categoryNames: string[];
   providerPayload: unknown;
   parsed?: unknown;
   extraction?: StatementExtraction;

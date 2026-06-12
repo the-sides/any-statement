@@ -6,6 +6,7 @@ import {
   saveFinalExtractionArtifact,
   saveUploadedPdf
 } from "@/lib/artifacts";
+import { loadCategoryCatalog } from "@/lib/categoryStore";
 import { extractFallbackExpensesFromPdf } from "@/lib/fallbackExtractor";
 import {
   extractStatementFromPdf,
@@ -46,13 +47,16 @@ export async function POST(request: Request) {
     const artifact = await saveUploadedPdf(file);
 
     try {
+      const categoryCatalog = await loadCategoryCatalog();
       const extraction = await extractStatementFromPdf(file, {
         bytes: artifact.bytes,
+        categories: categoryCatalog.enabledCategories,
         onDebug: (payload) => saveExtractionArtifact(artifact, payload)
       });
       const finalExtraction = await applyFallbackIfNeeded(
         artifact.pdfPath,
-        extraction
+        extraction,
+        categoryCatalog.enabledCategories.map((category) => category.name)
       );
 
       if (finalExtraction !== extraction) {
@@ -92,7 +96,8 @@ function isPdf(file: File) {
 
 async function applyFallbackIfNeeded(
   pdfPath: string,
-  extraction: Awaited<ReturnType<typeof extractStatementFromPdf>>
+  extraction: Awaited<ReturnType<typeof extractStatementFromPdf>>,
+  categoryNames: readonly string[]
 ) {
   if (extraction.expenses.length > 0) {
     return extraction;
@@ -100,7 +105,8 @@ async function applyFallbackIfNeeded(
 
   const fallback = await extractFallbackExpensesFromPdf(
     pdfPath,
-    extraction.statement
+    extraction.statement,
+    categoryNames
   );
 
   if (fallback.expenses.length === 0) {

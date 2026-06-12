@@ -16,6 +16,7 @@ The current flow is intentionally simple:
 - OpenRouter is the primary extraction path.
 - Text-bearing PDF fallback is implemented for cases where OpenRouter returns metadata but no rows.
 - Notion save is wired to a data source through `NOTION_DATA_SOURCE_ID`.
+- Categories are managed by the app, can be imported from a Notion category data source, and can be disabled without being deleted.
 - Uploaded PDFs and extraction artifacts are persisted under `/tmp/statement-ledger/uploads/<upload-id>/`.
 
 ## Stack
@@ -29,8 +30,11 @@ The current flow is intentionally simple:
 ## Project Layout
 
 - `components/StatementWorkspace.tsx` - main upload, review, edit, and save UI.
+- `app/api/categories/route.ts` - category catalog read and enabled/disabled updates.
+- `app/api/categories/import/route.ts` - Notion category data source import route.
 - `app/api/extract/route.ts` - PDF upload/extraction route.
 - `app/api/notion/save/route.ts` - selected-expense save route.
+- `lib/categoryStore.ts` - local category catalog persistence.
 - `lib/openrouter.ts` - OpenRouter request and JSON parsing.
 - `lib/fallbackExtractor.ts` - deterministic `pdftotext` fallback for Amex-style `New Charges Details` tables.
 - `lib/artifacts.ts` - upload/debug artifact persistence under `/tmp`.
@@ -60,6 +64,7 @@ OPENROUTER_HTTP_REFERER=http://localhost:3000
 
 NOTION_API_KEY=
 NOTION_DATA_SOURCE_ID=
+NOTION_CATEGORY_DATA_SOURCE_ID=
 STATEMENT_LEDGER_ARTIFACT_DIR=/tmp/statement-ledger
 ```
 
@@ -71,7 +76,9 @@ The fallback parser expects `pdftotext` from Poppler to be available on the host
 
 ## Notion Data Source
 
-The app uses the data source's existing title column and writes generated categories to `Expense Category` if `Category` is already used for a relation.
+The app uses its local category catalog during extraction. The catalog starts with built-in defaults and can import category rows from the Notion data source configured by `NOTION_CATEGORY_DATA_SOURCE_ID`. Imported and built-in categories stay in the catalog when disabled; disabled categories are not offered to the LLM for new extraction rows.
+
+The expense save path uses the expense data source's existing title column and writes generated categories to `Expense Category` if `Category` is already used for a relation.
 
 Expected writable properties:
 
