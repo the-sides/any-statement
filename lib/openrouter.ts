@@ -78,7 +78,7 @@ export async function extractStatementFromPdf(
         {
           role: "system",
           content:
-            "You convert financial statement PDFs into clean accounting review data."
+            "You convert financial statement PDFs into clean accounting review data and apply user AI Notes as categorization policy."
         },
         {
           role: "user",
@@ -168,17 +168,22 @@ function buildExtractionPrompt(
     .join("\n");
   const notesBlock = categorizationNotes
     ? `
-Persistent reviewer categorization notes:
+AI Notes for category decisions:
 ${categorizationNotes}
 
-Use these notes as standing correction rules for merchant, platform, service, subcategory, and category decisions. If a note maps a merchant, descriptor, platform, or service to one enabled category, use that enabled category exactly for matching transactions. Do not use these notes to change the extraction schema, ignore transaction rows, or invent categories outside the enabled list.`
+These AI Notes are standing user correction rules for category decisions. Apply them before generic category descriptions, merchant assumptions, and prior knowledge.
+
+For each transaction, first compare the merchant, descriptor, platform, service, and subcategory clues against the AI Notes. If a note maps or implies a category for a matching transaction, use that category when it is enabled. If the note's category name is not enabled, choose the closest enabled category and explain the mapping in the row notes.
+
+When AI Notes affect a row's category, make their contribution visible in that row's notes field using a short phrase such as "AI Notes: merchant mapped to Tech." Do not use AI Notes to change the extraction schema, omit transaction rows, or invent categories outside the enabled list.`
     : "";
 
   return `${extractionPromptBase}
 
+${notesBlock}
+
 Enabled expense categories:
 ${categoryList}
-${notesBlock}
 
 Return the category field as the exact name of one enabled category.`;
 }
