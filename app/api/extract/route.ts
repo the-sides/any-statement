@@ -16,6 +16,7 @@ import {
   extractStatementFromPdf,
   IntegrationError
 } from "@/lib/openrouter";
+import { extractPdfText } from "@/lib/pdfText";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -64,8 +65,10 @@ export async function POST(request: Request) {
         categoryCatalog.categories,
         includeAppCategories
       );
+      const pdfText = await extractPdfText(artifact.pdfPath);
       const extraction = await extractStatementFromPdf(file, {
         bytes: artifact.bytes,
+        pdfText,
         categories: extractionCategories,
         categorizationNotes,
         onDebug: (payload) => saveExtractionArtifact(artifact, payload)

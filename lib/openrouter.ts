@@ -10,8 +10,10 @@ import type { StatementExtraction } from "@/lib/types";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "anthropic/claude-sonnet-4.6";
 const DEFAULT_PDF_ENGINE = "cloudflare-ai";
+const MIN_LOCAL_PDF_TEXT_CHARS = 500;
+const MAX_LOCAL_PDF_TEXT_CHARS = 120_000;
 
-const extractionPromptBase = `Extract business expenses from the attached credit card or bank statement.
+const extractionPromptBase = `Extract business expenses from the provided credit card or bank statement.
 
 Do not stop after statement metadata. Read every page and identify the transaction detail tables.
 
@@ -37,6 +39,7 @@ export async function extractStatementFromPdf(
   file: File,
   options: {
     bytes?: Buffer;
+    pdfText?: string;
     categories?: readonly ExpenseCategoryDefinitionInput[];
     categorizationNotes?: string;
     onDebug?: (payload: ExtractionDebugPayload) => Promise<void>;
@@ -53,8 +56,6 @@ export async function extractStatementFromPdf(
 
   const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
   const pdfEngine = process.env.OPENROUTER_PDF_ENGINE || DEFAULT_PDF_ENGINE;
-  const bytes = options.bytes || Buffer.from(await file.arrayBuffer());
-  const fileData = `data:application/pdf;base64,${bytes.toString("base64")}`;
   const categoryDefinitions = getEnabledCategoryDefinitions(
     options.categories || DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
   );
@@ -62,6 +63,21 @@ export async function extractStatementFromPdf(
   const categorizationNotes = normalizeCategorizationNotes(
     options.categorizationNotes
   );
+  const pdfText = normalizeLocalPdfText(options.pdfText);
+  const useLocalPdfText = hasUsableLocalPdfText(pdfText);
+  const fileName = file.name || "statement.pdf";
+  const inputSource = useLocalPdfText
+    ? "local-pdftotext"
+    : "openrouter-file-parser";
+  const userContent = useLocalPdfText
+    ? buildTextExtractionPrompt(categoryDefinitions, categorizationNotes, {
+        fileName,
+        pdfText
+      })
+    : await buildPdfExtractionContent(file, options.bytes, {
+        categoryDefinitions,
+        categorizationNotes
+      });
 
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
@@ -78,39 +94,28 @@ export async function extractStatementFromPdf(
         {
           role: "system",
           content:
-            "You convert financial statement PDFs into clean accounting review data and apply user AI Notes as categorization policy."
+            "You convert financial statement data into clean accounting review data and apply user AI Notes as categorization policy."
         },
         {
           role: "user",
-          content: [
-            {
-              type: "text",
-              text: buildExtractionPrompt(
-                categoryDefinitions,
-                categorizationNotes
-              )
-            },
-            {
-              type: "file",
-              file: {
-                filename: file.name || "statement.pdf",
-                file_data: fileData
+          content: userContent
+        }
+      ],
+      ...(useLocalPdfText
+        ? {}
+        : {
+            plugins: [
+              {
+                id: "file-parser",
+                pdf: {
+                  engine: pdfEngine
+                }
               }
-            }
-          ]
-        }
-      ],
-      plugins: [
-        {
-          id: "file-parser",
-          pdf: {
-            engine: pdfEngine
-          }
-        }
-      ],
+            ]
+          }),
       response_format: createExtractionResponseFormat(categoryNames),
       temperature: 0.1,
-      max_tokens: 8000,
+      max_tokens: useLocalPdfText ? 12000 : 8000,
       stream: false
     })
   });
@@ -122,7 +127,9 @@ export async function extractStatementFromPdf(
       ok: false,
       model,
       pdfEngine,
-      fileName: file.name || "statement.pdf",
+      inputSource,
+      localPdfTextLength: pdfText.length,
+      fileName,
       categoryNames,
       categorizationNotes,
       providerPayload: payload
@@ -142,7 +149,9 @@ export async function extractStatementFromPdf(
     ok: true,
     model,
     pdfEngine,
-    fileName: file.name || "statement.pdf",
+    inputSource,
+    localPdfTextLength: pdfText.length,
+    fileName,
     categoryNames,
     categorizationNotes,
     providerPayload: payload,
@@ -151,6 +160,35 @@ export async function extractStatementFromPdf(
   });
 
   return extraction;
+}
+
+async function buildPdfExtractionContent(
+  file: File,
+  bytes: Buffer | undefined,
+  options: {
+    categoryDefinitions: readonly ExpenseCategoryDefinitionInput[];
+    categorizationNotes: string;
+  }
+) {
+  const pdfBytes = bytes || Buffer.from(await file.arrayBuffer());
+  const fileData = `data:application/pdf;base64,${pdfBytes.toString("base64")}`;
+
+  return [
+    {
+      type: "text",
+      text: buildExtractionPrompt(
+        options.categoryDefinitions,
+        options.categorizationNotes
+      )
+    },
+    {
+      type: "file",
+      file: {
+        filename: file.name || "statement.pdf",
+        file_data: fileData
+      }
+    }
+  ];
 }
 
 function buildExtractionPrompt(
@@ -188,12 +226,41 @@ ${categoryList}
 Return the category field as the exact name of one enabled category.`;
 }
 
+function buildTextExtractionPrompt(
+  categories: readonly ExpenseCategoryDefinitionInput[],
+  categorizationNotes: string,
+  options: { fileName: string; pdfText: string }
+) {
+  return `${buildExtractionPrompt(categories, categorizationNotes)}
+
+The statement text below was extracted locally with pdftotext -layout from ${options.fileName}. Use this text as the source of truth for transaction rows. If it contains a New Charges Details section, extract every charge row under that section until Fees or Interest Charged.
+
+<statement_text>
+${options.pdfText}
+</statement_text>`;
+}
+
 function normalizeCategorizationNotes(value: unknown) {
   if (typeof value !== "string") {
     return "";
   }
 
   return value.trim().slice(0, 4000);
+}
+
+function normalizeLocalPdfText(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, MAX_LOCAL_PDF_TEXT_CHARS);
+}
+
+function hasUsableLocalPdfText(value: string) {
+  return (
+    value.length >= MIN_LOCAL_PDF_TEXT_CHARS &&
+    /\b(?:statement|charges|transactions?|payments?)\b/i.test(value)
+  );
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -250,6 +317,8 @@ export type ExtractionDebugPayload = {
   ok: boolean;
   model: string;
   pdfEngine: string;
+  inputSource: "local-pdftotext" | "openrouter-file-parser";
+  localPdfTextLength: number;
   fileName: string;
   categoryNames: string[];
   categorizationNotes: string;

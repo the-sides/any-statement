@@ -1,13 +1,10 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import {
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
   getDefaultCategoryName,
   getEnabledCategoryNames,
 } from "@/lib/categories";
+import { extractPdfText } from "@/lib/pdfText";
 import type { ExpenseItem, StatementSummary } from "@/lib/types";
-
-const execFileAsync = promisify(execFile);
 
 export type FallbackExtractionResult = {
   source: "pdftotext-new-charges";
@@ -45,19 +42,6 @@ export async function extractFallbackExpensesFromPdf(
     expenses,
     textLength: text.length
   };
-}
-
-async function extractPdfText(pdfPath: string) {
-  try {
-    const { stdout } = await execFileAsync("pdftotext", [
-      "-layout",
-      pdfPath,
-      "-"
-    ]);
-    return stdout;
-  } catch {
-    return "";
-  }
 }
 
 function extractNewCharges(
