@@ -321,6 +321,7 @@ button:focus-visible,
 
 .notice span {
   flex: 1;
+  overflow-wrap: anywhere;
 }
 
 .table-actions {
@@ -383,6 +384,16 @@ th {
 
 tbody tr:hover {
   background: #fbfcf8;
+}
+
+.empty-state {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
 }
 
 td:first-child,

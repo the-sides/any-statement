@@ -1,4 +1,10 @@
 import {
+  publicUploadArtifact,
+  saveExtractionArtifact,
+  saveExtractionErrorArtifact,
+  saveUploadedPdf
+} from "@/lib/artifacts";
+import {
   extractStatementFromPdf,
   IntegrationError
 } from "@/lib/openrouter";
@@ -34,8 +40,22 @@ export async function POST(request: Request) {
       );
     }
 
-    const extraction = await extractStatementFromPdf(file);
-    return Response.json({ extraction });
+    const artifact = await saveUploadedPdf(file);
+
+    try {
+      const extraction = await extractStatementFromPdf(file, {
+        bytes: artifact.bytes,
+        onDebug: (payload) => saveExtractionArtifact(artifact, payload)
+      });
+
+      return Response.json({
+        extraction,
+        artifact: publicUploadArtifact(artifact)
+      });
+    } catch (error) {
+      await saveExtractionErrorArtifact(artifact, error);
+      throw error;
+    }
   } catch (error) {
     if (error instanceof IntegrationError) {
       return Response.json({ error: error.message }, { status: error.status });

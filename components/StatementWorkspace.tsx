@@ -36,6 +36,14 @@ type Notice = {
   message: string;
 };
 
+type ExtractionResponse = {
+  extraction: StatementExtraction;
+  artifact?: {
+    dir: string;
+    pdfPath: string;
+  };
+};
+
 const currencyNames = new Intl.DisplayNames(["en"], { type: "currency" });
 
 export function StatementWorkspace() {
@@ -82,16 +90,29 @@ export function StatementWorkspace() {
         method: "POST",
         body: formData
       });
-      const result = await response.json();
+      const result = (await response.json()) as
+        | ExtractionResponse
+        | { error?: string };
 
       if (!response.ok) {
-        throw new Error(result.error || "Extraction failed.");
+        throw new Error(
+          ("error" in result && result.error) || "Extraction failed."
+        );
       }
 
-      loadExtraction(result.extraction);
+      const extractionResult = result as ExtractionResponse;
+      const rowCount = extractionResult.extraction.expenses.length;
+      const artifactMessage = extractionResult.artifact?.dir
+        ? ` Artifacts: ${extractionResult.artifact.dir}`
+        : "";
+
+      loadExtraction(extractionResult.extraction);
       setNotice({
-        tone: "success",
-        message: `Extracted ${result.extraction.expenses.length} expenses.`
+        tone: rowCount > 0 ? "success" : "error",
+        message:
+          rowCount > 0
+            ? `Extracted ${rowCount} expenses.${artifactMessage}`
+            : `Metadata extracted, but OpenRouter returned no expense rows.${artifactMessage}`
       });
     } catch (error) {
       setNotice({
@@ -437,6 +458,16 @@ export function StatementWorkspace() {
               </tr>
             </thead>
             <tbody>
+              {items.length === 0 ? (
+                <tr>
+                  <td colSpan={11}>
+                    <div className="empty-state">
+                      No expense rows returned. Re-upload the PDF and inspect the
+                      saved artifact directory shown above.
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
               {items.map((item) => (
                 <tr key={item.id}>
                   <td>

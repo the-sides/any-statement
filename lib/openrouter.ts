@@ -8,7 +8,13 @@ const DEFAULT_PDF_ENGINE = "cloudflare-ai";
 
 const extractionPrompt = `Extract business expenses from the attached credit card or bank statement.
 
-Return only charges, debits, fees, interest, withdrawals, checks, ACH outflows, and transfers that represent money leaving the account. Do not include payments, deposits, rewards, balance summaries, or statement metadata as expenses.
+Do not stop after statement metadata. Read every page and identify the transaction detail tables.
+
+For credit card statements, return every purchase, fee, interest charge, cash advance, and balance transfer as an expense row, regardless of whether the statement prints charges as positive or negative values. Exclude card payments, credits, refunds, rewards, and balance summary lines.
+
+For bank statements, return withdrawals, debit-card purchases, checks, outgoing ACH, outgoing wires, fees, interest charges, and other outflows as expense rows. Exclude deposits, incoming transfers, credits, rewards, and balance summary lines.
+
+If a transaction looks like an outflow but you are not fully certain, include it with a lower confidence score instead of omitting it. The expenses array should be empty only when the PDF contains no transaction detail rows.
 
 Use positive numbers for expense amounts. Preserve transaction dates as ISO-like YYYY-MM-DD strings when possible. If a field is not visible, use an empty string or null according to the schema. Categorize each expense using only the allowed category enum. Use confidence scores to show uncertainty.`;
 
@@ -23,7 +29,11 @@ export class IntegrationError extends Error {
 }
 
 export async function extractStatementFromPdf(
-  file: File
+  file: File,
+  options: {
+    bytes?: Buffer;
+    onDebug?: (payload: ExtractionDebugPayload) => Promise<void>;
+  } = {}
 ): Promise<StatementExtraction> {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
@@ -36,7 +46,7 @@ export async function extractStatementFromPdf(
 
   const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
   const pdfEngine = process.env.OPENROUTER_PDF_ENGINE || DEFAULT_PDF_ENGINE;
-  const bytes = Buffer.from(await file.arrayBuffer());
+  const bytes = options.bytes || Buffer.from(await file.arrayBuffer());
   const fileData = `data:application/pdf;base64,${bytes.toString("base64")}`;
 
   const response = await fetch(OPENROUTER_URL, {
@@ -91,6 +101,13 @@ export async function extractStatementFromPdf(
   const payload = await readJson(response);
 
   if (!response.ok) {
+    await options.onDebug?.({
+      ok: false,
+      model,
+      pdfEngine,
+      fileName: file.name || "statement.pdf",
+      providerPayload: payload
+    });
     throw new IntegrationError(
       getProviderError(payload) || "OpenRouter extraction failed.",
       response.status
@@ -100,8 +117,19 @@ export async function extractStatementFromPdf(
   const content = (payload as OpenRouterResponse).choices?.[0]?.message
     ?.content;
   const parsed = parseModelContent(content);
+  const extraction = normalizeExtraction(parsed);
 
-  return normalizeExtraction(parsed);
+  await options.onDebug?.({
+    ok: true,
+    model,
+    pdfEngine,
+    fileName: file.name || "statement.pdf",
+    providerPayload: payload,
+    parsed,
+    extraction
+  });
+
+  return extraction;
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -152,4 +180,14 @@ type OpenRouterResponse = {
       content?: unknown;
     };
   }>;
+};
+
+export type ExtractionDebugPayload = {
+  ok: boolean;
+  model: string;
+  pdfEngine: string;
+  fileName: string;
+  providerPayload: unknown;
+  parsed?: unknown;
+  extraction?: StatementExtraction;
 };
