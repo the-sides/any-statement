@@ -8,7 +8,7 @@ import { normalizeExtraction } from "@/lib/normalize";
 import type { StatementExtraction } from "@/lib/types";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const DEFAULT_MODEL = "google/gemini-3.1-flash-lite";
+const DEFAULT_MODEL = "anthropic/claude-sonnet-4.6";
 const DEFAULT_PDF_ENGINE = "cloudflare-ai";
 
 const extractionPromptBase = `Extract business expenses from the attached credit card or bank statement.

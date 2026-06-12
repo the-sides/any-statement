@@ -59,7 +59,7 @@ On this machine, the sandbox may block binding to localhost. Running the dev ser
 
 ```bash
 OPENROUTER_API_KEY=
-OPENROUTER_MODEL=google/gemini-3.1-flash-lite
+OPENROUTER_MODEL=anthropic/claude-sonnet-4.6
 OPENROUTER_PDF_ENGINE=cloudflare-ai
 OPENROUTER_HTTP_REFERER=http://localhost:3000
 

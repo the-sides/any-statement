@@ -5,6 +5,11 @@ import {
   STATEMENT_TYPES
 } from "@/lib/categories";
 
+const confidenceSchema = {
+  type: "number",
+  description: "Confidence score from 0 to 1. Values are clamped after parsing."
+} as const;
+
 export function createStatementExtractionSchema(
   categoryNames: readonly string[] = EXPENSE_CATEGORIES
 ) {
@@ -36,7 +41,7 @@ export function createStatementExtractionSchema(
           currency: { type: "string" },
           openingBalance: { type: ["number", "null"] },
           closingBalance: { type: ["number", "null"] },
-          confidence: { type: "number", minimum: 0, maximum: 1 }
+          confidence: confidenceSchema
         }
       },
       expenses: {
@@ -71,7 +76,7 @@ export function createStatementExtractionSchema(
             subcategory: { type: "string" },
             paymentMethod: { type: "string", enum: PAYMENT_METHODS },
             statementSection: { type: "string", enum: STATEMENT_SECTIONS },
-            confidence: { type: "number", minimum: 0, maximum: 1 },
+            confidence: confidenceSchema,
             notes: { type: "string" }
           }
         }
