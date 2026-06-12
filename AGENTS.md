@@ -3,7 +3,7 @@
 This project lives at:
 
 ```text
-/home/jake/Documents/Codex/2026-06-12-this-will-be-a-new-project
+/home/jake/repos/statement-to-notion
 ```
 
 It is a Bun + Next.js app named Statement Ledger. The user is testing it from a phone against localhost and expects uploaded PDFs to be saved locally so agents can inspect and replay the exact statements.
