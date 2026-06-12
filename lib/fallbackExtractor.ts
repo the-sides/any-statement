@@ -197,6 +197,31 @@ function categorize(
     return { category: preferredCategory(categoryNames, ["Food", "Meals"]) };
   }
 
+  if (
+    includesAny(value, [
+      "food city",
+      "grocery",
+      "supermarket",
+      "whole foods",
+      "trader joe",
+      "kroger",
+      "publix",
+      "safeway",
+      "aldi",
+      "instacart"
+    ])
+  ) {
+    return {
+      category: preferredCategory(categoryNames, [
+        "Food",
+        "Groceries",
+        "Meals",
+        "Shopping",
+        "Supplies"
+      ])
+    };
+  }
+
   if (includesAny(value, ["uber trip", "parkmobile", "exxonmobil"])) {
     return {
       category: preferredCategory(categoryNames, ["Transport", "Travel"])
@@ -232,6 +257,18 @@ function categorize(
   }
 
   return { category: getDefaultCategoryName(categoryNames) };
+}
+
+export function categorizeFallbackDescription(
+  description: string,
+  categoryNames: readonly string[],
+  categorizationNotes = ""
+) {
+  return categorize(
+    description,
+    categoryNames,
+    parseCategorizationNoteRules(categorizationNotes, categoryNames)
+  );
 }
 
 function categoryFromNotes(
