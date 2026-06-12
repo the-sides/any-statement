@@ -17,6 +17,7 @@ The current flow is intentionally simple:
 - Text-bearing PDF fallback is implemented for cases where OpenRouter returns metadata but no rows.
 - Notion save is wired to a data source through `NOTION_DATA_SOURCE_ID`.
 - Categories are managed by the app, can be imported from a Notion category data source, and can be disabled without being deleted.
+- Reviewer categorization notes are saved in browser localStorage and sent to OpenRouter with each extraction.
 - Uploaded PDFs and extraction artifacts are persisted under `/tmp/statement-ledger/uploads/<upload-id>/`.
 
 ## Stack
@@ -117,6 +118,7 @@ Files may include:
 - Original uploaded PDF.
 - `upload.json` with upload metadata.
 - `extraction.json` with OpenRouter provider response and normalized extraction.
+- `extraction.json` also records reviewer categorization notes submitted with the upload.
 - `fallback.json` when the local text fallback was used.
 - `final-extraction.json` with the payload returned to the UI.
 - `error.json` if extraction fails.

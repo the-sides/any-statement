@@ -6,6 +6,7 @@ import {
   Database,
   FileText,
   LoaderCircle,
+  NotebookPen,
   Plus,
   RefreshCw,
   Save,
@@ -14,7 +15,7 @@ import {
   Trash2,
   Upload
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
   PAYMENT_METHODS,
@@ -58,6 +59,11 @@ type CategoryResponse = {
 };
 
 const currencyNames = new Intl.DisplayNames(["en"], { type: "currency" });
+const CATEGORIZATION_NOTES_STORAGE_KEY =
+  "statement-ledger.categorization-notes";
+const CATEGORIZATION_NOTES_STORAGE_EVENT =
+  "statement-ledger-categorization-notes";
+const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 
 export function StatementWorkspace() {
   const [file, setFile] = useState<File | null>(null);
@@ -82,6 +88,11 @@ export function StatementWorkspace() {
     message: "Sample rows are loaded."
   });
   const [lastSave, setLastSave] = useState<SaveExpensesResult | null>(null);
+  const categorizationNotes = useSyncExternalStore(
+    subscribeToCategorizationNotes,
+    readCategorizationNotes,
+    () => ""
+  );
 
   const selectedItems = useMemo(
     () => items.filter((item) => selectedIds.has(item.id)),
@@ -145,6 +156,11 @@ export function StatementWorkspace() {
     try {
       const formData = new FormData();
       formData.append("statementPdf", file);
+
+      const notes = categorizationNotes.trim();
+      if (notes) {
+        formData.append("categorizationNotes", notes);
+      }
 
       const response = await fetch("/api/extract", {
         method: "POST",
@@ -441,6 +457,39 @@ export function StatementWorkspace() {
             )}
             Save
           </button>
+        </section>
+
+        <section className="panel note-panel">
+          <div className="panel-heading panel-heading-split">
+            <div className="panel-heading-title">
+              <NotebookPen size={18} aria-hidden="true" />
+              <h2>AI Notes</h2>
+            </div>
+            <span className="panel-count">
+              {categorizationNotes.trim() ? "Local" : "Empty"}
+            </span>
+          </div>
+
+          <textarea
+            className="note-textarea"
+            value={categorizationNotes}
+            maxLength={MAX_CATEGORIZATION_NOTES_LENGTH}
+            onChange={(event) => {
+              if (!writeCategorizationNotes(event.target.value)) {
+                setNotice({
+                  tone: "error",
+                  message: "AI notes could not be saved in this browser."
+                });
+              }
+            }}
+            placeholder="Steam, Valve, and STEAMGAMES.COM should be Entertainment, not Charity."
+          />
+          <div className="note-meta">
+            <span>Saved locally</span>
+            <span>
+              {categorizationNotes.length}/{MAX_CATEGORIZATION_NOTES_LENGTH}
+            </span>
+          </div>
         </section>
 
         <section className="panel category-panel">
@@ -777,6 +826,55 @@ export function StatementWorkspace() {
       </section>
     </main>
   );
+}
+
+function subscribeToCategorizationNotes(onStoreChange: () => void) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === CATEGORIZATION_NOTES_STORAGE_KEY) {
+      onStoreChange();
+    }
+  };
+
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(CATEGORIZATION_NOTES_STORAGE_EVENT, onStoreChange);
+
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(
+      CATEGORIZATION_NOTES_STORAGE_EVENT,
+      onStoreChange
+    );
+  };
+}
+
+function readCategorizationNotes() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  try {
+    return window.localStorage.getItem(CATEGORIZATION_NOTES_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeCategorizationNotes(value: string) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    window.localStorage.setItem(CATEGORIZATION_NOTES_STORAGE_KEY, value);
+    window.dispatchEvent(new Event(CATEGORIZATION_NOTES_STORAGE_EVENT));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function categoryOptionsForItem(

@@ -27,6 +27,7 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 - `/api/extract` saves the original PDF and extraction artifacts to `/tmp/statement-ledger/uploads/<upload-id>/`.
 - OpenRouter is the primary extraction path.
 - Categories are app-managed, persisted locally, can be imported from `NOTION_CATEGORY_DATA_SOURCE_ID`, and disabled categories remain in the catalog.
+- Reviewer categorization notes are saved in browser localStorage, submitted with `/api/extract`, and included in OpenRouter prompt/debug artifacts.
 - If OpenRouter returns statement metadata but zero rows, `lib/fallbackExtractor.ts` uses `pdftotext -layout` to parse Amex-style `New Charges Details` tables.
 - `/api/notion/save` saves selected reviewed rows to Notion.
 - `lib/notion.ts` reconciles missing optional Notion properties before creating pages and leaves an existing `Category` relation untouched.

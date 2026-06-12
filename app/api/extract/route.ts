@@ -17,11 +17,16 @@ export const runtime = "nodejs";
 export const maxDuration = 90;
 
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
+const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const file = formData.get("statementPdf");
+    const categorizationNotes = readOptionalFormString(
+      formData.get("categorizationNotes"),
+      MAX_CATEGORIZATION_NOTES_LENGTH
+    );
 
     if (!(file instanceof File)) {
       return Response.json(
@@ -51,6 +56,7 @@ export async function POST(request: Request) {
       const extraction = await extractStatementFromPdf(file, {
         bytes: artifact.bytes,
         categories: categoryCatalog.enabledCategories,
+        categorizationNotes,
         onDebug: (payload) => saveExtractionArtifact(artifact, payload)
       });
       const finalExtraction = await applyFallbackIfNeeded(
@@ -92,6 +98,14 @@ export async function POST(request: Request) {
 
 function isPdf(file: File) {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+function readOptionalFormString(value: FormDataEntryValue | null, maxLength: number) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, maxLength);
 }
 
 async function applyFallbackIfNeeded(

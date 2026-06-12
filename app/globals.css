@@ -40,7 +40,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -304,7 +305,8 @@ a {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 36px;
   border: 1px solid var(--line);
@@ -316,10 +318,28 @@ select {
 
 input:focus,
 select:focus,
+textarea:focus,
 button:focus-visible,
 .file-drop:focus-within {
   outline: 3px solid rgba(36, 72, 199, 0.18);
   outline-offset: 2px;
+}
+
+.note-textarea {
+  min-height: 132px;
+  resize: vertical;
+  line-height: 1.35;
+}
+
+.note-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .workspace {

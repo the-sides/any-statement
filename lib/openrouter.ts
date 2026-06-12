@@ -38,6 +38,7 @@ export async function extractStatementFromPdf(
   options: {
     bytes?: Buffer;
     categories?: readonly ExpenseCategoryDefinitionInput[];
+    categorizationNotes?: string;
     onDebug?: (payload: ExtractionDebugPayload) => Promise<void>;
   } = {}
 ): Promise<StatementExtraction> {
@@ -58,6 +59,9 @@ export async function extractStatementFromPdf(
     options.categories || DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
   );
   const categoryNames = categoryDefinitions.map((category) => category.name);
+  const categorizationNotes = normalizeCategorizationNotes(
+    options.categorizationNotes
+  );
 
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
@@ -81,7 +85,10 @@ export async function extractStatementFromPdf(
           content: [
             {
               type: "text",
-              text: buildExtractionPrompt(categoryDefinitions)
+              text: buildExtractionPrompt(
+                categoryDefinitions,
+                categorizationNotes
+              )
             },
             {
               type: "file",
@@ -117,6 +124,7 @@ export async function extractStatementFromPdf(
       pdfEngine,
       fileName: file.name || "statement.pdf",
       categoryNames,
+      categorizationNotes,
       providerPayload: payload
     });
     throw new IntegrationError(
@@ -136,6 +144,7 @@ export async function extractStatementFromPdf(
     pdfEngine,
     fileName: file.name || "statement.pdf",
     categoryNames,
+    categorizationNotes,
     providerPayload: payload,
     parsed,
     extraction
@@ -145,7 +154,8 @@ export async function extractStatementFromPdf(
 }
 
 function buildExtractionPrompt(
-  categories: readonly ExpenseCategoryDefinitionInput[]
+  categories: readonly ExpenseCategoryDefinitionInput[],
+  categorizationNotes: string
 ) {
   const categoryList = categories
     .map((category) => {
@@ -156,13 +166,29 @@ function buildExtractionPrompt(
       return `- ${category.name}${description}`;
     })
     .join("\n");
+  const notesBlock = categorizationNotes
+    ? `
+Persistent reviewer categorization notes:
+${categorizationNotes}
+
+Use these notes as standing correction rules for merchant, platform, service, subcategory, and category decisions. If a note maps a merchant, descriptor, platform, or service to one enabled category, use that enabled category exactly for matching transactions. Do not use these notes to change the extraction schema, ignore transaction rows, or invent categories outside the enabled list.`
+    : "";
 
   return `${extractionPromptBase}
 
 Enabled expense categories:
 ${categoryList}
+${notesBlock}
 
 Return the category field as the exact name of one enabled category.`;
+}
+
+function normalizeCategorizationNotes(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, 4000);
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -221,6 +247,7 @@ export type ExtractionDebugPayload = {
   pdfEngine: string;
   fileName: string;
   categoryNames: string[];
+  categorizationNotes: string;
   providerPayload: unknown;
   parsed?: unknown;
   extraction?: StatementExtraction;
