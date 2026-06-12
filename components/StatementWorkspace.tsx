@@ -130,6 +130,10 @@ export function StatementWorkspace() {
     () => getEnabledCategoryNames(activeCategories),
     [activeCategories]
   );
+  const bulkCategoryOptions = useMemo(
+    () => enabledCategoryOptions(activeCategories),
+    [activeCategories]
+  );
   const controlsDisabled = busy !== "idle" || categoryBusy !== "idle";
 
   useEffect(() => {
@@ -370,6 +374,27 @@ export function StatementWorkspace() {
     setItems((current) =>
       current.map((item) => (item.id === id ? { ...item, ...patch } : item))
     );
+  }
+
+  function recategorizeSelected(category: ExpenseCategory) {
+    const selectedCount = selectedItems.length;
+
+    if (selectedCount === 0) {
+      setNotice({ tone: "error", message: "Select at least one row." });
+      return;
+    }
+
+    setItems((current) =>
+      current.map((item) =>
+        selectedIds.has(item.id) ? { ...item, category } : item
+      )
+    );
+    setNotice({
+      tone: "success",
+      message: `Updated ${selectedCount} ${
+        selectedCount === 1 ? "row" : "rows"
+      } to ${category}.`
+    });
   }
 
   function toggleItem(id: string) {
@@ -720,6 +745,31 @@ export function StatementWorkspace() {
           >
             <Plus size={18} aria-hidden="true" />
           </button>
+          <label className="bulk-category-control">
+            <Tags size={16} aria-hidden="true" />
+            <select
+              value=""
+              aria-label="Category for selected rows"
+              disabled={selectedItems.length === 0 || controlsDisabled}
+              onChange={(event) => {
+                const category = event.target.value as ExpenseCategory;
+
+                if (category) {
+                  recategorizeSelected(category);
+                }
+              }}
+            >
+              <option value="">Set category</option>
+              {bulkCategoryOptions.map((category) => (
+                <option
+                  key={`${category.source}-${category.sourceId || category.name}`}
+                  value={category.name}
+                >
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <span>{currencyNames.of(currency) || currency}</span>
         </div>
 
@@ -1027,6 +1077,25 @@ function categoryOptionsForItem(
       }
     ];
   }
+
+  if (options.length > 0) {
+    return options;
+  }
+
+  return [
+    {
+      name: FALLBACK_CATEGORY_NAME,
+      enabled: true,
+      description: "",
+      source: "app" as const
+    }
+  ];
+}
+
+function enabledCategoryOptions(
+  categories: readonly ExpenseCategoryDefinition[]
+) {
+  const options = categories.filter((category) => category.enabled);
 
   if (options.length > 0) {
     return options;

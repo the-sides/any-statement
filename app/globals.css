@@ -475,6 +475,7 @@ button:focus-visible,
 .table-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   color: var(--muted);
   font-size: 13px;
@@ -494,6 +495,43 @@ button:focus-visible,
 
 .icon-button.danger {
   color: var(--coral);
+}
+
+.bulk-category-control {
+  display: inline-flex;
+  min-width: 210px;
+  max-width: min(280px, 100%);
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--accent-dark);
+  padding: 0 8px;
+}
+
+.bulk-category-control:focus-within {
+  outline: 3px solid rgba(36, 72, 199, 0.18);
+  outline-offset: 2px;
+}
+
+.bulk-category-control select {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 0 2px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.bulk-category-control select:focus {
+  outline: 0;
+}
+
+.bulk-category-control:has(select:disabled) {
+  color: var(--quiet);
+  background: #f5f6f2;
 }
 
 .table-frame {
