@@ -68,6 +68,10 @@ const APP_CATEGORY_VISIBILITY_STORAGE_KEY =
 const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
   "statement-ledger-include-app-categories";
 const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
+const hydrationSafeIconProps = {
+  "aria-hidden": "true",
+  suppressHydrationWarning: true
+} as const;
 
 export function StatementWorkspace() {
   const [file, setFile] = useState<File | null>(null);
@@ -457,12 +461,12 @@ export function StatementWorkspace() {
 
         <section className="panel upload-panel">
           <div className="panel-heading">
-            <FileText size={18} aria-hidden="true" />
+            <FileText size={18} {...hydrationSafeIconProps} />
             <h2>Statement</h2>
           </div>
 
           <label className="file-drop" htmlFor="statement-upload">
-            <Upload size={22} aria-hidden="true" />
+            <Upload size={22} {...hydrationSafeIconProps} />
             <span>{file ? file.name : "Choose PDF"}</span>
             <small>{file ? formatBytes(file.size) : "Credit card or bank"}</small>
           </label>
@@ -482,9 +486,13 @@ export function StatementWorkspace() {
             onClick={extractStatement}
           >
             {busy === "extracting" ? (
-              <LoaderCircle className="spin" size={18} aria-hidden="true" />
+              <LoaderCircle
+                className="spin"
+                size={18}
+                {...hydrationSafeIconProps}
+              />
             ) : (
-              <Sparkles size={18} aria-hidden="true" />
+              <Sparkles size={18} {...hydrationSafeIconProps} />
             )}
             Extract
           </button>
@@ -492,7 +500,7 @@ export function StatementWorkspace() {
 
         <section className="panel">
           <div className="panel-heading">
-            <Database size={18} aria-hidden="true" />
+            <Database size={18} {...hydrationSafeIconProps} />
             <h2>Notion</h2>
           </div>
           <label className="field">
@@ -511,9 +519,13 @@ export function StatementWorkspace() {
             onClick={saveToNotion}
           >
             {busy === "saving" ? (
-              <LoaderCircle className="spin" size={18} aria-hidden="true" />
+              <LoaderCircle
+                className="spin"
+                size={18}
+                {...hydrationSafeIconProps}
+              />
             ) : (
-              <Save size={18} aria-hidden="true" />
+              <Save size={18} {...hydrationSafeIconProps} />
             )}
             Save
           </button>
@@ -522,7 +534,7 @@ export function StatementWorkspace() {
         <section className="panel note-panel">
           <div className="panel-heading panel-heading-split">
             <div className="panel-heading-title">
-              <NotebookPen size={18} aria-hidden="true" />
+              <NotebookPen size={18} {...hydrationSafeIconProps} />
               <h2>AI Notes</h2>
             </div>
             <span className="panel-count">
@@ -555,7 +567,7 @@ export function StatementWorkspace() {
         <section className="panel category-panel">
           <div className="panel-heading panel-heading-split">
             <div className="panel-heading-title">
-              <Tags size={18} aria-hidden="true" />
+              <Tags size={18} {...hydrationSafeIconProps} />
               <h2>Categories</h2>
             </div>
             <span className="panel-count">
@@ -571,9 +583,13 @@ export function StatementWorkspace() {
             onClick={importCategories}
           >
             {categoryBusy === "importing" ? (
-              <LoaderCircle className="spin" size={18} aria-hidden="true" />
+              <LoaderCircle
+                className="spin"
+                size={18}
+                {...hydrationSafeIconProps}
+              />
             ) : (
-              <RefreshCw size={18} aria-hidden="true" />
+              <RefreshCw size={18} {...hydrationSafeIconProps} />
             )}
             Import
           </button>
@@ -714,11 +730,11 @@ export function StatementWorkspace() {
 
         <div className={`notice ${notice.tone}`} role="status">
           {notice.tone === "error" ? (
-            <AlertTriangle size={16} aria-hidden="true" />
+            <AlertTriangle size={16} {...hydrationSafeIconProps} />
           ) : notice.tone === "success" ? (
-            <Check size={16} aria-hidden="true" />
+            <Check size={16} {...hydrationSafeIconProps} />
           ) : (
-            <FileText size={16} aria-hidden="true" />
+            <FileText size={16} {...hydrationSafeIconProps} />
           )}
           <span>{notice.message}</span>
           {lastSave?.pages[0]?.url ? (
@@ -735,7 +751,7 @@ export function StatementWorkspace() {
             title={allSelected ? "Clear selection" : "Select all"}
             onClick={toggleAll}
           >
-            <Check size={18} aria-hidden="true" />
+            <Check size={18} {...hydrationSafeIconProps} />
           </button>
           <button
             className="icon-button"
@@ -743,10 +759,10 @@ export function StatementWorkspace() {
             title="Add expense"
             onClick={addRow}
           >
-            <Plus size={18} aria-hidden="true" />
+            <Plus size={18} {...hydrationSafeIconProps} />
           </button>
           <label className="bulk-category-control">
-            <Tags size={16} aria-hidden="true" />
+            <Tags size={16} {...hydrationSafeIconProps} />
             <select
               value=""
               aria-label="Category for selected rows"
@@ -924,7 +940,7 @@ export function StatementWorkspace() {
                       title="Remove row"
                       onClick={() => removeRow(item.id)}
                     >
-                      <Trash2 size={16} aria-hidden="true" />
+                      <Trash2 size={16} {...hydrationSafeIconProps} />
                     </button>
                   </td>
                 </tr>
