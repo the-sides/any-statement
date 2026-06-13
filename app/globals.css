@@ -10,6 +10,9 @@
   --accent-dark: #0d4f3b;
   --cobalt: #2448c7;
   --coral: #d45735;
+  --teal: #0ca4b8;
+  --gold: #f2b705;
+  --magenta: #c51f87;
   --warning: #a44624;
   --success-bg: #e7f5ed;
   --error-bg: #fff0eb;
@@ -472,6 +475,231 @@ button:focus-visible,
   overflow-wrap: anywhere;
 }
 
+.cash-flow-panel {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(115deg, rgba(12, 164, 184, 0.08), transparent 36%),
+    linear-gradient(285deg, rgba(242, 183, 5, 0.13), transparent 42%),
+    #fffefa;
+  padding: 14px;
+}
+
+.cash-flow-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.cash-flow-heading h3 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 24px;
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.cash-flow-balance {
+  min-width: 154px;
+  border: 1px solid rgba(47, 158, 79, 0.22);
+  border-left: 8px solid #2f9e4f;
+  border-radius: 8px;
+  background: #edf8ed;
+  padding: 8px 10px;
+  text-align: right;
+}
+
+.cash-flow-balance.negative {
+  border-color: rgba(212, 87, 53, 0.28);
+  border-left-color: var(--coral);
+  background: #fff0eb;
+}
+
+.cash-flow-balance span,
+.cash-flow-entry-heading span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cash-flow-balance strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 18px;
+}
+
+.cash-flow-body {
+  display: grid;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.cash-flow-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 10px;
+}
+
+.cash-flow-entry-group {
+  border: 1px solid rgba(23, 26, 22, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+  padding: 10px;
+}
+
+.cash-flow-entry-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.cash-flow-entry-row {
+  display: grid;
+  grid-template-columns: 18px minmax(86px, 1fr) minmax(82px, 102px) 28px;
+  gap: 6px;
+  align-items: center;
+  min-height: 36px;
+  margin-top: 7px;
+}
+
+.cash-flow-entry-row input {
+  min-height: 32px;
+}
+
+.cash-flow-entry-toggle {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.cash-flow-amount-input {
+  text-align: right;
+}
+
+.cash-flow-empty-row {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  border: 1px dashed var(--line-strong);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cash-flow-empty-row {
+  margin-top: 7px;
+}
+
+.mini-icon-button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.mini-icon-button:hover {
+  background: #eef2e9;
+}
+
+.mini-icon-button.danger {
+  color: var(--coral);
+}
+
+.flow-visual {
+  position: relative;
+  display: block;
+  min-height: 306px;
+  overflow-x: auto;
+  border: 1px solid rgba(23, 26, 22, 0.1);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(12, 164, 184, 0.08), transparent 24%),
+    linear-gradient(270deg, rgba(242, 183, 5, 0.08), transparent 34%),
+    #ffffff;
+}
+
+.flow-visual::before {
+  content: none;
+}
+
+.sankey-chart {
+  display: block;
+  width: 100%;
+  min-width: 760px;
+  height: auto;
+}
+
+.sankey-stage {
+  fill: #fffefa;
+}
+
+.sankey-title {
+  fill: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sankey-empty {
+  fill: var(--muted);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.sankey-flow {
+  opacity: 0.24;
+}
+
+.sankey-flow.input-flow {
+  opacity: 0.78;
+}
+
+.sankey-input-node {
+  fill: url(#sankey-input-fill);
+  stroke: rgba(12, 164, 184, 0.28);
+}
+
+.sankey-income-node {
+  fill: #2f9e4f;
+}
+
+.sankey-income-label-bg {
+  fill: rgba(255, 255, 255, 0.9);
+}
+
+.sankey-node-label,
+.sankey-allocation-label,
+.sankey-income-label {
+  fill: var(--ink);
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.sankey-node-amount,
+.sankey-allocation-amount,
+.sankey-income-amount {
+  fill: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
+}
+
 .table-actions {
   display: flex;
   align-items: center;
@@ -692,6 +920,10 @@ meter {
   .statement-card {
     grid-column: 1 / -1;
   }
+
+  .cash-flow-body {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 680px) {
@@ -708,6 +940,23 @@ meter {
 
   .workspace-top h2 {
     font-size: 24px;
+  }
+
+  .cash-flow-heading {
+    flex-direction: column;
+  }
+
+  .cash-flow-balance {
+    width: 100%;
+    text-align: left;
+  }
+
+  .cash-flow-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .cash-flow-entry-row {
+    grid-template-columns: 18px minmax(0, 1fr) minmax(72px, 88px) 28px;
   }
 
   .field-grid {

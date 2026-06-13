@@ -15,7 +15,12 @@ import {
   Trash2,
   Upload
 } from "lucide-react";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore
+} from "react";
 import {
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
   PAYMENT_METHODS,
@@ -30,6 +35,16 @@ import {
   type StatementSection,
   type StatementType
 } from "@/lib/categories";
+import {
+  CASH_FLOW_PLAN_STORAGE_KEY,
+  createCashFlowPlan,
+  parseCashFlowPlan,
+  summarizeCashFlow,
+  type CashFlowEntry,
+  type CashFlowEntryKind,
+  type CashFlowPlan,
+  type CashFlowSummary
+} from "@/lib/cashFlowPlan";
 import {
   REVIEW_DRAFT_STORAGE_KEY,
   createReviewDraft,
@@ -75,6 +90,7 @@ const APP_CATEGORY_VISIBILITY_STORAGE_KEY =
 const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
   "statement-ledger-include-app-categories";
 const REVIEW_DRAFT_STORAGE_EVENT = "statement-ledger-review-draft";
+const CASH_FLOW_PLAN_STORAGE_EVENT = "statement-ledger-cash-flow-plan";
 const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 const SAMPLE_REVIEW_DRAFT = createReviewDraft({
   extraction: sampleExtraction,
@@ -82,8 +98,33 @@ const SAMPLE_REVIEW_DRAFT = createReviewDraft({
   selectedIds: sampleExtraction.expenses.map((item) => item.id),
   sourceFileName: ""
 });
+const SAMPLE_CASH_FLOW_PLAN = createCashFlowPlan([
+  {
+    id: "paychecks",
+    kind: "input",
+    label: "Paychecks",
+    amount: 4200,
+    enabled: true
+  },
+  {
+    id: "rent",
+    kind: "output",
+    label: "Rent",
+    amount: 0,
+    enabled: true
+  },
+  {
+    id: "insurance",
+    kind: "output",
+    label: "Insurance",
+    amount: 0,
+    enabled: true
+  }
+]);
 let cachedReviewDraftRaw: string | null = null;
 let cachedReviewDraftSnapshot: ReviewDraft = SAMPLE_REVIEW_DRAFT;
+let cachedCashFlowPlanRaw: string | null | undefined;
+let cachedCashFlowPlanSnapshot: CashFlowPlan = SAMPLE_CASH_FLOW_PLAN;
 const hydrationSafeIconProps = {
   "aria-hidden": "true",
   suppressHydrationWarning: true
@@ -119,6 +160,11 @@ export function StatementWorkspace() {
     readReviewDraftSnapshot,
     readSampleReviewDraftSnapshot
   );
+  const cashFlowPlan = useSyncExternalStore(
+    subscribeToCashFlowPlan,
+    readCashFlowPlanSnapshot,
+    readSampleCashFlowPlanSnapshot
+  );
   const extraction = reviewDraft.extraction;
   const items = extraction.expenses;
   const sourceFileName = reviewDraft.sourceFileName;
@@ -130,6 +176,16 @@ export function StatementWorkspace() {
   const selectedItems = useMemo(
     () => items.filter((item) => selectedIds.has(item.id)),
     [items, selectedIds]
+  );
+  const cashFlowSummary = useMemo(
+    () => summarizeCashFlow(cashFlowPlan.entries, items),
+    [cashFlowPlan.entries, items]
+  );
+  const cashFlowInputs = cashFlowPlan.entries.filter(
+    (entry) => entry.kind === "input"
+  );
+  const cashFlowOutputs = cashFlowPlan.entries.filter(
+    (entry) => entry.kind === "output"
   );
   const totalAmount = selectedItems.reduce((sum, item) => sum + item.amount, 0);
   const currency = extraction.statement.currency || "USD";
@@ -516,6 +572,47 @@ export function StatementWorkspace() {
     });
   }
 
+  function writeCashFlowState(entries: readonly CashFlowEntry[]) {
+    const plan = createCashFlowPlan(entries);
+
+    if (!writeStoredCashFlowPlan(plan)) {
+      setNotice({
+        tone: "error",
+        message: "Cash flow inputs could not be saved in this browser."
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  function addCashFlowEntry(kind: CashFlowEntryKind) {
+    const entry: CashFlowEntry = {
+      id: crypto.randomUUID(),
+      kind,
+      label: kind === "input" ? "Income" : "Output",
+      amount: 0,
+      enabled: true
+    };
+
+    writeCashFlowState([...cashFlowPlan.entries, entry]);
+  }
+
+  function updateCashFlowEntry(
+    id: string,
+    patch: Partial<Pick<CashFlowEntry, "amount" | "enabled" | "label">>
+  ) {
+    writeCashFlowState(
+      cashFlowPlan.entries.map((entry) =>
+        entry.id === id ? { ...entry, ...patch } : entry
+      )
+    );
+  }
+
+  function removeCashFlowEntry(id: string) {
+    writeCashFlowState(cashFlowPlan.entries.filter((entry) => entry.id !== id));
+  }
+
   return (
     <main className="app-shell">
       <aside className="side-panel" aria-label="Statement controls">
@@ -818,6 +915,162 @@ export function StatementWorkspace() {
           ) : null}
         </div>
 
+        <section className="cash-flow-panel" aria-label="Income allocation">
+          <div className="cash-flow-heading">
+            <div>
+              <p className="eyebrow">Cash flow</p>
+              <h3>Income allocation</h3>
+            </div>
+            <div
+              className={`cash-flow-balance ${
+                cashFlowSummary.savedAmount < 0 ? "negative" : ""
+              }`}
+            >
+              <span>
+                {cashFlowSummary.savedAmount < 0 ? "Overspent" : "Saved"}
+              </span>
+              <strong>
+                {formatCurrency(
+                  Math.abs(cashFlowSummary.savedAmount),
+                  currency
+                )}
+              </strong>
+            </div>
+          </div>
+
+          <div className="cash-flow-body">
+            <div className="cash-flow-editor" aria-label="Manual cash flow">
+              <div className="cash-flow-entry-group">
+                <div className="cash-flow-entry-heading">
+                  <span>Inputs</span>
+                  <button
+                    className="mini-icon-button"
+                    type="button"
+                    title="Add income input"
+                    onClick={() => addCashFlowEntry("input")}
+                  >
+                    <Plus size={14} {...hydrationSafeIconProps} />
+                  </button>
+                </div>
+                {cashFlowInputs.length === 0 ? (
+                  <div className="cash-flow-empty-row">No income inputs</div>
+                ) : null}
+                {cashFlowInputs.map((entry) => (
+                  <div className="cash-flow-entry-row" key={entry.id}>
+                    <input
+                      className="cash-flow-entry-toggle"
+                      type="checkbox"
+                      checked={entry.enabled}
+                      onChange={(event) =>
+                        updateCashFlowEntry(entry.id, {
+                          enabled: event.target.checked
+                        })
+                      }
+                      aria-label={`Include ${entry.label || "income"}`}
+                    />
+                    <input
+                      value={entry.label}
+                      onChange={(event) =>
+                        updateCashFlowEntry(entry.id, {
+                          label: event.target.value
+                        })
+                      }
+                      aria-label="Income label"
+                    />
+                    <input
+                      className="cash-flow-amount-input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={entry.amount || ""}
+                      onChange={(event) =>
+                        updateCashFlowEntry(entry.id, {
+                          amount: Number(event.target.value)
+                        })
+                      }
+                      aria-label={`${entry.label || "Income"} amount`}
+                    />
+                    <button
+                      className="mini-icon-button danger"
+                      type="button"
+                      title="Remove income input"
+                      onClick={() => removeCashFlowEntry(entry.id)}
+                    >
+                      <Trash2 size={14} {...hydrationSafeIconProps} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="cash-flow-entry-group">
+                <div className="cash-flow-entry-heading">
+                  <span>Outputs</span>
+                  <button
+                    className="mini-icon-button"
+                    type="button"
+                    title="Add manual output"
+                    onClick={() => addCashFlowEntry("output")}
+                  >
+                    <Plus size={14} {...hydrationSafeIconProps} />
+                  </button>
+                </div>
+                {cashFlowOutputs.length === 0 ? (
+                  <div className="cash-flow-empty-row">No manual outputs</div>
+                ) : null}
+                {cashFlowOutputs.map((entry) => (
+                  <div className="cash-flow-entry-row" key={entry.id}>
+                    <input
+                      className="cash-flow-entry-toggle"
+                      type="checkbox"
+                      checked={entry.enabled}
+                      onChange={(event) =>
+                        updateCashFlowEntry(entry.id, {
+                          enabled: event.target.checked
+                        })
+                      }
+                      aria-label={`Include ${entry.label || "output"}`}
+                    />
+                    <input
+                      value={entry.label}
+                      onChange={(event) =>
+                        updateCashFlowEntry(entry.id, {
+                          label: event.target.value
+                        })
+                      }
+                      aria-label="Output label"
+                    />
+                    <input
+                      className="cash-flow-amount-input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={entry.amount || ""}
+                      onChange={(event) =>
+                        updateCashFlowEntry(entry.id, {
+                          amount: Number(event.target.value)
+                        })
+                      }
+                      aria-label={`${entry.label || "Output"} amount`}
+                    />
+                    <button
+                      className="mini-icon-button danger"
+                      type="button"
+                      title="Remove manual output"
+                      onClick={() => removeCashFlowEntry(entry.id)}
+                    >
+                      <Trash2 size={14} {...hydrationSafeIconProps} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flow-visual" aria-label="Cash flow visualization">
+              <CashFlowSankey summary={cashFlowSummary} currency={currency} />
+            </div>
+          </div>
+        </section>
+
         <div className="table-actions">
           <button
             className="icon-button"
@@ -1027,6 +1280,241 @@ export function StatementWorkspace() {
   );
 }
 
+type SankeySegment<T> = T & {
+  color: string;
+  height: number;
+  y0: number;
+  y1: number;
+  yc: number;
+};
+
+function CashFlowSankey({
+  summary,
+  currency
+}: {
+  summary: CashFlowSummary;
+  currency: string;
+}) {
+  const width = 1120;
+  const top = 58;
+  const bottom = 34;
+  const leftX = 22;
+  const leftWidth = 290;
+  const middleX = 448;
+  const middleWidth = 16;
+  const rightBarX = 1074;
+  const rightBarWidth = 16;
+  const positiveInputs = summary.inputs.filter((entry) => entry.amount > 0);
+  const allocations = summary.allocations.filter(
+    (allocation) => allocation.amount > 0
+  );
+  const rowCount = Math.max(positiveInputs.length, allocations.length, 1);
+  const height = Math.max(410, 122 + rowCount * 44);
+  const availableHeight = height - top - bottom;
+  const inputTotal =
+    positiveInputs.reduce((sum, input) => sum + input.amount, 0) || 1;
+  const allocationTotal =
+    allocations.reduce((sum, allocation) => sum + allocation.amount, 0) || 1;
+  const inputSegments = layoutSankeySegments(
+    positiveInputs.map((entry, index) => ({
+      ...entry,
+      color: inputColor(index)
+    })),
+    inputTotal,
+    top,
+    availableHeight,
+    8,
+    48
+  );
+  const allocationSegments = layoutSankeySegments(
+    allocations.map((allocation, index) => ({
+      ...allocation,
+      color: allocationColor(allocation.source, index)
+    })),
+    allocationTotal,
+    top,
+    availableHeight,
+    8,
+    34
+  );
+
+  return (
+    <svg
+      className="sankey-chart"
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label="Income flowing to savings, manual outputs, and statement categories"
+    >
+      <defs>
+        <linearGradient id="sankey-input-fill" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0%" stopColor="#d9f3f6" />
+          <stop offset="100%" stopColor="#effbf2" />
+        </linearGradient>
+        <linearGradient id="sankey-income-fill" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0%" stopColor="#d9f3f6" stopOpacity="0.82" />
+          <stop offset="100%" stopColor="#dff2dc" stopOpacity="0.88" />
+        </linearGradient>
+      </defs>
+
+      <rect className="sankey-stage" width={width} height={height} rx="8" />
+      <text className="sankey-title" x={leftX} y="28">
+        Inputs
+      </text>
+      <text className="sankey-title" x={middleX - 28} y="28">
+        Income
+      </text>
+      <text className="sankey-title" x={rightBarX - 220} y="28">
+        Outputs & categories
+      </text>
+
+      {positiveInputs.length === 0 ? (
+        <text className="sankey-empty" x={leftX + 18} y={top + 28}>
+          Add income
+        </text>
+      ) : null}
+      {allocations.length === 0 ? (
+        <text className="sankey-empty" x={rightBarX - 240} y={top + 28}>
+          Add outputs or statement rows
+        </text>
+      ) : null}
+
+      <g className="sankey-flows">
+        {inputSegments.map((segment) => (
+          <path
+            className="sankey-flow input-flow"
+            d={sankeyBandPath(
+              leftX + leftWidth,
+              middleX,
+              segment.y0,
+              segment.y1,
+              segment.y0,
+              segment.y1
+            )}
+            fill="url(#sankey-income-fill)"
+            key={`input-flow-${segment.id}`}
+          />
+        ))}
+
+        {allocationSegments.map((segment) => (
+          <path
+            className="sankey-flow"
+            d={sankeyBandPath(
+              middleX + middleWidth,
+              rightBarX,
+              segment.y0,
+              segment.y1,
+              segment.y0,
+              segment.y1
+            )}
+            fill={segment.color}
+            key={`allocation-flow-${segment.id}`}
+          />
+        ))}
+      </g>
+
+      <g className="sankey-nodes">
+        {inputSegments.map((segment) => (
+          <g key={`input-${segment.id}`}>
+            <rect
+              className="sankey-input-node"
+              x={leftX}
+              y={segment.y0}
+              width={leftWidth}
+              height={segment.height}
+              rx="6"
+            />
+            <rect
+              x={leftX}
+              y={segment.y0}
+              width="12"
+              height={segment.height}
+              rx="4"
+              fill={segment.color}
+            />
+            <text
+              className="sankey-node-label"
+              x={leftX + 28}
+              y={segment.y0 + 26}
+            >
+              {truncateSvgText(segment.label, 28)}
+            </text>
+            <text
+              className="sankey-node-amount"
+              x={leftX + 28}
+              y={segment.y0 + 46}
+            >
+              {formatCurrency(segment.amount, currency)}
+            </text>
+          </g>
+        ))}
+
+        <rect
+          className="sankey-income-node"
+          x={middleX}
+          y={top}
+          width={middleWidth}
+          height={availableHeight}
+          rx="4"
+        />
+        <rect
+          className="sankey-income-label-bg"
+          x={middleX - 43}
+          y={top + availableHeight / 2 - 25}
+          width="102"
+          height="50"
+          rx="4"
+        />
+        <text
+          className="sankey-income-label"
+          x={middleX + middleWidth / 2}
+          y={top + availableHeight / 2 - 5}
+          textAnchor="middle"
+        >
+          Income
+        </text>
+        <text
+          className="sankey-income-amount"
+          x={middleX + middleWidth / 2}
+          y={top + availableHeight / 2 + 15}
+          textAnchor="middle"
+        >
+          {formatCurrency(summary.incomeTotal, currency)}
+        </text>
+
+        {allocationSegments.map((segment) => (
+          <g key={`allocation-${segment.id}`}>
+            <rect
+              x={rightBarX}
+              y={segment.y0}
+              width={rightBarWidth}
+              height={segment.height}
+              rx="3"
+              fill={segment.color}
+            />
+            <text
+              className="sankey-allocation-label"
+              x={rightBarX - 14}
+              y={segment.yc - 6}
+              textAnchor="end"
+            >
+              {truncateSvgText(segment.label, 32)}
+            </text>
+            <text
+              className="sankey-allocation-amount"
+              x={rightBarX - 14}
+              y={segment.yc + 13}
+              textAnchor="end"
+            >
+              {formatCurrency(segment.amount, currency)} (
+              {formatPercent(segment.percent)})
+            </text>
+          </g>
+        ))}
+      </g>
+    </svg>
+  );
+}
+
 function subscribeToCategorizationNotes(onStoreChange: () => void) {
   if (typeof window === "undefined") {
     return () => {};
@@ -1197,13 +1685,74 @@ function writeStoredReviewDraft(draft: ReviewDraft) {
 
   try {
     const raw = JSON.stringify(draft);
-    window.localStorage.setItem(
-      REVIEW_DRAFT_STORAGE_KEY,
-      raw
-    );
+    window.localStorage.setItem(REVIEW_DRAFT_STORAGE_KEY, raw);
     cachedReviewDraftRaw = raw;
     cachedReviewDraftSnapshot = draft;
     window.dispatchEvent(new Event(REVIEW_DRAFT_STORAGE_EVENT));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function subscribeToCashFlowPlan(onStoreChange: () => void) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === CASH_FLOW_PLAN_STORAGE_KEY) {
+      onStoreChange();
+    }
+  };
+
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(CASH_FLOW_PLAN_STORAGE_EVENT, onStoreChange);
+
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(CASH_FLOW_PLAN_STORAGE_EVENT, onStoreChange);
+  };
+}
+
+function readSampleCashFlowPlanSnapshot() {
+  return SAMPLE_CASH_FLOW_PLAN;
+}
+
+function readCashFlowPlanSnapshot() {
+  if (typeof window === "undefined") {
+    return SAMPLE_CASH_FLOW_PLAN;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(CASH_FLOW_PLAN_STORAGE_KEY);
+
+    if (raw === cachedCashFlowPlanRaw) {
+      return cachedCashFlowPlanSnapshot;
+    }
+
+    const plan = raw ? parseCashFlowPlan(JSON.parse(raw)) : null;
+    cachedCashFlowPlanRaw = raw;
+    cachedCashFlowPlanSnapshot = plan || SAMPLE_CASH_FLOW_PLAN;
+    return cachedCashFlowPlanSnapshot;
+  } catch {
+    cachedCashFlowPlanRaw = undefined;
+    cachedCashFlowPlanSnapshot = SAMPLE_CASH_FLOW_PLAN;
+    return cachedCashFlowPlanSnapshot;
+  }
+}
+
+function writeStoredCashFlowPlan(plan: CashFlowPlan) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const raw = JSON.stringify(plan);
+    window.localStorage.setItem(CASH_FLOW_PLAN_STORAGE_KEY, raw);
+    cachedCashFlowPlanRaw = raw;
+    cachedCashFlowPlanSnapshot = plan;
+    window.dispatchEvent(new Event(CASH_FLOW_PLAN_STORAGE_EVENT));
     return true;
   } catch {
     return false;
@@ -1286,6 +1835,154 @@ function formatCurrency(value: number, currency: string) {
   } catch {
     return `${currency} ${value.toFixed(2)}`;
   }
+}
+
+function layoutSankeySegments<T extends { amount: number; color: string }>(
+  items: readonly T[],
+  total: number,
+  top: number,
+  availableHeight: number,
+  gap: number,
+  minHeight: number
+): Array<SankeySegment<T>> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const totalGap = gap * (items.length - 1);
+  const stackHeight = Math.max(1, availableHeight - totalGap);
+  const heights = calculateSankeyHeights(
+    items.map((item) => item.amount),
+    total,
+    stackHeight,
+    minHeight
+  );
+  let cursor = top;
+
+  return items.map((item, index) => {
+    const height = heights[index] || 1;
+    const y0 = cursor;
+    const y1 = y0 + height;
+    cursor = y1 + gap;
+
+    return {
+      ...item,
+      height,
+      y0,
+      y1,
+      yc: y0 + height / 2
+    };
+  });
+}
+
+function calculateSankeyHeights(
+  amounts: readonly number[],
+  total: number,
+  availableHeight: number,
+  minHeight: number
+) {
+  if (amounts.length * minHeight >= availableHeight) {
+    return amounts.map(() => availableHeight / amounts.length);
+  }
+
+  const heights = new Array<number>(amounts.length).fill(0);
+  const unresolved = new Set(amounts.map((_, index) => index));
+  let remainingHeight = availableHeight;
+  let remainingTotal = total;
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const index of [...unresolved]) {
+      const height =
+        remainingTotal > 0
+          ? (amounts[index] / remainingTotal) * remainingHeight
+          : 0;
+
+      if (height < minHeight) {
+        heights[index] = minHeight;
+        remainingHeight -= minHeight;
+        remainingTotal -= amounts[index];
+        unresolved.delete(index);
+        changed = true;
+      }
+    }
+  }
+
+  for (const index of unresolved) {
+    heights[index] =
+      remainingTotal > 0
+        ? (amounts[index] / remainingTotal) * remainingHeight
+        : remainingHeight / unresolved.size;
+  }
+
+  return heights;
+}
+
+function sankeyBandPath(
+  x0: number,
+  x1: number,
+  sourceY0: number,
+  sourceY1: number,
+  targetY0: number,
+  targetY1: number
+) {
+  const curve = (x1 - x0) * 0.54;
+
+  return [
+    `M ${x0} ${sourceY0}`,
+    `C ${x0 + curve} ${sourceY0}, ${x1 - curve} ${targetY0}, ${x1} ${targetY0}`,
+    `L ${x1} ${targetY1}`,
+    `C ${x1 - curve} ${targetY1}, ${x0 + curve} ${sourceY1}, ${x0} ${sourceY1}`,
+    "Z"
+  ].join(" ");
+}
+
+function inputColor(index: number) {
+  const colors = ["#0ca4b8", "#2f9e4f", "#2448c7", "#f2b705"];
+
+  return colors[index % colors.length];
+}
+
+function allocationColor(source: string, index: number) {
+  if (source === "saved") {
+    return "#2f9e4f";
+  }
+
+  if (source === "manual-output") {
+    return "#f2b705";
+  }
+
+  if (source === "overspent") {
+    return "#d45735";
+  }
+
+  const colors = ["#c51f87", "#0ca4b8", "#2448c7", "#d45735", "#7a62c9"];
+
+  return colors[index % colors.length];
+}
+
+function truncateSvgText(value: string, maxLength: number) {
+  const trimmed = value.trim();
+
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, maxLength - 3)}...`;
+}
+
+function formatPercent(value: number) {
+  if (value === 0) {
+    return "0%";
+  }
+
+  if (Math.abs(value) < 10) {
+    return `${value.toFixed(1)}%`;
+  }
+
+  return `${Math.round(value)}%`;
 }
 
 function formatBytes(value: number) {
