@@ -2,20 +2,24 @@
 
 import {
   AlertTriangle,
+  Bot,
   Check,
   Database,
   FileText,
   Layers,
   ListChecks,
   LoaderCircle,
+  MessageCircle,
   NotebookPen,
   Plus,
   RefreshCw,
   Save,
+  Send,
   Sparkles,
   Tags,
   Trash2,
   Upload,
+  UserRound,
   X
 } from "lucide-react";
 import {
@@ -59,6 +63,7 @@ import {
   type ReviewStatement
 } from "@/lib/reviewDraft";
 import { sampleExtraction } from "@/lib/sample";
+import type { ExpenseChatMessage } from "@/lib/expenseChat";
 import type {
   ExpenseItem,
   SaveExpensesResult,
@@ -87,6 +92,21 @@ type CategoryResponse = {
   error?: string;
 };
 
+type ExpenseChatUiMessage = ExpenseChatMessage & {
+  id: string;
+};
+
+type ExpenseChatResponse = {
+  answer: string;
+  context?: {
+    rowCount: number;
+    selectedRowCount: number;
+    totalSpend: number;
+    truncated: boolean;
+  };
+  error?: string;
+};
+
 const currencyNames = new Intl.DisplayNames(["en"], { type: "currency" });
 const CATEGORIZATION_NOTES_STORAGE_KEY =
   "statement-ledger.categorization-notes";
@@ -100,6 +120,11 @@ const REVIEW_DRAFT_STORAGE_EVENT = "statement-ledger-review-draft";
 const CASH_FLOW_PLAN_STORAGE_EVENT = "statement-ledger-cash-flow-plan";
 const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 const SAMPLE_STATEMENT_ID = "sample-statement";
+const EXPENSE_CHAT_PROMPTS = [
+  "How could I minimize food costs?",
+  "Which merchants cost the most?",
+  "Do any charges look recurring?"
+];
 const EMPTY_STATEMENT: StatementSummary = {
   institution: "",
   accountMask: "",
@@ -172,6 +197,9 @@ export function StatementWorkspace() {
     message: "Rows are saved locally in this browser."
   });
   const [lastSave, setLastSave] = useState<SaveExpensesResult | null>(null);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ExpenseChatUiMessage[]>([]);
   const categorizationNotes = useSyncExternalStore(
     subscribeToCategorizationNotes,
     readCategorizationNotes,
@@ -412,6 +440,81 @@ export function StatementWorkspace() {
       });
     } finally {
       setBusy("idle");
+    }
+  }
+
+  async function askExpenseChat(nextQuestion = chatInput) {
+    const question = nextQuestion.trim();
+
+    if (!question) {
+      return;
+    }
+
+    if (items.length === 0) {
+      setNotice({
+        tone: "error",
+        message: "Add expense rows before using expense chat."
+      });
+      return;
+    }
+
+    const userMessage: ExpenseChatUiMessage = {
+      id: createClientId("chat-user"),
+      role: "user",
+      content: question
+    };
+    const history = chatMessages
+      .slice(-8)
+      .map(({ role, content }) => ({ role, content }));
+
+    setChatMessages((current) => [...current, userMessage]);
+    setChatInput("");
+    setChatBusy(true);
+
+    try {
+      const response = await fetch("/api/expense-chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          question,
+          expenses: items,
+          statements: statements.map(statementSourceForSave),
+          selectedExpenseIds: [...selectedIds],
+          cashFlowSummary,
+          history
+        })
+      });
+      const result = (await response.json()) as ExpenseChatResponse;
+
+      if (!response.ok) {
+        throw new Error(result.error || "Expense chat failed.");
+      }
+
+      setChatMessages((current) => [
+        ...current,
+        {
+          id: createClientId("chat-assistant"),
+          role: "assistant",
+          content: result.answer
+        }
+      ]);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Expense chat failed.";
+
+      setChatMessages((current) => [
+        ...current,
+        {
+          id: createClientId("chat-assistant"),
+          role: "assistant",
+          content: message
+        }
+      ]);
+      setNotice({ tone: "error", message });
+    } finally {
+      setChatBusy(false);
     }
   }
 
@@ -1229,6 +1332,95 @@ export function StatementWorkspace() {
             </a>
           ) : null}
         </div>
+
+        <section className="expense-chat-panel" aria-label="Expense chat">
+          <div className="expense-chat-heading">
+            <div className="panel-heading-title">
+              <MessageCircle size={18} {...hydrationSafeIconProps} />
+              <h3>Expense chat</h3>
+            </div>
+            <span className="panel-count">
+              {selectedItems.length > 0
+                ? `${selectedItems.length} selected`
+                : `${items.length} rows`}
+            </span>
+          </div>
+
+          <div className="expense-chat-log" aria-live="polite">
+            {chatMessages.length === 0 ? (
+              <div className="expense-chat-suggestions">
+                {EXPENSE_CHAT_PROMPTS.map((prompt) => (
+                  <button
+                    className="expense-chat-suggestion"
+                    type="button"
+                    key={prompt}
+                    disabled={chatBusy || items.length === 0}
+                    onClick={() => void askExpenseChat(prompt)}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {chatMessages.map((message) => (
+              <div
+                className={`expense-chat-message ${message.role}`}
+                key={message.id}
+              >
+                <span className="expense-chat-avatar">
+                  {message.role === "assistant" ? (
+                    <Bot size={16} {...hydrationSafeIconProps} />
+                  ) : (
+                    <UserRound size={16} {...hydrationSafeIconProps} />
+                  )}
+                </span>
+                <p>{message.content}</p>
+              </div>
+            ))}
+
+            {chatBusy ? (
+              <div className="expense-chat-message assistant">
+                <span className="expense-chat-avatar">
+                  <Bot size={16} {...hydrationSafeIconProps} />
+                </span>
+                <p>Thinking...</p>
+              </div>
+            ) : null}
+          </div>
+
+          <form
+            className="expense-chat-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void askExpenseChat();
+            }}
+          >
+            <input
+              value={chatInput}
+              disabled={chatBusy || items.length === 0}
+              onChange={(event) => setChatInput(event.target.value)}
+              placeholder="How could I minimize food costs?"
+              aria-label="Expense question"
+            />
+            <button
+              className="icon-button expense-chat-send"
+              type="submit"
+              title="Send question"
+              disabled={chatBusy || items.length === 0 || !chatInput.trim()}
+            >
+              {chatBusy ? (
+                <LoaderCircle
+                  className="spin"
+                  size={16}
+                  {...hydrationSafeIconProps}
+                />
+              ) : (
+                <Send size={16} {...hydrationSafeIconProps} />
+              )}
+            </button>
+          </form>
+        </section>
 
         <section className="cash-flow-panel" aria-label="Income allocation">
           <div className="cash-flow-heading">

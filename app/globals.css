@@ -475,6 +475,124 @@ button:focus-visible,
   overflow-wrap: anywhere;
 }
 
+.expense-chat-panel {
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(36, 72, 199, 0.18);
+  border-radius: 8px;
+  background:
+    linear-gradient(110deg, rgba(36, 72, 199, 0.07), transparent 44%),
+    linear-gradient(290deg, rgba(12, 164, 184, 0.09), transparent 38%),
+    #fbfcf8;
+  padding: 12px;
+}
+
+.expense-chat-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.expense-chat-heading h3 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.expense-chat-log {
+  display: grid;
+  max-height: 286px;
+  overflow: auto;
+  gap: 8px;
+  border: 1px solid rgba(23, 26, 22, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 10px;
+}
+
+.expense-chat-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.expense-chat-suggestion {
+  min-height: 34px;
+  border: 1px solid rgba(36, 72, 199, 0.22);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--cobalt);
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.expense-chat-suggestion:hover:not(:disabled) {
+  background: #eef2ff;
+}
+
+.expense-chat-message {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.expense-chat-message p {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px 10px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.expense-chat-message.user p {
+  border-color: rgba(22, 115, 87, 0.24);
+  background: #eff7f1;
+}
+
+.expense-chat-message.assistant p {
+  border-color: rgba(36, 72, 199, 0.16);
+}
+
+.expense-chat-avatar {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--accent-dark);
+}
+
+.expense-chat-message.assistant .expense-chat-avatar {
+  color: var(--cobalt);
+}
+
+.expense-chat-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  gap: 8px;
+  align-items: center;
+}
+
+.expense-chat-form input {
+  min-height: 40px;
+}
+
+.expense-chat-send {
+  width: 40px;
+  height: 40px;
+}
+
 .statement-list {
   display: grid;
   gap: 8px;
