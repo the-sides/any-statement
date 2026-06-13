@@ -736,7 +736,7 @@ button:focus-visible,
 .flow-visual {
   position: relative;
   display: block;
-  min-height: 306px;
+  min-height: 360px;
   overflow-x: auto;
   border: 1px solid rgba(23, 26, 22, 0.1);
   border-radius: 8px;
@@ -753,7 +753,7 @@ button:focus-visible,
 .sankey-chart {
   display: block;
   width: 100%;
-  min-width: 760px;
+  min-width: 0;
   height: auto;
 }
 
@@ -763,7 +763,7 @@ button:focus-visible,
 
 .sankey-title {
   fill: var(--muted);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -776,11 +776,21 @@ button:focus-visible,
 }
 
 .sankey-flow {
-  opacity: 0.24;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.5;
 }
 
 .sankey-flow.input-flow {
-  opacity: 0.78;
+  opacity: 0.9;
+}
+
+.sankey-flow.allocation-flow {
+  opacity: 0.5;
+}
+
+.sankey-flow.allocation-flow.label-outside {
+  opacity: 0.72;
 }
 
 .sankey-input-node {
@@ -793,22 +803,42 @@ button:focus-visible,
 }
 
 .sankey-income-label-bg {
-  fill: rgba(255, 255, 255, 0.9);
+  fill: rgba(255, 255, 255, 0.93);
+  stroke: rgba(23, 26, 22, 0.08);
+}
+
+.sankey-flow-terminal {
+  stroke: rgba(255, 255, 255, 0.82);
+  stroke-width: 1.5;
+}
+
+.sankey-label-leader {
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.62;
 }
 
 .sankey-node-label,
 .sankey-allocation-label,
 .sankey-income-label {
   fill: var(--ink);
-  font-size: 16px;
+  font-size: 19px;
   font-weight: 900;
+}
+
+.sankey-allocation-label.outside,
+.sankey-allocation-amount.outside {
+  paint-order: stroke;
+  stroke: #fffefa;
+  stroke-linejoin: round;
+  stroke-width: 5px;
 }
 
 .sankey-node-amount,
 .sankey-allocation-amount,
 .sankey-income-amount {
   fill: var(--ink);
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 800;
 }
 

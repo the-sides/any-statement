@@ -1637,22 +1637,23 @@ function CashFlowSankey({
   summary: CashFlowSummary;
   currency: string;
 }) {
-  const width = 1120;
-  const top = 58;
-  const bottom = 34;
+  const width = 760;
+  const top = 76;
+  const bottom = 64;
   const leftX = 22;
-  const leftWidth = 290;
-  const middleX = 448;
-  const middleWidth = 16;
-  const rightBarX = 1074;
-  const rightBarWidth = 16;
+  const leftWidth = 180;
+  const bundleX = 286;
+  const bundleWidth = 22;
+  const outputX = 520;
+  const outsideLabelX = 552;
   const positiveInputs = summary.inputs.filter((entry) => entry.amount > 0);
   const allocations = summary.allocations.filter(
     (allocation) => allocation.amount > 0
   );
   const rowCount = Math.max(positiveInputs.length, allocations.length, 1);
-  const height = Math.max(410, 122 + rowCount * 44);
+  const height = Math.max(660, 180 + rowCount * 62);
   const availableHeight = height - top - bottom;
+  const incomeCenterY = top + availableHeight / 2;
   const inputTotal =
     positiveInputs.reduce((sum, input) => sum + input.amount, 0) || 1;
   const allocationTotal =
@@ -1665,8 +1666,7 @@ function CashFlowSankey({
     inputTotal,
     top,
     availableHeight,
-    8,
-    48
+    18
   );
   const allocationSegments = layoutSankeySegments(
     allocations.map((allocation, index) => ({
@@ -1676,8 +1676,17 @@ function CashFlowSankey({
     allocationTotal,
     top,
     availableHeight,
-    8,
-    34
+    16
+  );
+  const outsideAllocationLabelYs = new Map(
+    layoutOutsideFlowLabels(
+      allocationSegments.filter(
+        (segment) => !canPlaceFlowLabelInside(segment)
+      ),
+      top + 16,
+      height - bottom - 16,
+      38
+    )
   );
 
   return (
@@ -1692,9 +1701,9 @@ function CashFlowSankey({
           <stop offset="0%" stopColor="#d9f3f6" />
           <stop offset="100%" stopColor="#effbf2" />
         </linearGradient>
-        <linearGradient id="sankey-income-fill" x1="0" x2="1" y1="0" y2="0">
-          <stop offset="0%" stopColor="#d9f3f6" stopOpacity="0.82" />
-          <stop offset="100%" stopColor="#dff2dc" stopOpacity="0.88" />
+        <linearGradient id="sankey-input-stroke" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0%" stopColor="#0ca4b8" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="#2f9e4f" stopOpacity="0.54" />
         </linearGradient>
       </defs>
 
@@ -1702,10 +1711,10 @@ function CashFlowSankey({
       <text className="sankey-title" x={leftX} y="28">
         Inputs
       </text>
-      <text className="sankey-title" x={middleX - 28} y="28">
+      <text className="sankey-title" x={bundleX - 32} y="28">
         Income
       </text>
-      <text className="sankey-title" x={rightBarX - 220} y="28">
+      <text className="sankey-title" x={outsideLabelX} y="28">
         Outputs & categories
       </text>
 
@@ -1715,143 +1724,183 @@ function CashFlowSankey({
         </text>
       ) : null}
       {allocations.length === 0 ? (
-        <text className="sankey-empty" x={rightBarX - 240} y={top + 28}>
+        <text className="sankey-empty" x={outsideLabelX} y={top + 28}>
           Add outputs or statement rows
         </text>
       ) : null}
 
       <g className="sankey-flows">
         {inputSegments.map((segment) => (
-          <path
-            className="sankey-flow input-flow"
-            d={sankeyBandPath(
-              leftX + leftWidth,
-              middleX,
-              segment.y0,
-              segment.y1,
-              segment.y0,
-              segment.y1
-            )}
-            fill="url(#sankey-income-fill)"
-            key={`input-flow-${segment.id}`}
-          />
+          <g key={`input-flow-${segment.id}`}>
+            <path
+              className="sankey-flow input-flow"
+              d={sankeyStrokePath(
+                leftX + leftWidth + 16,
+                bundleX - 10,
+                segment.yc,
+                flowBundleY(segment.yc, incomeCenterY)
+              )}
+              fill="none"
+              stroke="url(#sankey-input-stroke)"
+              strokeWidth={segment.height}
+            />
+          </g>
         ))}
 
         {allocationSegments.map((segment) => (
-          <path
-            className="sankey-flow"
-            d={sankeyBandPath(
-              middleX + middleWidth,
-              rightBarX,
-              segment.y0,
-              segment.y1,
-              segment.y0,
-              segment.y1
-            )}
-            fill={segment.color}
-            key={`allocation-flow-${segment.id}`}
-          />
+          <g key={`allocation-flow-${segment.id}`}>
+            <path
+              className={`sankey-flow allocation-flow ${
+                canPlaceFlowLabelInside(segment)
+                  ? "label-inside"
+                  : "label-outside"
+              }`}
+              d={sankeyStrokePath(
+                bundleX + bundleWidth + 18,
+                outputX,
+                flowBundleY(segment.yc, incomeCenterY),
+                segment.yc
+              )}
+              fill="none"
+              stroke={segment.color}
+              strokeWidth={segment.height}
+            />
+          </g>
         ))}
       </g>
 
       <g className="sankey-nodes">
-        {inputSegments.map((segment) => (
-          <g key={`input-${segment.id}`}>
-            <rect
-              className="sankey-input-node"
-              x={leftX}
-              y={segment.y0}
-              width={leftWidth}
-              height={segment.height}
-              rx="6"
-            />
-            <rect
-              x={leftX}
-              y={segment.y0}
-              width="12"
-              height={segment.height}
-              rx="4"
-              fill={segment.color}
-            />
-            <text
-              className="sankey-node-label"
-              x={leftX + 28}
-              y={segment.y0 + 26}
-            >
-              {truncateSvgText(segment.label, 28)}
-            </text>
-            <text
-              className="sankey-node-amount"
-              x={leftX + 28}
-              y={segment.y0 + 46}
-            >
-              {formatCurrency(segment.amount, currency)}
-            </text>
-          </g>
-        ))}
+        {inputSegments.map((segment) => {
+          const nodeHeight = Math.max(56, Math.min(segment.height, 104));
+          const nodeY = clamp(
+            segment.yc - nodeHeight / 2,
+            top,
+            height - bottom - nodeHeight
+          );
+
+          return (
+            <g key={`input-${segment.id}`}>
+              <rect
+                className="sankey-input-node"
+                x={leftX}
+                y={nodeY}
+                width={leftWidth}
+                height={nodeHeight}
+                rx="6"
+              />
+              <rect
+                x={leftX}
+                y={nodeY}
+                width="12"
+                height={nodeHeight}
+                rx="4"
+                fill={segment.color}
+              />
+              <text
+                className="sankey-node-label"
+                x={leftX + 28}
+                y={nodeY + 26}
+              >
+                {truncateSvgText(segment.label, 28)}
+              </text>
+              <text
+                className="sankey-node-amount"
+                x={leftX + 28}
+                y={nodeY + 46}
+              >
+                {formatCurrency(segment.amount, currency)}
+              </text>
+            </g>
+          );
+        })}
 
         <rect
           className="sankey-income-node"
-          x={middleX}
+          x={bundleX}
           y={top}
-          width={middleWidth}
+          width={bundleWidth}
           height={availableHeight}
-          rx="4"
+          rx="12"
         />
         <rect
           className="sankey-income-label-bg"
-          x={middleX - 43}
-          y={top + availableHeight / 2 - 25}
-          width="102"
-          height="50"
+          x={bundleX - 56}
+          y={incomeCenterY - 30}
+          width="136"
+          height="60"
           rx="4"
         />
         <text
           className="sankey-income-label"
-          x={middleX + middleWidth / 2}
-          y={top + availableHeight / 2 - 5}
+          x={bundleX + bundleWidth / 2}
+          y={incomeCenterY - 7}
           textAnchor="middle"
         >
           Income
         </text>
         <text
           className="sankey-income-amount"
-          x={middleX + middleWidth / 2}
-          y={top + availableHeight / 2 + 15}
+          x={bundleX + bundleWidth / 2}
+          y={incomeCenterY + 15}
           textAnchor="middle"
         >
           {formatCurrency(summary.incomeTotal, currency)}
         </text>
 
-        {allocationSegments.map((segment) => (
-          <g key={`allocation-${segment.id}`}>
-            <rect
-              x={rightBarX}
-              y={segment.y0}
-              width={rightBarWidth}
-              height={segment.height}
-              rx="3"
-              fill={segment.color}
-            />
-            <text
-              className="sankey-allocation-label"
-              x={rightBarX - 14}
-              y={segment.yc - 6}
-              textAnchor="end"
-            >
-              {truncateSvgText(segment.label, 32)}
-            </text>
-            <text
-              className="sankey-allocation-amount"
-              x={rightBarX - 14}
-              y={segment.yc + 13}
-              textAnchor="end"
-            >
-              {formatCurrency(segment.amount, currency)} (
-              {formatPercent(segment.percent)})
-            </text>
-          </g>
-        ))}
+        {allocationSegments.map((segment) => {
+          const labelInside = canPlaceFlowLabelInside(segment);
+          const labelY = labelInside
+            ? segment.yc
+            : outsideAllocationLabelYs.get(segment.id) || segment.yc;
+          const labelX = labelInside ? outputX - 22 : outsideLabelX;
+          const textAnchor = labelInside ? "end" : "start";
+
+          return (
+            <g key={`allocation-${segment.id}`}>
+              {!labelInside ? (
+                <path
+                  className="sankey-label-leader"
+                  d={sankeyLabelLeaderPath(
+                    outputX + 8,
+                    segment.yc,
+                    labelX - 12,
+                    labelY
+                  )}
+                  fill="none"
+                  stroke={segment.color}
+                />
+              ) : null}
+              <circle
+                className="sankey-flow-terminal"
+                cx={outputX}
+                cy={segment.yc}
+                r={Math.max(2.5, Math.min(8, segment.height / 2))}
+                fill={segment.color}
+              />
+              <text
+                className={`sankey-allocation-label ${
+                  labelInside ? "inside" : "outside"
+                }`}
+                x={labelX}
+                y={labelY - 5}
+                textAnchor={textAnchor}
+              >
+                {truncateSvgText(segment.label, labelInside ? 24 : 34)}
+              </text>
+              <text
+                className={`sankey-allocation-amount ${
+                  labelInside ? "inside" : "outside"
+                }`}
+                x={labelX}
+                y={labelY + 14}
+                textAnchor={textAnchor}
+              >
+                {formatCurrency(segment.amount, currency)} (
+                {formatPercent(segment.percent)})
+              </text>
+            </g>
+          );
+        })}
       </g>
     </svg>
   );
@@ -2244,8 +2293,7 @@ function layoutSankeySegments<T extends { amount: number; color: string }>(
   total: number,
   top: number,
   availableHeight: number,
-  gap: number,
-  minHeight: number
+  gap: number
 ): Array<SankeySegment<T>> {
   if (items.length === 0) {
     return [];
@@ -2253,16 +2301,13 @@ function layoutSankeySegments<T extends { amount: number; color: string }>(
 
   const totalGap = gap * (items.length - 1);
   const stackHeight = Math.max(1, availableHeight - totalGap);
-  const heights = calculateSankeyHeights(
-    items.map((item) => item.amount),
-    total,
-    stackHeight,
-    minHeight
-  );
   let cursor = top;
 
-  return items.map((item, index) => {
-    const height = heights[index] || 1;
+  return items.map((item) => {
+    const height =
+      total > 0
+        ? (item.amount / total) * stackHeight
+        : stackHeight / items.length;
     const y0 = cursor;
     const y1 = y0 + height;
     cursor = y1 + gap;
@@ -2277,68 +2322,92 @@ function layoutSankeySegments<T extends { amount: number; color: string }>(
   });
 }
 
-function calculateSankeyHeights(
-  amounts: readonly number[],
-  total: number,
-  availableHeight: number,
-  minHeight: number
-) {
-  if (amounts.length * minHeight >= availableHeight) {
-    return amounts.map(() => availableHeight / amounts.length);
+function canPlaceFlowLabelInside(segment: { height: number }) {
+  return segment.height >= 46;
+}
+
+function flowBundleY(targetY: number, centerY: number) {
+  return centerY + (targetY - centerY) * 0.18;
+}
+
+function layoutOutsideFlowLabels<T extends { id: string; yc: number }>(
+  segments: readonly T[],
+  minY: number,
+  maxY: number,
+  minSpacing: number
+): Array<readonly [string, number]> {
+  if (segments.length === 0) {
+    return [];
   }
 
-  const heights = new Array<number>(amounts.length).fill(0);
-  const unresolved = new Set(amounts.map((_, index) => index));
-  let remainingHeight = availableHeight;
-  let remainingTotal = total;
-  let changed = true;
+  const sorted = [...segments].sort((left, right) => left.yc - right.yc);
+  const available = Math.max(1, maxY - minY);
+  const spacing =
+    sorted.length > 1
+      ? Math.min(minSpacing, available / (sorted.length - 1))
+      : minSpacing;
+  const positions = sorted.map((segment) => clamp(segment.yc, minY, maxY));
 
-  while (changed) {
-    changed = false;
+  for (let index = 1; index < positions.length; index += 1) {
+    positions[index] = Math.max(
+      positions[index],
+      positions[index - 1] + spacing
+    );
+  }
 
-    for (const index of [...unresolved]) {
-      const height =
-        remainingTotal > 0
-          ? (amounts[index] / remainingTotal) * remainingHeight
-          : 0;
-
-      if (height < minHeight) {
-        heights[index] = minHeight;
-        remainingHeight -= minHeight;
-        remainingTotal -= amounts[index];
-        unresolved.delete(index);
-        changed = true;
-      }
+  const overflow = positions[positions.length - 1] - maxY;
+  if (overflow > 0) {
+    for (let index = 0; index < positions.length; index += 1) {
+      positions[index] -= overflow;
     }
   }
 
-  for (const index of unresolved) {
-    heights[index] =
-      remainingTotal > 0
-        ? (amounts[index] / remainingTotal) * remainingHeight
-        : remainingHeight / unresolved.size;
+  for (let index = positions.length - 2; index >= 0; index -= 1) {
+    positions[index] = Math.min(
+      positions[index],
+      positions[index + 1] - spacing
+    );
   }
 
-  return heights;
+  return sorted.map((segment, index) => [
+    segment.id,
+    clamp(positions[index], minY, maxY)
+  ]);
 }
 
-function sankeyBandPath(
+function sankeyStrokePath(
   x0: number,
   x1: number,
-  sourceY0: number,
-  sourceY1: number,
-  targetY0: number,
-  targetY1: number
+  y0: number,
+  y1: number
 ) {
-  const curve = (x1 - x0) * 0.54;
+  const curve = (x1 - x0) * 0.48;
+  const verticalPull = (y1 - y0) * 0.18;
 
   return [
-    `M ${x0} ${sourceY0}`,
-    `C ${x0 + curve} ${sourceY0}, ${x1 - curve} ${targetY0}, ${x1} ${targetY0}`,
-    `L ${x1} ${targetY1}`,
-    `C ${x1 - curve} ${targetY1}, ${x0 + curve} ${sourceY1}, ${x0} ${sourceY1}`,
-    "Z"
+    `M ${x0} ${y0}`,
+    `C ${x0 + curve} ${y0 + verticalPull}, ${x1 - curve} ${
+      y1 - verticalPull
+    }, ${x1} ${y1}`
   ].join(" ");
+}
+
+function sankeyLabelLeaderPath(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number
+) {
+  const curve = Math.max(24, (x1 - x0) * 0.52);
+
+  return [
+    `M ${x0} ${y0}`,
+    `C ${x0 + curve} ${y0}, ${x1 - curve} ${y1}, ${x1} ${y1}`
+  ].join(" ");
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function inputColor(index: number) {
