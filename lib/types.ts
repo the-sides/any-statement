@@ -19,6 +19,7 @@ export type StatementSummary = {
 
 export type ExpenseItem = {
   id: string;
+  statementId?: string;
   date: string;
   postedDate: string;
   description: string;
@@ -41,8 +42,15 @@ export type StatementExtraction = {
 export type SaveExpensesPayload = {
   dataSourceId?: string;
   sourceFileName?: string;
-  statement: StatementSummary;
+  statement?: StatementSummary;
+  statements?: SaveStatementSource[];
   expenses: ExpenseItem[];
+};
+
+export type SaveStatementSource = {
+  id: string;
+  statement: StatementSummary;
+  sourceFileName: string;
 };
 
 export type SaveExpensesResult = {

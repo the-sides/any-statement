@@ -5,6 +5,8 @@ import {
   Check,
   Database,
   FileText,
+  Layers,
+  ListChecks,
   LoaderCircle,
   NotebookPen,
   Plus,
@@ -13,7 +15,8 @@ import {
   Sparkles,
   Tags,
   Trash2,
-  Upload
+  Upload,
+  X
 } from "lucide-react";
 import {
   useEffect,
@@ -47,9 +50,13 @@ import {
 } from "@/lib/cashFlowPlan";
 import {
   REVIEW_DRAFT_STORAGE_KEY,
+  createReviewStatement,
   createReviewDraft,
+  createStatementExpenses,
   parseReviewDraft,
-  type ReviewDraft
+  statementSourceForSave,
+  type ReviewDraft,
+  type ReviewStatement
 } from "@/lib/reviewDraft";
 import { sampleExtraction } from "@/lib/sample";
 import type {
@@ -92,11 +99,31 @@ const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
 const REVIEW_DRAFT_STORAGE_EVENT = "statement-ledger-review-draft";
 const CASH_FLOW_PLAN_STORAGE_EVENT = "statement-ledger-cash-flow-plan";
 const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
-const SAMPLE_REVIEW_DRAFT = createReviewDraft({
-  extraction: sampleExtraction,
-  items: sampleExtraction.expenses,
-  selectedIds: sampleExtraction.expenses.map((item) => item.id),
+const SAMPLE_STATEMENT_ID = "sample-statement";
+const EMPTY_STATEMENT: StatementSummary = {
+  institution: "",
+  accountMask: "",
+  statementType: "other",
+  periodStart: "",
+  periodEnd: "",
+  currency: "USD",
+  openingBalance: null,
+  closingBalance: null,
+  confidence: 0
+};
+const SAMPLE_REVIEW_STATEMENT = createReviewStatement({
+  id: SAMPLE_STATEMENT_ID,
+  statement: sampleExtraction.statement,
   sourceFileName: ""
+});
+const SAMPLE_REVIEW_DRAFT = createReviewDraft({
+  statements: [SAMPLE_REVIEW_STATEMENT],
+  expenses: sampleExtraction.expenses.map((item) => ({
+    ...item,
+    statementId: SAMPLE_STATEMENT_ID
+  })),
+  selectedIds: sampleExtraction.expenses.map((item) => item.id),
+  activeStatementId: SAMPLE_STATEMENT_ID
 });
 const SAMPLE_CASH_FLOW_PLAN = createCashFlowPlan([
   {
@@ -165,17 +192,44 @@ export function StatementWorkspace() {
     readCashFlowPlanSnapshot,
     readSampleCashFlowPlanSnapshot
   );
-  const extraction = reviewDraft.extraction;
-  const items = extraction.expenses;
-  const sourceFileName = reviewDraft.sourceFileName;
+  const statements = reviewDraft.statements;
+  const items = reviewDraft.expenses;
   const selectedIds = useMemo(
     () => new Set(reviewDraft.selectedIds),
     [reviewDraft.selectedIds]
   );
+  const statementById = useMemo(
+    () => new Map(statements.map((statement) => [statement.id, statement])),
+    [statements]
+  );
+  const activeStatement =
+    statementById.get(reviewDraft.activeStatementId) || statements[0] || null;
+  const activeStatementId = activeStatement?.id || "";
+  const activeStatementSummary = activeStatement?.statement || EMPTY_STATEMENT;
+  const sourceFileName = activeStatement?.sourceFileName || "";
 
   const selectedItems = useMemo(
     () => items.filter((item) => selectedIds.has(item.id)),
     [items, selectedIds]
+  );
+  const statementSummaries = useMemo(
+    () =>
+      statements.map((statement) => {
+        const statementItems = items.filter(
+          (item) => item.statementId === statement.id
+        );
+        const statementSelectedItems = statementItems.filter((item) =>
+          selectedIds.has(item.id)
+        );
+
+        return {
+          statement,
+          items: statementItems,
+          selectedItems: statementSelectedItems,
+          amount: statementItems.reduce((sum, item) => sum + item.amount, 0)
+        };
+      }),
+    [items, selectedIds, statements]
   );
   const cashFlowSummary = useMemo(
     () => summarizeCashFlow(cashFlowPlan.entries, items),
@@ -188,7 +242,8 @@ export function StatementWorkspace() {
     (entry) => entry.kind === "output"
   );
   const totalAmount = selectedItems.reduce((sum, item) => sum + item.amount, 0);
-  const currency = extraction.statement.currency || "USD";
+  const currency =
+    activeStatementSummary.currency || items[0]?.currency || "USD";
   const allSelected = items.length > 0 && selectedIds.size === items.length;
   const notionCategoryCount = categories.filter(
     (category) => category.source === "notion"
@@ -332,8 +387,10 @@ export function StatementWorkspace() {
         },
         body: JSON.stringify({
           dataSourceId: dataSourceId.trim() || undefined,
-          sourceFileName: sourceFileName || file?.name || "sample-statement.pdf",
-          statement: extraction.statement,
+          sourceFileName:
+            sourceFileName || file?.name || "sample-statement.pdf",
+          statement: activeStatementSummary,
+          statements: statements.map(statementSourceForSave),
           expenses: selectedItems
         })
       });
@@ -435,18 +492,18 @@ export function StatementWorkspace() {
   }
 
   function writeReviewState(next: {
-    extraction?: StatementExtraction;
+    statements?: readonly ReviewStatement[];
     items?: readonly ExpenseItem[];
     selectedIds?: Iterable<string>;
-    sourceFileName?: string;
+    activeStatementId?: string;
   }) {
-    const nextExtraction = next.extraction || extraction;
+    const nextStatements = next.statements || statements;
     const nextItems = [...(next.items || items)];
     const draft = createReviewDraft({
-      extraction: nextExtraction,
-      items: nextItems,
-      selectedIds: next.selectedIds || selectedIds,
-      sourceFileName: next.sourceFileName ?? sourceFileName
+      statements: nextStatements,
+      expenses: nextItems,
+      selectedIds: next.selectedIds ?? selectedIds,
+      activeStatementId: next.activeStatementId ?? activeStatementId
     });
 
     if (!writeStoredReviewDraft(draft)) {
@@ -464,11 +521,29 @@ export function StatementWorkspace() {
     nextExtraction: StatementExtraction,
     nextSourceFileName = ""
   ) {
-    writeReviewState({
-      extraction: nextExtraction,
-      items: nextExtraction.expenses,
-      selectedIds: nextExtraction.expenses.map((item) => item.id),
+    const statementId = createClientId("statement");
+    const statement = createReviewStatement({
+      id: statementId,
+      statement: nextExtraction.statement,
       sourceFileName: nextSourceFileName
+    });
+    const statementItems = createStatementExpenses(
+      statementId,
+      nextExtraction.expenses
+    );
+    const shouldReplaceDraft = !hasStoredReviewDraft();
+    const nextSelectedIds = shouldReplaceDraft
+      ? statementItems.map((item) => item.id)
+      : new Set([
+          ...selectedIds,
+          ...statementItems.map((item) => item.id)
+        ]);
+
+    writeReviewState({
+      statements: shouldReplaceDraft ? [statement] : [...statements, statement],
+      items: shouldReplaceDraft ? statementItems : [...items, ...statementItems],
+      selectedIds: nextSelectedIds,
+      activeStatementId: statementId
     });
   }
 
@@ -476,14 +551,22 @@ export function StatementWorkspace() {
     key: K,
     value: StatementSummary[K]
   ) {
+    if (!activeStatement) {
+      return;
+    }
+
     writeReviewState({
-      extraction: {
-        ...extraction,
-        statement: {
-          ...extraction.statement,
-          [key]: value
-        }
-      }
+      statements: statements.map((statement) =>
+        statement.id === activeStatement.id
+          ? {
+              ...statement,
+              statement: {
+                ...statement.statement,
+                [key]: value
+              }
+            }
+          : statement
+      )
     });
   }
 
@@ -521,6 +604,34 @@ export function StatementWorkspace() {
     });
   }
 
+  function recategorizeStatement(statementId: string, category: ExpenseCategory) {
+    const rowCount = items.filter((item) => item.statementId === statementId).length;
+    const statement = statementById.get(statementId);
+
+    if (rowCount === 0) {
+      setNotice({ tone: "error", message: "No rows for that statement." });
+      return;
+    }
+
+    if (
+      !writeReviewState({
+        items: items.map((item) =>
+          item.statementId === statementId ? { ...item, category } : item
+        ),
+        activeStatementId: statementId
+      })
+    ) {
+      return;
+    }
+
+    setNotice({
+      tone: "success",
+      message: `Updated ${rowCount} rows from ${formatStatementTitle(
+        statement
+      )} to ${category}.`
+    });
+  }
+
   function toggleItem(id: string) {
     const next = new Set(selectedIds);
     if (next.has(id)) {
@@ -538,10 +649,99 @@ export function StatementWorkspace() {
     });
   }
 
+  function activateStatement(statementId: string) {
+    if (!statementById.has(statementId)) {
+      return;
+    }
+
+    writeReviewState({ activeStatementId: statementId });
+  }
+
+  function selectStatementRows(statementId: string) {
+    const rowIds = items
+      .filter((item) => item.statementId === statementId)
+      .map((item) => item.id);
+    const statement = statementById.get(statementId);
+
+    if (rowIds.length === 0) {
+      setNotice({ tone: "error", message: "No rows for that statement." });
+      return;
+    }
+
+    writeReviewState({
+      selectedIds: new Set([...selectedIds, ...rowIds]),
+      activeStatementId: statementId
+    });
+    setNotice({
+      tone: "success",
+      message: `Selected ${rowIds.length} rows from ${formatStatementTitle(
+        statement
+      )}.`
+    });
+  }
+
+  function clearStatementRows(statementId: string) {
+    const rowIds = new Set(
+      items
+        .filter((item) => item.statementId === statementId)
+        .map((item) => item.id)
+    );
+    const nextSelectedIds = [...selectedIds].filter((id) => !rowIds.has(id));
+    const statement = statementById.get(statementId);
+
+    writeReviewState({
+      selectedIds: nextSelectedIds,
+      activeStatementId: statementId
+    });
+    setNotice({
+      tone: "neutral",
+      message: `Cleared ${rowIds.size} rows from ${formatStatementTitle(
+        statement
+      )}.`
+    });
+  }
+
+  function removeStatement(statementId: string) {
+    const rowIds = new Set(
+      items
+        .filter((item) => item.statementId === statementId)
+        .map((item) => item.id)
+    );
+    const nextStatements = statements.filter(
+      (statement) => statement.id !== statementId
+    );
+    const statement = statementById.get(statementId);
+
+    writeReviewState({
+      statements: nextStatements,
+      items: items.filter((item) => item.statementId !== statementId),
+      selectedIds: [...selectedIds].filter((id) => !rowIds.has(id)),
+      activeStatementId:
+        activeStatementId === statementId
+          ? nextStatements[0]?.id || ""
+          : activeStatementId
+    });
+    setNotice({
+      tone: "neutral",
+      message: `Removed ${rowIds.size} rows from ${formatStatementTitle(
+        statement
+      )}.`
+    });
+  }
+
   function addRow() {
     const id = crypto.randomUUID();
+    const targetStatementId = activeStatementId || createClientId("statement");
+    const targetStatement =
+      activeStatement ||
+      createReviewStatement({
+        id: targetStatementId,
+        statement: EMPTY_STATEMENT,
+        sourceFileName: "Manual rows"
+      });
     const row: ExpenseItem = {
       id,
+      statementId: targetStatementId,
       date: new Date().toISOString().slice(0, 10),
       postedDate: "",
       description: "",
@@ -557,8 +757,10 @@ export function StatementWorkspace() {
     };
 
     writeReviewState({
+      statements: activeStatement ? statements : [...statements, targetStatement],
       items: [row, ...items],
-      selectedIds: new Set([id, ...selectedIds])
+      selectedIds: new Set([id, ...selectedIds]),
+      activeStatementId: targetStatementId
     });
   }
 
@@ -632,7 +834,14 @@ export function StatementWorkspace() {
 
           <label className="file-drop" htmlFor="statement-upload">
             <Upload size={22} {...hydrationSafeIconProps} />
-            <span>{file ? file.name : sourceFileName || "Choose PDF"}</span>
+            <span>
+              {file
+                ? file.name
+                : sourceFileName ||
+                  (statements.length > 1
+                    ? `${statements.length} statements`
+                    : "Choose PDF")}
+            </span>
             <small>
               {file
                 ? formatBytes(file.size)
@@ -811,12 +1020,113 @@ export function StatementWorkspace() {
           </div>
         </section>
 
+        <section className="panel statement-list-panel">
+          <div className="panel-heading panel-heading-split">
+            <div className="panel-heading-title">
+              <Layers size={18} {...hydrationSafeIconProps} />
+              <h2>Statements</h2>
+            </div>
+            <span className="panel-count">{statements.length}</span>
+          </div>
+
+          <div className="statement-list">
+            {statementSummaries.length === 0 ? (
+              <div className="statement-empty">No statements</div>
+            ) : null}
+            {statementSummaries.map(
+              ({ statement, items: statementItems, selectedItems: selected }) => (
+                <div
+                  className={`statement-source ${
+                    statement.id === activeStatementId ? "active" : ""
+                  }`}
+                  key={statement.id}
+                >
+                  <button
+                    className="statement-source-main"
+                    type="button"
+                    onClick={() => activateStatement(statement.id)}
+                  >
+                    <strong>{formatStatementTitle(statement)}</strong>
+                    <small>
+                      {statement.sourceFileName ||
+                        formatStatementPeriod(statement.statement) ||
+                        "Manual rows"}
+                    </small>
+                    <span>
+                      {statementItems.length} rows / {selected.length} selected
+                    </span>
+                  </button>
+
+                  <div className="statement-source-actions">
+                    <button
+                      className="mini-icon-button"
+                      type="button"
+                      title="Select statement rows"
+                      onClick={() => selectStatementRows(statement.id)}
+                    >
+                      <ListChecks size={14} {...hydrationSafeIconProps} />
+                    </button>
+                    <button
+                      className="mini-icon-button"
+                      type="button"
+                      title="Clear statement selection"
+                      onClick={() => clearStatementRows(statement.id)}
+                    >
+                      <X size={14} {...hydrationSafeIconProps} />
+                    </button>
+                    <button
+                      className="mini-icon-button danger"
+                      type="button"
+                      title="Remove statement"
+                      onClick={() => removeStatement(statement.id)}
+                    >
+                      <Trash2 size={14} {...hydrationSafeIconProps} />
+                    </button>
+                  </div>
+
+                  <label className="statement-category-control">
+                    <Tags size={14} {...hydrationSafeIconProps} />
+                    <select
+                      value=""
+                      aria-label={`Category for ${formatStatementTitle(
+                        statement
+                      )}`}
+                      disabled={
+                        statementItems.length === 0 || controlsDisabled
+                      }
+                      onChange={(event) => {
+                        const category = event.target.value as ExpenseCategory;
+
+                        if (category) {
+                          recategorizeStatement(statement.id, category);
+                        }
+                      }}
+                    >
+                      <option value="">Set all rows</option>
+                      {bulkCategoryOptions.map((category) => (
+                        <option
+                          key={`${category.source}-${
+                            category.sourceId || category.name
+                          }`}
+                          value={category.name}
+                        >
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )
+            )}
+          </div>
+        </section>
+
         <section className="panel statement-card">
-          <h2>Review</h2>
+          <h2>Active statement</h2>
           <label className="field">
             <span>Institution</span>
             <input
-              value={extraction.statement.institution}
+              value={activeStatementSummary.institution}
               onChange={(event) =>
                 updateStatement("institution", event.target.value)
               }
@@ -826,7 +1136,7 @@ export function StatementWorkspace() {
             <label className="field">
               <span>Type</span>
               <select
-                value={extraction.statement.statementType}
+                value={activeStatementSummary.statementType}
                 onChange={(event) =>
                   updateStatement(
                     "statementType",
@@ -844,7 +1154,7 @@ export function StatementWorkspace() {
             <label className="field">
               <span>Account</span>
               <input
-                value={extraction.statement.accountMask}
+                value={activeStatementSummary.accountMask}
                 onChange={(event) =>
                   updateStatement("accountMask", event.target.value)
                 }
@@ -856,7 +1166,7 @@ export function StatementWorkspace() {
               <span>Start</span>
               <input
                 type="date"
-                value={extraction.statement.periodStart}
+                value={activeStatementSummary.periodStart}
                 onChange={(event) =>
                   updateStatement("periodStart", event.target.value)
                 }
@@ -866,7 +1176,7 @@ export function StatementWorkspace() {
               <span>End</span>
               <input
                 type="date"
-                value={extraction.statement.periodEnd}
+                value={activeStatementSummary.periodEnd}
                 onChange={(event) =>
                   updateStatement("periodEnd", event.target.value)
                 }
@@ -876,7 +1186,7 @@ export function StatementWorkspace() {
           <label className="field">
             <span>Currency</span>
             <input
-              value={extraction.statement.currency}
+              value={activeStatementSummary.currency}
               onChange={(event) =>
                 updateStatement("currency", event.target.value.toUpperCase())
               }
@@ -889,11 +1199,16 @@ export function StatementWorkspace() {
         <div className="workspace-top">
           <div>
             <p className="eyebrow">Review queue</p>
-            <h2>{extraction.statement.institution}</h2>
+            <h2>
+              {statements.length > 1
+                ? "Combined review"
+                : activeStatementSummary.institution || "Review queue"}
+            </h2>
           </div>
 
           <div className="stats-strip">
             <Stat label="Rows" value={String(items.length)} />
+            <Stat label="Statements" value={String(statements.length)} />
             <Stat label="Selected" value={String(selectedItems.length)} />
             <Stat label="Amount" value={formatCurrency(totalAmount, currency)} />
           </div>
@@ -1113,6 +1428,21 @@ export function StatementWorkspace() {
               ))}
             </select>
           </label>
+          <label className="statement-scope-control">
+            <Layers size={16} {...hydrationSafeIconProps} />
+            <select
+              value={activeStatementId}
+              aria-label="Active statement"
+              disabled={statements.length === 0 || controlsDisabled}
+              onChange={(event) => activateStatement(event.target.value)}
+            >
+              {statements.map((statement) => (
+                <option key={statement.id} value={statement.id}>
+                  {formatStatementTitle(statement)}
+                </option>
+              ))}
+            </select>
+          </label>
           <span>{currencyNames.of(currency) || currency}</span>
         </div>
 
@@ -1121,6 +1451,7 @@ export function StatementWorkspace() {
             <thead>
               <tr>
                 <th aria-label="Selected" />
+                <th>Statement</th>
                 <th>Date</th>
                 <th>Merchant</th>
                 <th>Description</th>
@@ -1136,7 +1467,7 @@ export function StatementWorkspace() {
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={11}>
+                  <td colSpan={12}>
                     <div className="empty-state">
                       No expense rows returned. Re-upload the PDF and inspect the
                       saved artifact directory shown above.
@@ -1153,6 +1484,17 @@ export function StatementWorkspace() {
                       onChange={() => toggleItem(item.id)}
                       aria-label={`Select ${item.merchant || item.description}`}
                     />
+                  </td>
+                  <td>
+                    <button
+                      className="statement-chip"
+                      type="button"
+                      onClick={() => activateStatement(item.statementId || "")}
+                    >
+                      {formatStatementShortLabel(
+                        statementById.get(item.statementId || "")
+                      )}
+                    </button>
                   </td>
                   <td>
                     <input
@@ -1693,6 +2035,66 @@ function writeStoredReviewDraft(draft: ReviewDraft) {
   } catch {
     return false;
   }
+}
+
+function hasStoredReviewDraft() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(REVIEW_DRAFT_STORAGE_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function createClientId(prefix: string) {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+}
+
+function formatStatementTitle(statement?: ReviewStatement | null) {
+  if (!statement) {
+    return "Statement";
+  }
+
+  return (
+    statement.statement.institution.trim() ||
+    statement.sourceFileName.trim() ||
+    "Statement"
+  );
+}
+
+function formatStatementShortLabel(statement?: ReviewStatement | null) {
+  if (!statement) {
+    return "Unknown";
+  }
+
+  return truncateText(
+    statement.statement.accountMask.trim() ||
+      statement.statement.institution.trim() ||
+      statement.sourceFileName.trim() ||
+      "Statement",
+    18
+  );
+}
+
+function formatStatementPeriod(statement: StatementSummary) {
+  return [statement.periodStart, statement.periodEnd].filter(Boolean).join(" to ");
+}
+
+function truncateText(value: string, maxLength: number) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
 function subscribeToCashFlowPlan(onStoreChange: () => void) {

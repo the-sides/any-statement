@@ -8,7 +8,10 @@ export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as SaveExpensesPayload;
 
-    if (!payload.statement || !Array.isArray(payload.expenses)) {
+    if (
+      !Array.isArray(payload.expenses) ||
+      (!payload.statement && !Array.isArray(payload.statements))
+    ) {
       return Response.json(
         { error: "Statement and expense rows are required." },
         { status: 400 }

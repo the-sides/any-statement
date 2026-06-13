@@ -8,7 +8,8 @@ import { loadCategoryCatalog } from "@/lib/categoryStore";
 import type {
   ExpenseItem,
   SaveExpensesPayload,
-  SaveExpensesResult
+  SaveExpensesResult,
+  SaveStatementSource
 } from "@/lib/types";
 
 const NOTION_VERSION = "2026-03-11";
@@ -58,6 +59,9 @@ export async function saveExpensesToNotion(
     resolvedDataSourceId,
     categoryNames
   );
+  const statementById = new Map(
+    (payload.statements || []).map((statement) => [statement.id, statement])
+  );
   const pages = [];
 
   for (const expense of payload.expenses) {
@@ -72,7 +76,7 @@ export async function saveExpensesToNotion(
         parent: {
           data_source_id: resolvedDataSourceId
         },
-        properties: buildProperties(expense, payload, schema)
+        properties: buildProperties(expense, payload, schema, statementById)
       })
     });
 
@@ -490,9 +494,11 @@ function addMissingProperty(
 function buildProperties(
   expense: ExpenseItem,
   payload: SaveExpensesPayload,
-  schema: NotionPropertyMap
+  schema: NotionPropertyMap,
+  statementById: ReadonlyMap<string, SaveStatementSource>
 ) {
-  const statement = payload.statement;
+  const source = getStatementSource(expense, payload, statementById);
+  const statement = source.statement;
   const name = [
     expense.date,
     expense.merchant || expense.description || "Expense"
@@ -537,11 +543,37 @@ function buildProperties(
     "Statement Period",
     [statement.periodStart, statement.periodEnd].filter(Boolean).join(" to ")
   );
-  setRichText(properties, schema, "Source File", payload.sourceFileName || "");
+  setRichText(properties, schema, "Source File", source.sourceFileName);
   setNumber(properties, schema, "Confidence", expense.confidence);
   setRichText(properties, schema, "Notes", expense.notes);
 
   return properties;
+}
+
+function getStatementSource(
+  expense: ExpenseItem,
+  payload: SaveExpensesPayload,
+  statementById: ReadonlyMap<string, SaveStatementSource>
+) {
+  const matchedSource = expense.statementId
+    ? statementById.get(expense.statementId)
+    : undefined;
+  const fallbackStatement =
+    payload.statement || payload.statements?.[0]?.statement;
+  const statement = matchedSource?.statement || fallbackStatement;
+
+  if (!statement) {
+    throw new NotionSaveError(
+      "Statement metadata is required before rows can be saved.",
+      400
+    );
+  }
+
+  return {
+    statement,
+    sourceFileName:
+      matchedSource?.sourceFileName || payload.sourceFileName || ""
+  };
 }
 
 function setDate(

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { createReviewDraft, parseReviewDraft } from "@/lib/reviewDraft";
+import {
+  createReviewDraft,
+  createReviewStatement,
+  createStatementExpenses,
+  parseReviewDraft
+} from "@/lib/reviewDraft";
 import type { StatementExtraction } from "@/lib/types";
 
 const extraction: StatementExtraction = {
@@ -34,23 +39,52 @@ const extraction: StatementExtraction = {
 };
 
 describe("review draft persistence", () => {
-  test("creates and parses a persisted review draft", () => {
-    const draft = createReviewDraft({
-      extraction,
-      items: extraction.expenses,
-      selectedIds: ["tx-1", "missing"],
+  test("creates and parses a multi-statement review draft", () => {
+    const statement = createReviewStatement({
+      id: "statement-a",
+      statement: extraction.statement,
       sourceFileName: "statement.pdf"
+    });
+    const expenses = createStatementExpenses("statement-a", extraction.expenses);
+    const draft = createReviewDraft({
+      statements: [statement],
+      expenses,
+      selectedIds: [expenses[0].id, "missing"],
+      activeStatementId: "statement-a"
     });
     const parsed = parseReviewDraft(JSON.parse(JSON.stringify(draft)));
 
-    expect(parsed?.extraction.expenses.length).toBe(1);
+    expect(parsed?.expenses.length).toBe(1);
+    expect(parsed?.expenses[0].statementId).toBe("statement-a");
     expect(parsed?.selectedIds.length).toBe(1);
-    expect(parsed?.selectedIds[0]).toBe("tx-1");
-    expect(parsed?.sourceFileName).toBe("statement.pdf");
+    expect(parsed?.selectedIds[0]).toBe(expenses[0].id);
+    expect(parsed?.statements[0].sourceFileName).toBe("statement.pdf");
+  });
+
+  test("migrates the previous single-statement draft shape", () => {
+    const parsed = parseReviewDraft({
+      version: 1,
+      extraction,
+      selectedIds: ["tx-1"],
+      sourceFileName: "legacy.pdf",
+      savedAt: "2026-06-12T00:00:00.000Z"
+    });
+
+    expect(parsed?.version).toBe(2);
+    expect(parsed?.statements.length).toBe(1);
+    expect(parsed?.statements[0].sourceFileName).toBe("legacy.pdf");
+    expect(parsed?.expenses[0].statementId).toBe(parsed?.statements[0].id);
+    expect(parsed?.selectedIds.join(",")).toBe("tx-1");
   });
 
   test("rejects unknown draft shapes", () => {
     expect(parseReviewDraft({ version: 999 })).toBe(null);
-    expect(parseReviewDraft({ version: 1, extraction: null })).toBe(null);
+    const parsed = parseReviewDraft({ version: 2, statements: null });
+
+    expect(parsed?.version).toBe(2);
+    expect(parsed?.statements.length).toBe(0);
+    expect(parsed?.expenses.length).toBe(0);
+    expect(parsed?.selectedIds.length).toBe(0);
+    expect(parsed?.activeStatementId).toBe("");
   });
 });
