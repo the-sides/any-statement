@@ -30,6 +30,12 @@ import {
   type StatementSection,
   type StatementType
 } from "@/lib/categories";
+import {
+  REVIEW_DRAFT_STORAGE_KEY,
+  createReviewDraft,
+  parseReviewDraft,
+  type ReviewDraft
+} from "@/lib/reviewDraft";
 import { sampleExtraction } from "@/lib/sample";
 import type {
   ExpenseItem,
@@ -47,6 +53,7 @@ type ExtractionResponse = {
   extraction: StatementExtraction;
   artifact?: {
     dir: string;
+    fileName?: string;
     pdfPath: string;
   };
 };
@@ -67,7 +74,16 @@ const APP_CATEGORY_VISIBILITY_STORAGE_KEY =
   "statement-ledger.include-app-categories";
 const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
   "statement-ledger-include-app-categories";
+const REVIEW_DRAFT_STORAGE_EVENT = "statement-ledger-review-draft";
 const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
+const SAMPLE_REVIEW_DRAFT = createReviewDraft({
+  extraction: sampleExtraction,
+  items: sampleExtraction.expenses,
+  selectedIds: sampleExtraction.expenses.map((item) => item.id),
+  sourceFileName: ""
+});
+let cachedReviewDraftRaw: string | null = null;
+let cachedReviewDraftSnapshot: ReviewDraft = SAMPLE_REVIEW_DRAFT;
 const hydrationSafeIconProps = {
   "aria-hidden": "true",
   suppressHydrationWarning: true
@@ -75,14 +91,6 @@ const hydrationSafeIconProps = {
 
 export function StatementWorkspace() {
   const [file, setFile] = useState<File | null>(null);
-  const [extraction, setExtraction] =
-    useState<StatementExtraction>(sampleExtraction);
-  const [items, setItems] = useState<ExpenseItem[]>(
-    sampleExtraction.expenses
-  );
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(sampleExtraction.expenses.map((item) => item.id))
-  );
   const [dataSourceId, setDataSourceId] = useState("");
   const [busy, setBusy] = useState<"idle" | "extracting" | "saving">("idle");
   const [categoryBusy, setCategoryBusy] = useState<
@@ -93,7 +101,7 @@ export function StatementWorkspace() {
   );
   const [notice, setNotice] = useState<Notice>({
     tone: "neutral",
-    message: "Sample rows are loaded."
+    message: "Rows are saved locally in this browser."
   });
   const [lastSave, setLastSave] = useState<SaveExpensesResult | null>(null);
   const categorizationNotes = useSyncExternalStore(
@@ -105,6 +113,18 @@ export function StatementWorkspace() {
     subscribeToAppCategoryVisibilityPreference,
     readAppCategoryVisibilityPreference,
     () => null
+  );
+  const reviewDraft = useSyncExternalStore(
+    subscribeToReviewDraft,
+    readReviewDraftSnapshot,
+    readSampleReviewDraftSnapshot
+  );
+  const extraction = reviewDraft.extraction;
+  const items = extraction.expenses;
+  const sourceFileName = reviewDraft.sourceFileName;
+  const selectedIds = useMemo(
+    () => new Set(reviewDraft.selectedIds),
+    [reviewDraft.selectedIds]
   );
 
   const selectedItems = useMemo(
@@ -216,7 +236,10 @@ export function StatementWorkspace() {
         ? ` Artifacts: ${extractionResult.artifact.dir}`
         : "";
 
-      loadExtraction(extractionResult.extraction);
+      loadExtraction(
+        extractionResult.extraction,
+        extractionResult.artifact?.fileName || file.name
+      );
       setNotice({
         tone: rowCount > 0 ? "success" : "error",
         message:
@@ -253,7 +276,7 @@ export function StatementWorkspace() {
         },
         body: JSON.stringify({
           dataSourceId: dataSourceId.trim() || undefined,
-          sourceFileName: file?.name || "sample-statement.pdf",
+          sourceFileName: sourceFileName || file?.name || "sample-statement.pdf",
           statement: extraction.statement,
           expenses: selectedItems
         })
@@ -355,29 +378,65 @@ export function StatementWorkspace() {
     }
   }
 
-  function loadExtraction(nextExtraction: StatementExtraction) {
-    setExtraction(nextExtraction);
-    setItems(nextExtraction.expenses);
-    setSelectedIds(new Set(nextExtraction.expenses.map((item) => item.id)));
+  function writeReviewState(next: {
+    extraction?: StatementExtraction;
+    items?: readonly ExpenseItem[];
+    selectedIds?: Iterable<string>;
+    sourceFileName?: string;
+  }) {
+    const nextExtraction = next.extraction || extraction;
+    const nextItems = [...(next.items || items)];
+    const draft = createReviewDraft({
+      extraction: nextExtraction,
+      items: nextItems,
+      selectedIds: next.selectedIds || selectedIds,
+      sourceFileName: next.sourceFileName ?? sourceFileName
+    });
+
+    if (!writeStoredReviewDraft(draft)) {
+      setNotice({
+        tone: "error",
+        message: "Current rows could not be saved in this browser."
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  function loadExtraction(
+    nextExtraction: StatementExtraction,
+    nextSourceFileName = ""
+  ) {
+    writeReviewState({
+      extraction: nextExtraction,
+      items: nextExtraction.expenses,
+      selectedIds: nextExtraction.expenses.map((item) => item.id),
+      sourceFileName: nextSourceFileName
+    });
   }
 
   function updateStatement<K extends keyof StatementSummary>(
     key: K,
     value: StatementSummary[K]
   ) {
-    setExtraction((current) => ({
-      ...current,
-      statement: {
-        ...current.statement,
-        [key]: value
+    writeReviewState({
+      extraction: {
+        ...extraction,
+        statement: {
+          ...extraction.statement,
+          [key]: value
+        }
       }
-    }));
+    });
   }
 
   function updateItem(id: string, patch: Partial<ExpenseItem>) {
-    setItems((current) =>
-      current.map((item) => (item.id === id ? { ...item, ...patch } : item))
-    );
+    writeReviewState({
+      items: items.map((item) =>
+        item.id === id ? { ...item, ...patch } : item
+      )
+    });
   }
 
   function recategorizeSelected(category: ExpenseCategory) {
@@ -388,11 +447,16 @@ export function StatementWorkspace() {
       return;
     }
 
-    setItems((current) =>
-      current.map((item) =>
-        selectedIds.has(item.id) ? { ...item, category } : item
-      )
-    );
+    if (
+      !writeReviewState({
+        items: items.map((item) =>
+          selectedIds.has(item.id) ? { ...item, category } : item
+        )
+      })
+    ) {
+      return;
+    }
+
     setNotice({
       tone: "success",
       message: `Updated ${selectedCount} ${
@@ -402,19 +466,20 @@ export function StatementWorkspace() {
   }
 
   function toggleItem(id: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
+    const next = new Set(selectedIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+
+    writeReviewState({ selectedIds: next });
   }
 
   function toggleAll() {
-    setSelectedIds(allSelected ? new Set() : new Set(items.map((item) => item.id)));
+    writeReviewState({
+      selectedIds: allSelected ? [] : items.map((item) => item.id)
+    });
   }
 
   function addRow() {
@@ -435,16 +500,19 @@ export function StatementWorkspace() {
       notes: ""
     };
 
-    setItems((current) => [row, ...current]);
-    setSelectedIds((current) => new Set([id, ...current]));
+    writeReviewState({
+      items: [row, ...items],
+      selectedIds: new Set([id, ...selectedIds])
+    });
   }
 
   function removeRow(id: string) {
-    setItems((current) => current.filter((item) => item.id !== id));
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      next.delete(id);
-      return next;
+    const nextSelectedIds = new Set(selectedIds);
+    nextSelectedIds.delete(id);
+
+    writeReviewState({
+      items: items.filter((item) => item.id !== id),
+      selectedIds: nextSelectedIds
     });
   }
 
@@ -467,8 +535,14 @@ export function StatementWorkspace() {
 
           <label className="file-drop" htmlFor="statement-upload">
             <Upload size={22} {...hydrationSafeIconProps} />
-            <span>{file ? file.name : "Choose PDF"}</span>
-            <small>{file ? formatBytes(file.size) : "Credit card or bank"}</small>
+            <span>{file ? file.name : sourceFileName || "Choose PDF"}</span>
+            <small>
+              {file
+                ? formatBytes(file.size)
+                : sourceFileName
+                  ? "Restored draft"
+                  : "Credit card or bank"}
+            </small>
           </label>
           <input
             id="statement-upload"
@@ -1063,6 +1137,73 @@ function writeAppCategoryVisibilityPreference(value: boolean) {
       String(value)
     );
     window.dispatchEvent(new Event(APP_CATEGORY_VISIBILITY_STORAGE_EVENT));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function subscribeToReviewDraft(onStoreChange: () => void) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === REVIEW_DRAFT_STORAGE_KEY) {
+      onStoreChange();
+    }
+  };
+
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(REVIEW_DRAFT_STORAGE_EVENT, onStoreChange);
+
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(REVIEW_DRAFT_STORAGE_EVENT, onStoreChange);
+  };
+}
+
+function readSampleReviewDraftSnapshot() {
+  return SAMPLE_REVIEW_DRAFT;
+}
+
+function readReviewDraftSnapshot() {
+  if (typeof window === "undefined") {
+    return SAMPLE_REVIEW_DRAFT;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(REVIEW_DRAFT_STORAGE_KEY);
+
+    if (raw === cachedReviewDraftRaw) {
+      return cachedReviewDraftSnapshot;
+    }
+
+    const draft = raw ? parseReviewDraft(JSON.parse(raw)) : null;
+    cachedReviewDraftRaw = raw;
+    cachedReviewDraftSnapshot = draft || SAMPLE_REVIEW_DRAFT;
+    return cachedReviewDraftSnapshot;
+  } catch {
+    cachedReviewDraftRaw = null;
+    cachedReviewDraftSnapshot = SAMPLE_REVIEW_DRAFT;
+    return cachedReviewDraftSnapshot;
+  }
+}
+
+function writeStoredReviewDraft(draft: ReviewDraft) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const raw = JSON.stringify(draft);
+    window.localStorage.setItem(
+      REVIEW_DRAFT_STORAGE_KEY,
+      raw
+    );
+    cachedReviewDraftRaw = raw;
+    cachedReviewDraftSnapshot = draft;
+    window.dispatchEvent(new Event(REVIEW_DRAFT_STORAGE_EVENT));
     return true;
   } catch {
     return false;
