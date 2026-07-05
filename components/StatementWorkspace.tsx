@@ -122,6 +122,13 @@ type ExpenseChatResponse = {
   error?: string;
 };
 
+const CASH_FLOW_GRAPH_TYPES = [
+  { value: "flow", label: "Flow" },
+  { value: "pie", label: "Pie" }
+] as const;
+
+type CashFlowGraphType = (typeof CASH_FLOW_GRAPH_TYPES)[number]["value"];
+
 const currencyNames = new Intl.DisplayNames(["en"], { type: "currency" });
 const CATEGORIZATION_NOTES_STORAGE_KEY =
   "statement-ledger.categorization-notes";
@@ -209,6 +216,8 @@ export function StatementWorkspace() {
   const [dataSourceId, setDataSourceId] = useState("");
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [graphZoom, setGraphZoom] = useState(1);
+  const [cashFlowGraphType, setCashFlowGraphType] =
+    useState<CashFlowGraphType>("flow");
   const [busy, setBusy] = useState<"idle" | "extracting" | "saving">("idle");
   const [categoryBusy, setCategoryBusy] = useState<
     "idle" | "loading" | "importing" | "updating"
@@ -1723,42 +1732,68 @@ export function StatementWorkspace() {
 
             <div className="flow-visual" aria-label="Cash flow visualization">
               <div className="flow-visual-toolbar">
-                <button
-                  className="mini-icon-button"
-                  type="button"
-                  title="Zoom out"
-                  aria-label="Zoom out graph"
-                  disabled={graphZoom <= MIN_GRAPH_ZOOM}
-                  onClick={() => updateGraphZoom("out")}
-                >
-                  <ZoomOut size={14} {...hydrationSafeIconProps} />
-                </button>
-                <button
-                  className="graph-zoom-reset"
-                  type="button"
-                  title="Reset graph zoom"
-                  aria-label="Reset graph zoom"
-                  disabled={graphZoom === 1}
-                  onClick={resetGraphZoom}
-                >
-                  {Math.round(graphZoom * 100)}%
-                </button>
-                <button
-                  className="mini-icon-button"
-                  type="button"
-                  title="Zoom in"
-                  aria-label="Zoom in graph"
-                  disabled={graphZoom >= MAX_GRAPH_ZOOM}
-                  onClick={() => updateGraphZoom("in")}
-                >
-                  <ZoomIn size={14} {...hydrationSafeIconProps} />
-                </button>
+                <div className="graph-type-control" aria-label="Graph type">
+                  {CASH_FLOW_GRAPH_TYPES.map((graphType) => (
+                    <button
+                      className={
+                        cashFlowGraphType === graphType.value ? "active" : ""
+                      }
+                      key={graphType.value}
+                      type="button"
+                      aria-pressed={cashFlowGraphType === graphType.value}
+                      onClick={() => setCashFlowGraphType(graphType.value)}
+                    >
+                      {graphType.label}
+                    </button>
+                  ))}
+                </div>
+                {cashFlowGraphType === "flow" ? (
+                  <div
+                    className="graph-zoom-controls"
+                    aria-label="Graph zoom controls"
+                  >
+                    <button
+                      className="mini-icon-button"
+                      type="button"
+                      title="Zoom out"
+                      aria-label="Zoom out graph"
+                      disabled={graphZoom <= MIN_GRAPH_ZOOM}
+                      onClick={() => updateGraphZoom("out")}
+                    >
+                      <ZoomOut size={14} {...hydrationSafeIconProps} />
+                    </button>
+                    <button
+                      className="graph-zoom-reset"
+                      type="button"
+                      title="Reset graph zoom"
+                      aria-label="Reset graph zoom"
+                      disabled={graphZoom === 1}
+                      onClick={resetGraphZoom}
+                    >
+                      {Math.round(graphZoom * 100)}%
+                    </button>
+                    <button
+                      className="mini-icon-button"
+                      type="button"
+                      title="Zoom in"
+                      aria-label="Zoom in graph"
+                      disabled={graphZoom >= MAX_GRAPH_ZOOM}
+                      onClick={() => updateGraphZoom("in")}
+                    >
+                      <ZoomIn size={14} {...hydrationSafeIconProps} />
+                    </button>
+                  </div>
+                ) : null}
               </div>
-              <CashFlowSankey
-                summary={cashFlowSummary}
-                currency={currency}
-                zoom={graphZoom}
-              />
+              {cashFlowGraphType === "flow" ? (
+                <CashFlowSankey
+                  summary={cashFlowSummary}
+                  currency={currency}
+                  zoom={graphZoom}
+                />
+              ) : (
+                <CashFlowPie summary={cashFlowSummary} currency={currency} />
+              )}
             </div>
           </div>
         </section>
@@ -2083,6 +2118,16 @@ type SankeySegment<T> = T & {
   yc: number;
 };
 
+type PieSlice = {
+  id: string;
+  label: string;
+  amount: number;
+  percent: number;
+  color: string;
+  startAngle: number;
+  endAngle: number;
+};
+
 function CashFlowSankey({
   summary,
   currency,
@@ -2361,6 +2406,128 @@ function CashFlowSankey({
           );
         })}
       </g>
+    </svg>
+  );
+}
+
+function CashFlowPie({
+  summary,
+  currency
+}: {
+  summary: CashFlowSummary;
+  currency: string;
+}) {
+  const width = 760;
+  const legendX = 398;
+  const legendTop = 78;
+  const legendRowHeight = 46;
+  const allocations = summary.allocations.filter(
+    (allocation) => allocation.amount > 0
+  );
+  const allocationTotal = allocations.reduce(
+    (sum, allocation) => sum + allocation.amount,
+    0
+  );
+  const height = Math.max(
+    420,
+    legendTop + 46 + Math.max(allocations.length, 1) * legendRowHeight
+  );
+  const centerX = 210;
+  const centerY = height / 2;
+  const radius = 146;
+  const slices = layoutPieSlices(allocations);
+
+  return (
+    <svg
+      className="pie-chart"
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label="Pie graph of savings, manual outputs, and statement categories"
+    >
+      <rect className="pie-stage" width={width} height={height} rx="8" />
+      <text className="pie-title" x="24" y="32">
+        Allocation share
+      </text>
+
+      {slices.length === 0 ? (
+        <text
+          className="pie-empty"
+          x={centerX}
+          y={centerY}
+          textAnchor="middle"
+        >
+          Add outputs or statement rows
+        </text>
+      ) : (
+        <>
+          <g className="pie-slices">
+            {slices.length === 1 ? (
+              <circle
+                className="pie-slice"
+                cx={centerX}
+                cy={centerY}
+                r={radius}
+                fill={slices[0].color}
+              >
+                <title>
+                  {slices[0].label}: {formatCurrency(slices[0].amount, currency)}
+                </title>
+              </circle>
+            ) : (
+              slices.map((slice) => (
+                <path
+                  className="pie-slice"
+                  d={pieSlicePath(
+                    centerX,
+                    centerY,
+                    radius,
+                    slice.startAngle,
+                    slice.endAngle
+                  )}
+                  fill={slice.color}
+                  key={slice.id}
+                >
+                  <title>
+                    {slice.label}: {formatCurrency(slice.amount, currency)}
+                  </title>
+                </path>
+              ))
+            )}
+          </g>
+
+          <g className="pie-legend" transform={`translate(${legendX} 0)`}>
+            <text className="pie-legend-heading" x="0" y="32">
+              {formatCurrency(allocationTotal, currency)} total
+            </text>
+            {slices.map((slice, index) => (
+              <g
+                className="pie-legend-row"
+                key={slice.id}
+                transform={`translate(0 ${
+                  legendTop + index * legendRowHeight
+                })`}
+              >
+                <rect
+                  className="pie-legend-swatch"
+                  x="0"
+                  y="-13"
+                  width="14"
+                  height="14"
+                  rx="4"
+                  fill={slice.color}
+                />
+                <text className="pie-legend-label" x="24" y="-2">
+                  {truncateSvgText(slice.label, 30)}
+                </text>
+                <text className="pie-legend-value" x="24" y="19">
+                  {formatCurrency(slice.amount, currency)} /{" "}
+                  {formatPercent(slice.percent)}
+                </text>
+              </g>
+            ))}
+          </g>
+        </>
+      )}
     </svg>
   );
 }
@@ -2967,6 +3134,73 @@ function sankeyLabelLeaderPath(
     `M ${x0} ${y0}`,
     `C ${x0 + curve} ${y0}, ${x1 - curve} ${y1}, ${x1} ${y1}`
   ].join(" ");
+}
+
+function layoutPieSlices(
+  items: ReadonlyArray<{
+    id: string;
+    label: string;
+    amount: number;
+    source: string;
+  }>
+): PieSlice[] {
+  const total = items.reduce((sum, item) => sum + item.amount, 0);
+
+  if (total <= 0) {
+    return [];
+  }
+
+  let cursor = -90;
+
+  return items.map((item, index) => {
+    const angle = (item.amount / total) * 360;
+    const startAngle = cursor;
+    const endAngle = cursor + angle;
+    cursor = endAngle;
+
+    return {
+      id: item.id,
+      label: item.label,
+      amount: item.amount,
+      percent: (item.amount / total) * 100,
+      color: allocationColor(item.source, index),
+      startAngle,
+      endAngle
+    };
+  });
+}
+
+function pieSlicePath(
+  centerX: number,
+  centerY: number,
+  radius: number,
+  startAngle: number,
+  endAngle: number
+) {
+  const start = piePoint(centerX, centerY, radius, startAngle);
+  const end = piePoint(centerX, centerY, radius, endAngle);
+  const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+
+  return [
+    `M ${centerX} ${centerY}`,
+    `L ${start.x} ${start.y}`,
+    `A ${radius} ${radius} 0 ${largeArc} 1 ${end.x} ${end.y}`,
+    "Z"
+  ].join(" ");
+}
+
+function piePoint(
+  centerX: number,
+  centerY: number,
+  radius: number,
+  angle: number
+) {
+  const radians = (angle * Math.PI) / 180;
+
+  return {
+    x: centerX + radius * Math.cos(radians),
+    y: centerY + radius * Math.sin(radians)
+  };
 }
 
 function clamp(value: number, min: number, max: number) {

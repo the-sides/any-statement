@@ -865,10 +865,52 @@ button:focus-visible,
   top: 0;
   z-index: 2;
   display: flex;
-  justify-content: flex-end;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   padding: 8px;
   background: linear-gradient(180deg, #ffffff 0%, rgba(255, 255, 255, 0.76) 100%);
+}
+
+.graph-type-control,
+.graph-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.graph-type-control {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 2px;
+}
+
+.graph-type-control button {
+  min-width: 52px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.graph-type-control button:hover:not(.active) {
+  background: #eef2e9;
+  color: var(--ink);
+}
+
+.graph-type-control button.active {
+  background: var(--ink);
+  color: #fffefa;
+}
+
+.graph-zoom-controls {
+  margin-left: auto;
 }
 
 .graph-zoom-reset {
@@ -895,11 +937,20 @@ button:focus-visible,
   height: auto;
 }
 
+.pie-chart {
+  display: block;
+  width: 100%;
+  min-width: 620px;
+  height: auto;
+}
+
 .sankey-stage {
   fill: #fffefa;
 }
 
-.sankey-title {
+.sankey-title,
+.pie-title,
+.pie-legend-heading {
   fill: var(--muted);
   font-size: 15px;
   font-weight: 900;
@@ -907,9 +958,48 @@ button:focus-visible,
   text-transform: uppercase;
 }
 
-.sankey-empty {
+.sankey-empty,
+.pie-empty {
   fill: var(--muted);
   font-size: 18px;
+  font-weight: 800;
+}
+
+.pie-stage {
+  fill: #fffefa;
+}
+
+.pie-slice {
+  stroke: #fffefa;
+  stroke-width: 2.5;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+  transform-origin: center;
+}
+
+.pie-slice:hover {
+  opacity: 0.86;
+}
+
+.pie-legend-row {
+  color: var(--ink);
+}
+
+.pie-legend-swatch {
+  stroke: rgba(255, 255, 255, 0.82);
+  stroke-width: 1.5;
+}
+
+.pie-legend-label {
+  fill: var(--ink);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.pie-legend-value {
+  fill: var(--muted);
+  font-size: 15px;
   font-weight: 800;
 }
 
