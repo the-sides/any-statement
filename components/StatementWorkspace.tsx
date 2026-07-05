@@ -8,6 +8,7 @@ import {
   FileText,
   Layers,
   ListChecks,
+  ListFilter,
   LoaderCircle,
   MessageCircle,
   NotebookPen,
@@ -201,6 +202,7 @@ const hydrationSafeIconProps = {
 export function StatementWorkspace() {
   const [file, setFile] = useState<File | null>(null);
   const [dataSourceId, setDataSourceId] = useState("");
+  const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [busy, setBusy] = useState<"idle" | "extracting" | "saving">("idle");
   const [categoryBusy, setCategoryBusy] = useState<
     "idle" | "loading" | "importing" | "updating"
@@ -263,6 +265,21 @@ export function StatementWorkspace() {
     () => items.filter((item) => selectedIds.has(item.id)),
     [items, selectedIds]
   );
+  const categoryFilterSet = useMemo(
+    () => new Set(categoryFilters),
+    [categoryFilters]
+  );
+  const visibleItems = useMemo(
+    () =>
+      categoryFilterSet.size === 0
+        ? items
+        : items.filter((item) => categoryFilterSet.has(item.category)),
+    [categoryFilterSet, items]
+  );
+  const visibleSelectedItems = useMemo(
+    () => visibleItems.filter((item) => selectedIds.has(item.id)),
+    [selectedIds, visibleItems]
+  );
   const statementSummaries = useMemo(
     () =>
       statements.map((statement) => {
@@ -295,7 +312,9 @@ export function StatementWorkspace() {
   const totalAmount = selectedItems.reduce((sum, item) => sum + item.amount, 0);
   const currency =
     activeStatementSummary.currency || items[0]?.currency || "USD";
-  const allSelected = items.length > 0 && selectedIds.size === items.length;
+  const allVisibleSelected =
+    visibleItems.length > 0 &&
+    visibleItems.every((item) => selectedIds.has(item.id));
   const notionCategoryCount = categories.filter(
     (category) => category.source === "notion"
   ).length;
@@ -319,6 +338,10 @@ export function StatementWorkspace() {
   const bulkCategoryOptions = useMemo(
     () => enabledCategoryOptions(activeCategories),
     [activeCategories]
+  );
+  const categoryFilterOptions = useMemo(
+    () => categoryFilterOptionsForItems(items, activeCategories),
+    [activeCategories, items]
   );
   const controlsDisabled = busy !== "idle" || categoryBusy !== "idle";
 
@@ -734,21 +757,31 @@ export function StatementWorkspace() {
   }
 
   function recategorizeSelected(category: ExpenseCategory) {
-    const changedItems = selectedItems.filter(
+    const targetSelectedItems = visibleSelectedItems;
+    const changedItems = targetSelectedItems.filter(
       (item) => item.category !== category
     );
     const changedItemIds = new Set(changedItems.map((item) => item.id));
     const changedCount = changedItems.length;
 
-    if (selectedItems.length === 0) {
-      setNotice({ tone: "error", message: "Select at least one row." });
+    if (targetSelectedItems.length === 0) {
+      setNotice({
+        tone: "error",
+        message:
+          categoryFilters.length > 0
+            ? "Select at least one visible row."
+            : "Select at least one row."
+      });
       return;
     }
 
     if (changedCount === 0) {
       setNotice({
         tone: "neutral",
-        message: `Selected rows already use ${category}.`
+        message:
+          categoryFilters.length > 0
+            ? `Visible selected rows already use ${category}.`
+            : `Selected rows already use ${category}.`
       });
       return;
     }
@@ -874,6 +907,26 @@ export function StatementWorkspace() {
     });
   }
 
+  function addCategoryFilter(category: string) {
+    if (!category) {
+      return;
+    }
+
+    setCategoryFilters((current) =>
+      current.includes(category) ? current : [...current, category]
+    );
+  }
+
+  function removeCategoryFilter(category: string) {
+    setCategoryFilters((current) =>
+      current.filter((currentCategory) => currentCategory !== category)
+    );
+  }
+
+  function clearCategoryFilters() {
+    setCategoryFilters([]);
+  }
+
   function toggleItem(id: string) {
     const next = new Set(selectedIds);
     if (next.has(id)) {
@@ -886,8 +939,21 @@ export function StatementWorkspace() {
   }
 
   function toggleAll() {
+    if (visibleItems.length === 0) {
+      return;
+    }
+
+    const visibleItemIds = new Set(visibleItems.map((item) => item.id));
+    const nextSelectedIds = new Set(selectedIds);
+
+    if (allVisibleSelected) {
+      visibleItemIds.forEach((id) => nextSelectedIds.delete(id));
+    } else {
+      visibleItemIds.forEach((id) => nextSelectedIds.add(id));
+    }
+
     writeReviewState({
-      selectedIds: allSelected ? [] : items.map((item) => item.id)
+      selectedIds: nextSelectedIds
     });
   }
 
@@ -1449,7 +1515,14 @@ export function StatementWorkspace() {
           </div>
 
           <div className="stats-strip">
-            <Stat label="Rows" value={String(items.length)} />
+            <Stat
+              label="Rows"
+              value={
+                categoryFilters.length > 0
+                  ? `${visibleItems.length}/${items.length}`
+                  : String(items.length)
+              }
+            />
             <Stat label="Statements" value={String(statements.length)} />
             <Stat label="Selected" value={String(selectedItems.length)} />
             <Stat label="Amount" value={formatCurrency(totalAmount, currency)} />
@@ -1721,7 +1794,12 @@ export function StatementWorkspace() {
           <button
             className="icon-button"
             type="button"
-            title={allSelected ? "Clear selection" : "Select all"}
+            title={
+              allVisibleSelected
+                ? "Clear visible selection"
+                : "Select visible rows"
+            }
+            disabled={visibleItems.length === 0}
             onClick={toggleAll}
           >
             <Check size={18} {...hydrationSafeIconProps} />
@@ -1756,8 +1834,8 @@ export function StatementWorkspace() {
             <Tags size={16} {...hydrationSafeIconProps} />
             <select
               value=""
-              aria-label="Category for selected rows"
-              disabled={selectedItems.length === 0 || controlsDisabled}
+              aria-label="Category for visible selected rows"
+              disabled={visibleSelectedItems.length === 0 || controlsDisabled}
               onChange={(event) => {
                 const category = event.target.value as ExpenseCategory;
 
@@ -1777,6 +1855,26 @@ export function StatementWorkspace() {
               ))}
             </select>
           </label>
+          <label className="category-filter-control">
+            <ListFilter size={16} {...hydrationSafeIconProps} />
+            <select
+              value=""
+              aria-label="Filter rows by category"
+              disabled={items.length === 0}
+              onChange={(event) => addCategoryFilter(event.target.value)}
+            >
+              <option value="">Filter category</option>
+              {categoryFilterOptions.map((category) => (
+                <option
+                  key={category.name}
+                  value={category.name}
+                  disabled={categoryFilterSet.has(category.name)}
+                >
+                  {category.name} ({category.count})
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="statement-scope-control">
             <Layers size={16} {...hydrationSafeIconProps} />
             <select
@@ -1792,6 +1890,30 @@ export function StatementWorkspace() {
               ))}
             </select>
           </label>
+          {categoryFilters.length > 0 ? (
+            <div className="category-filter-chips" aria-label="Active filters">
+              {categoryFilters.map((category) => (
+                <button
+                  className="category-filter-chip"
+                  type="button"
+                  key={category}
+                  title={`Remove ${category} filter`}
+                  onClick={() => removeCategoryFilter(category)}
+                >
+                  <span>{category}</span>
+                  <X size={13} {...hydrationSafeIconProps} />
+                </button>
+              ))}
+              <button
+                className="filter-clear-button"
+                type="button"
+                title="Clear category filters"
+                onClick={clearCategoryFilters}
+              >
+                Clear
+              </button>
+            </div>
+          ) : null}
           <span>{currencyNames.of(currency) || currency}</span>
         </div>
 
@@ -1824,7 +1946,16 @@ export function StatementWorkspace() {
                   </td>
                 </tr>
               ) : null}
-              {items.map((item) => (
+              {items.length > 0 && visibleItems.length === 0 ? (
+                <tr>
+                  <td colSpan={12}>
+                    <div className="empty-state">
+                      No rows match the active category filter.
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+              {visibleItems.map((item) => (
                 <tr key={item.id}>
                   <td>
                     <input
@@ -2682,6 +2813,43 @@ function enabledCategoryOptions(
       source: "app" as const
     }
   ];
+}
+
+function categoryFilterOptionsForItems(
+  items: readonly ExpenseItem[],
+  categories: readonly ExpenseCategoryDefinition[]
+) {
+  const countsByCategory = new Map<string, number>();
+
+  for (const item of items) {
+    const category = item.category.trim() || FALLBACK_CATEGORY_NAME;
+    countsByCategory.set(category, (countsByCategory.get(category) || 0) + 1);
+  }
+
+  const categoryOrder = new Map(
+    categories.map((category, index) => [category.name.toLowerCase(), index])
+  );
+
+  return [...countsByCategory.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((left, right) => {
+      const leftOrder = categoryOrder.get(left.name.toLowerCase());
+      const rightOrder = categoryOrder.get(right.name.toLowerCase());
+
+      if (leftOrder !== undefined && rightOrder !== undefined) {
+        return leftOrder - rightOrder;
+      }
+
+      if (leftOrder !== undefined) {
+        return -1;
+      }
+
+      if (rightOrder !== undefined) {
+        return 1;
+      }
+
+      return left.name.localeCompare(right.name);
+    });
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
