@@ -4,7 +4,8 @@ import {
   saveExtractionErrorArtifact,
   saveFallbackArtifact,
   saveFinalExtractionArtifact,
-  saveUploadedPdf
+  saveUploadedStatement,
+  type UploadArtifact
 } from "@/lib/artifacts";
 import { loadCategoryCatalog } from "@/lib/categoryStore";
 import {
@@ -13,6 +14,7 @@ import {
 } from "@/lib/categories";
 import { extractFallbackExpensesFromPdf } from "@/lib/fallbackExtractor";
 import {
+  extractStatementFromCsv,
   extractStatementFromPdf,
   IntegrationError
 } from "@/lib/openrouter";
@@ -23,11 +25,12 @@ export const maxDuration = 90;
 
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
+type StatementUploadType = UploadArtifact["mediaType"];
 
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
-    const file = formData.get("statementPdf");
+    const file = formData.get("statementFile") ?? formData.get("statementPdf");
     const categorizationNotes = readOptionalFormString(
       formData.get("categorizationNotes"),
       MAX_CATEGORIZATION_NOTES_LENGTH
@@ -38,26 +41,28 @@ export async function POST(request: Request) {
 
     if (!(file instanceof File)) {
       return Response.json(
-        { error: "Upload a statement PDF before extracting." },
+        { error: "Upload a statement PDF or CSV before extracting." },
         { status: 400 }
       );
     }
 
-    if (!isPdf(file)) {
+    const uploadType = getStatementUploadType(file);
+
+    if (!uploadType) {
       return Response.json(
-        { error: "Only PDF statements are supported." },
+        { error: "Only PDF and CSV statements are supported." },
         { status: 400 }
       );
     }
 
     if (file.size > MAX_FILE_SIZE) {
       return Response.json(
-        { error: "PDF is too large. The current limit is 12 MB." },
+        { error: "Statement file is too large. The current limit is 12 MB." },
         { status: 413 }
       );
     }
 
-    const artifact = await saveUploadedPdf(file);
+    const artifact = await saveUploadedStatement(file, uploadType);
 
     try {
       const categoryCatalog = await loadCategoryCatalog();
@@ -65,16 +70,23 @@ export async function POST(request: Request) {
         categoryCatalog.categories,
         includeAppCategories
       );
-      const pdfText = await extractPdfText(artifact.pdfPath);
-      const extraction = await extractStatementFromPdf(file, {
-        bytes: artifact.bytes,
-        pdfText,
-        categories: extractionCategories,
-        categorizationNotes,
-        onDebug: (payload) => saveExtractionArtifact(artifact, payload)
-      });
-      const finalExtraction = await applyFallbackIfNeeded(
-        artifact.pdfPath,
+
+      const extraction =
+        uploadType === "pdf"
+          ? await extractPdfUpload(
+              file,
+              artifact,
+              extractionCategories,
+              categorizationNotes
+            )
+          : await extractCsvUpload(
+              file,
+              artifact,
+              extractionCategories,
+              categorizationNotes
+            );
+      const finalExtraction = await applyPdfFallbackIfNeeded(
+        artifact,
         extraction,
         extractionCategories.map((category) => category.name),
         categorizationNotes
@@ -112,11 +124,40 @@ export async function POST(request: Request) {
   }
 }
 
-function isPdf(file: File) {
-  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+function getStatementUploadType(file: File): StatementUploadType | null {
+  if (isPdf(file)) {
+    return "pdf";
+  }
+
+  if (isCsv(file)) {
+    return "csv";
+  }
+
+  return null;
 }
 
-function readOptionalFormString(value: FormDataEntryValue | null, maxLength: number) {
+function isPdf(file: File) {
+  return (
+    file.type === "application/pdf" ||
+    file.name.toLowerCase().endsWith(".pdf")
+  );
+}
+
+function isCsv(file: File) {
+  const type = file.type.toLowerCase();
+
+  return (
+    type === "text/csv" ||
+    type === "application/csv" ||
+    type === "application/vnd.ms-excel" ||
+    file.name.toLowerCase().endsWith(".csv")
+  );
+}
+
+function readOptionalFormString(
+  value: FormDataEntryValue | null,
+  maxLength: number
+) {
   if (typeof value !== "string") {
     return "";
   }
@@ -158,18 +199,53 @@ function categoriesForExtraction(
   );
 }
 
-async function applyFallbackIfNeeded(
-  pdfPath: string,
+async function extractPdfUpload(
+  file: File,
+  artifact: UploadArtifact,
+  extractionCategories: readonly ExpenseCategoryDefinition[],
+  categorizationNotes: string
+) {
+  const pdfText = await extractPdfText(artifact.filePath);
+
+  return extractStatementFromPdf(file, {
+    bytes: artifact.bytes,
+    pdfText,
+    categories: extractionCategories,
+    categorizationNotes,
+    onDebug: (payload) => saveExtractionArtifact(artifact, payload)
+  });
+}
+
+async function extractCsvUpload(
+  file: File,
+  artifact: UploadArtifact,
+  extractionCategories: readonly ExpenseCategoryDefinition[],
+  categorizationNotes: string
+) {
+  return extractStatementFromCsv(file, {
+    bytes: artifact.bytes,
+    categories: extractionCategories,
+    categorizationNotes,
+    onDebug: (payload) => saveExtractionArtifact(artifact, payload)
+  });
+}
+
+async function applyPdfFallbackIfNeeded(
+  artifact: UploadArtifact,
   extraction: Awaited<ReturnType<typeof extractStatementFromPdf>>,
   categoryNames: readonly string[],
   categorizationNotes: string
 ) {
+  if (artifact.mediaType !== "pdf") {
+    return extraction;
+  }
+
   if (extraction.expenses.length > 0) {
     return extraction;
   }
 
   const fallback = await extractFallbackExpensesFromPdf(
-    pdfPath,
+    artifact.filePath,
     extraction.statement,
     categoryNames,
     { categorizationNotes }

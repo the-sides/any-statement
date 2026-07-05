@@ -7,31 +7,40 @@ const DEFAULT_ARTIFACT_ROOT = "/tmp/statement-ledger";
 export type UploadArtifact = {
   id: string;
   dir: string;
-  pdfPath: string;
+  filePath: string;
+  pdfPath?: string;
   fileName: string;
+  mediaType: "pdf" | "csv";
   bytes: Buffer;
 };
 
 export type PublicUploadArtifact = {
   id: string;
   dir: string;
-  pdfPath: string;
+  filePath: string;
+  pdfPath?: string;
   fileName: string;
+  mediaType: "pdf" | "csv";
 };
 
-export async function saveUploadedPdf(file: File): Promise<UploadArtifact> {
+export async function saveUploadedStatement(
+  file: File,
+  mediaType: UploadArtifact["mediaType"]
+): Promise<UploadArtifact> {
   const id = `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
-  const fileName = safeFileName(file.name || "statement.pdf");
+  const fileName = safeFileName(file.name || `statement.${mediaType}`, mediaType);
   const dir = path.join(artifactRoot(), "uploads", id);
-  const pdfPath = path.join(dir, fileName);
+  const filePath = path.join(dir, fileName);
   const bytes = Buffer.from(await file.arrayBuffer());
 
   await mkdir(dir, { recursive: true });
-  await writeFile(pdfPath, bytes);
+  await writeFile(filePath, bytes);
   await writeArtifactJson(dir, "upload.json", {
     id,
     fileName,
-    pdfPath,
+    filePath,
+    pdfPath: mediaType === "pdf" ? filePath : undefined,
+    mediaType,
     size: file.size,
     type: file.type,
     savedAt: new Date().toISOString()
@@ -40,8 +49,10 @@ export async function saveUploadedPdf(file: File): Promise<UploadArtifact> {
   return {
     id,
     dir,
-    pdfPath,
+    filePath,
+    pdfPath: mediaType === "pdf" ? filePath : undefined,
     fileName,
+    mediaType,
     bytes
   };
 }
@@ -102,8 +113,10 @@ export function publicUploadArtifact(
   return {
     id: artifact.id,
     dir: artifact.dir,
+    filePath: artifact.filePath,
     pdfPath: artifact.pdfPath,
-    fileName: artifact.fileName
+    fileName: artifact.fileName,
+    mediaType: artifact.mediaType
   };
 }
 
@@ -123,9 +136,12 @@ async function writeArtifactJson(
   );
 }
 
-function safeFileName(fileName: string) {
+function safeFileName(
+  fileName: string,
+  fallbackExtension: UploadArtifact["mediaType"]
+) {
   const sanitized = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return sanitized.toLowerCase().endsWith(".pdf")
+  return /\.[a-z0-9]+$/i.test(sanitized)
     ? sanitized
-    : `${sanitized}.pdf`;
+    : `${sanitized}.${fallbackExtension}`;
 }

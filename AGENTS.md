@@ -3,10 +3,10 @@
 This project lives at:
 
 ```text
-/home/jake/repos/statement-to-notion
+/home/jake/repos/any-statement
 ```
 
-It is a Bun + Next.js app named Statement Ledger. The user is testing it from a phone against localhost and expects uploaded PDFs to be saved locally so agents can inspect and replay the exact statements.
+It is a Bun + Next.js app named Statement Ledger. The user is testing it from a phone against localhost and expects uploaded statement files to be saved locally so agents can inspect and replay the exact statements.
 
 ## Rules For Future Agents
 
@@ -23,12 +23,13 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 ## Current Behavior
 
 - `/` renders the upload/review/save workspace.
-- `/api/extract` accepts `statementPdf` as multipart form data.
-- `/api/extract` saves the original PDF and extraction artifacts to `/tmp/statement-ledger/uploads/<upload-id>/`.
+- `/api/extract` accepts `statementFile` as multipart form data, with legacy `statementPdf` replays still accepted.
+- `/api/extract` saves the original PDF or CSV and extraction artifacts to `/tmp/statement-ledger/uploads/<upload-id>/`.
 - OpenRouter is the primary extraction path.
 - Categories are app-managed, persisted locally, can be imported from `NOTION_CATEGORY_DATA_SOURCE_ID`, and disabled categories remain in the catalog.
 - Reviewer categorization notes are saved in browser localStorage, submitted with `/api/extract`, and included in OpenRouter prompt/debug artifacts.
-- If OpenRouter returns statement metadata but zero rows, `lib/fallbackExtractor.ts` uses `pdftotext -layout` to parse Amex-style `New Charges Details` tables.
+- CSV uploads are extracted through OpenRouter from uploaded CSV text.
+- If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` uses `pdftotext -layout` to parse Amex-style `New Charges Details` tables.
 - `/api/notion/save` saves selected reviewed rows to Notion.
 - `lib/notion.ts` reconciles missing optional Notion properties before creating pages and leaves an existing `Category` relation untouched.
 
@@ -68,11 +69,11 @@ bun run lint
 BUN_INSTALL=/tmp/bun-install BUN_TMPDIR=/tmp/bun-tmp bun run build
 ```
 
-Replay a saved PDF through the live extraction route:
+Replay a saved statement file through the live extraction route:
 
 ```bash
 curl -s -o /tmp/statement-ledger-route-replay.json \
-  -F statementPdf=@/tmp/statement-ledger/uploads/<upload-id>/<file>.pdf \
+  -F statementFile=@/tmp/statement-ledger/uploads/<upload-id>/<file>.pdf \
   http://127.0.0.1:3000/api/extract
 ```
 

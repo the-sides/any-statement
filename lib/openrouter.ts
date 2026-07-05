@@ -12,6 +12,7 @@ const DEFAULT_MODEL = "anthropic/claude-sonnet-4.6";
 const DEFAULT_PDF_ENGINE = "cloudflare-ai";
 const MIN_LOCAL_PDF_TEXT_CHARS = 500;
 const MAX_LOCAL_PDF_TEXT_CHARS = 120_000;
+const MAX_CSV_TEXT_CHARS = 120_000;
 
 const extractionPromptBase = `Extract business expenses from the provided credit card or bank statement.
 
@@ -21,7 +22,7 @@ For credit card statements, return every purchase, fee, interest charge, cash ad
 
 For bank statements, return withdrawals, debit-card purchases, checks, outgoing ACH, outgoing wires, fees, interest charges, and other outflows as expense rows. Exclude deposits, incoming transfers, credits, rewards, and balance summary lines.
 
-If a transaction looks like an outflow but you are not fully certain, include it with a lower confidence score instead of omitting it. The expenses array should be empty only when the PDF contains no transaction detail rows.
+If a transaction looks like an outflow but you are not fully certain, include it with a lower confidence score instead of omitting it. The expenses array should be empty only when the statement file contains no transaction detail rows.
 
 Use positive numbers for expense amounts. Preserve transaction dates as ISO-like YYYY-MM-DD strings when possible. If a field is not visible, use an empty string or null according to the schema. Categorize each expense using only the allowed category enum. Use confidence scores to show uncertainty.`;
 
@@ -45,21 +46,10 @@ export async function extractStatementFromPdf(
     onDebug?: (payload: ExtractionDebugPayload) => Promise<void>;
   } = {}
 ): Promise<StatementExtraction> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-
-  if (!apiKey) {
-    throw new IntegrationError(
-      "OPENROUTER_API_KEY is missing. Add it to .env.local before extracting a statement.",
-      503
-    );
-  }
-
-  const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
   const pdfEngine = process.env.OPENROUTER_PDF_ENGINE || DEFAULT_PDF_ENGINE;
   const categoryDefinitions = getEnabledCategoryDefinitions(
     options.categories || DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
   );
-  const categoryNames = categoryDefinitions.map((category) => category.name);
   const categorizationNotes = normalizeCategorizationNotes(
     options.categorizationNotes
   );
@@ -78,6 +68,101 @@ export async function extractStatementFromPdf(
         categoryDefinitions,
         categorizationNotes
       });
+
+  return extractStatementWithOpenRouter({
+    userContent,
+    plugins: useLocalPdfText
+      ? undefined
+      : [
+          {
+            id: "file-parser",
+            pdf: {
+              engine: pdfEngine
+            }
+          }
+        ],
+    maxTokens: useLocalPdfText ? 12000 : 8000,
+    categoryDefinitions,
+    categorizationNotes,
+    onDebug: options.onDebug,
+    debug: {
+      pdfEngine,
+      inputSource,
+      localPdfTextLength: pdfText.length,
+      fileName
+    }
+  });
+}
+
+export async function extractStatementFromCsv(
+  file: File,
+  options: {
+    bytes?: Buffer;
+    categories?: readonly ExpenseCategoryDefinitionInput[];
+    categorizationNotes?: string;
+    onDebug?: (payload: ExtractionDebugPayload) => Promise<void>;
+  } = {}
+): Promise<StatementExtraction> {
+  const categoryDefinitions = getEnabledCategoryDefinitions(
+    options.categories || DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
+  );
+  const categorizationNotes = normalizeCategorizationNotes(
+    options.categorizationNotes
+  );
+  const fileName = file.name || "statement.csv";
+  const csvText = normalizeCsvText(
+    options.bytes
+      ? options.bytes.toString("utf8")
+      : await file.text()
+  );
+
+  if (!csvText) {
+    throw new IntegrationError("CSV upload is empty.", 400);
+  }
+
+  return extractStatementWithOpenRouter({
+    userContent: buildCsvExtractionPrompt(
+      categoryDefinitions,
+      categorizationNotes,
+      {
+        fileName,
+        csvText
+      }
+    ),
+    maxTokens: 12000,
+    categoryDefinitions,
+    categorizationNotes,
+    onDebug: options.onDebug,
+    debug: {
+      inputSource: "csv-text",
+      localCsvTextLength: csvText.length,
+      fileName
+    }
+  });
+}
+
+async function extractStatementWithOpenRouter(options: {
+  userContent: OpenRouterUserContent;
+  plugins?: unknown[];
+  maxTokens: number;
+  categoryDefinitions: readonly ExpenseCategoryDefinitionInput[];
+  categorizationNotes: string;
+  onDebug?: (payload: ExtractionDebugPayload) => Promise<void>;
+  debug: ExtractionDebugContext;
+}) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+
+  if (!apiKey) {
+    throw new IntegrationError(
+      "OPENROUTER_API_KEY is missing. Add it to .env.local before extracting a statement.",
+      503
+    );
+  }
+
+  const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
+  const categoryNames = options.categoryDefinitions.map(
+    (category) => category.name
+  );
 
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
@@ -98,24 +183,13 @@ export async function extractStatementFromPdf(
         },
         {
           role: "user",
-          content: userContent
+          content: options.userContent
         }
       ],
-      ...(useLocalPdfText
-        ? {}
-        : {
-            plugins: [
-              {
-                id: "file-parser",
-                pdf: {
-                  engine: pdfEngine
-                }
-              }
-            ]
-          }),
+      ...(options.plugins ? { plugins: options.plugins } : {}),
       response_format: createExtractionResponseFormat(categoryNames),
       temperature: 0.1,
-      max_tokens: useLocalPdfText ? 12000 : 8000,
+      max_tokens: options.maxTokens,
       stream: false
     })
   });
@@ -126,12 +200,9 @@ export async function extractStatementFromPdf(
     await options.onDebug?.({
       ok: false,
       model,
-      pdfEngine,
-      inputSource,
-      localPdfTextLength: pdfText.length,
-      fileName,
+      ...options.debug,
       categoryNames,
-      categorizationNotes,
+      categorizationNotes: options.categorizationNotes,
       providerPayload: payload
     });
     throw new IntegrationError(
@@ -148,12 +219,9 @@ export async function extractStatementFromPdf(
   await options.onDebug?.({
     ok: true,
     model,
-    pdfEngine,
-    inputSource,
-    localPdfTextLength: pdfText.length,
-    fileName,
+    ...options.debug,
     categoryNames,
-    categorizationNotes,
+    categorizationNotes: options.categorizationNotes,
     providerPayload: payload,
     parsed,
     extraction
@@ -169,7 +237,7 @@ async function buildPdfExtractionContent(
     categoryDefinitions: readonly ExpenseCategoryDefinitionInput[];
     categorizationNotes: string;
   }
-) {
+): Promise<OpenRouterContentPart[]> {
   const pdfBytes = bytes || Buffer.from(await file.arrayBuffer());
   const fileData = `data:application/pdf;base64,${pdfBytes.toString("base64")}`;
 
@@ -240,6 +308,24 @@ ${options.pdfText}
 </statement_text>`;
 }
 
+function buildCsvExtractionPrompt(
+  categories: readonly ExpenseCategoryDefinitionInput[],
+  categorizationNotes: string,
+  options: { fileName: string; csvText: string }
+) {
+  return `${buildExtractionPrompt(categories, categorizationNotes)}
+
+The statement content below is CSV text from ${options.fileName}. Treat this CSV as the source of truth for transaction rows.
+
+CSV exports vary by institution. Use columns named like Date, Posted Date, Description, Merchant, Amount, Debit, Credit, Type, Category, Account, Card, Currency, or Balance when present. For credit-card CSVs, purchases and fees may appear as positive or negative values; return expenses as positive amounts. For bank CSVs, return outgoing debits, withdrawals, fees, checks, wires, ACH, and card purchases. Exclude payments, credits, deposits, refunds, rewards, and balance-only rows.
+
+If statement metadata is not explicit in the CSV, infer what you can from headers, file name, and account columns. Use empty strings or null values for metadata that is not present.
+
+<statement_csv>
+${options.csvText}
+</statement_csv>`;
+}
+
 function normalizeCategorizationNotes(value: unknown) {
   if (typeof value !== "string") {
     return "";
@@ -254,6 +340,17 @@ function normalizeLocalPdfText(value: unknown) {
   }
 
   return value.trim().slice(0, MAX_LOCAL_PDF_TEXT_CHARS);
+}
+
+function normalizeCsvText(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value
+    .replace(/^\uFEFF/, "")
+    .trim()
+    .slice(0, MAX_CSV_TEXT_CHARS);
 }
 
 function hasUsableLocalPdfText(value: string) {
@@ -313,12 +410,36 @@ type OpenRouterResponse = {
   }>;
 };
 
+type OpenRouterUserContent = string | OpenRouterContentPart[];
+
+type OpenRouterContentPart =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "file";
+      file: {
+        filename: string;
+        file_data: string;
+      };
+    };
+
+type ExtractionDebugContext = {
+  pdfEngine?: string;
+  inputSource: "local-pdftotext" | "openrouter-file-parser" | "csv-text";
+  localPdfTextLength?: number;
+  localCsvTextLength?: number;
+  fileName: string;
+};
+
 export type ExtractionDebugPayload = {
   ok: boolean;
   model: string;
-  pdfEngine: string;
-  inputSource: "local-pdftotext" | "openrouter-file-parser";
-  localPdfTextLength: number;
+  pdfEngine?: string;
+  inputSource: "local-pdftotext" | "openrouter-file-parser" | "csv-text";
+  localPdfTextLength?: number;
+  localCsvTextLength?: number;
   fileName: string;
   categoryNames: string[];
   categorizationNotes: string;

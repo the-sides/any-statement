@@ -1,10 +1,10 @@
 # Statement Ledger
 
-Statement Ledger is a local-first Bun + Next.js app for turning credit card and bank statement PDFs into editable expense rows, then saving approved rows into a Notion data source.
+Statement Ledger is a local-first Bun + Next.js app for turning credit card and bank statement PDFs or CSVs into editable expense rows, then saving approved rows into a Notion data source.
 
 The current flow is intentionally simple:
 
-1. Upload a PDF statement.
+1. Upload a PDF or CSV statement.
 2. Extract statement metadata and expense rows.
 3. Review and edit the rows in the table.
 4. Select approved rows.
@@ -14,17 +14,18 @@ The current flow is intentionally simple:
 
 - Working local app at `http://127.0.0.1:3000`.
 - OpenRouter is the primary extraction path.
-- Text-bearing PDF fallback is implemented for cases where OpenRouter returns metadata but no rows.
+- CSV uploads are extracted by OpenRouter from the uploaded CSV text.
+- Text-bearing PDF fallback is implemented for PDF cases where OpenRouter returns metadata but no rows.
 - Notion save is wired to a data source through `NOTION_DATA_SOURCE_ID`.
 - Categories are managed by the app, can be imported from a Notion category data source, and can be disabled without being deleted.
 - Reviewer categorization notes are saved in browser localStorage and sent to OpenRouter with each extraction.
-- Uploaded PDFs and extraction artifacts are persisted under `/tmp/statement-ledger/uploads/<upload-id>/`.
+- Uploaded statement files and extraction artifacts are persisted under `/tmp/statement-ledger/uploads/<upload-id>/`.
 
 ## Stack
 
 - Bun for package management and scripts.
 - Next.js App Router for the UI and server routes.
-- OpenRouter chat completions with PDF file input and JSON schema output.
+- OpenRouter chat completions with PDF file input or CSV text input and JSON schema output.
 - Notion REST API with `data_source_id` page creation.
 - `pdftotext` from Poppler as a local fallback when the LLM returns statement metadata but no transaction rows.
 
@@ -33,7 +34,7 @@ The current flow is intentionally simple:
 - `components/StatementWorkspace.tsx` - main upload, review, edit, and save UI.
 - `app/api/categories/route.ts` - category catalog read and enabled/disabled updates.
 - `app/api/categories/import/route.ts` - Notion category data source import route.
-- `app/api/extract/route.ts` - PDF upload/extraction route.
+- `app/api/extract/route.ts` - statement upload/extraction route.
 - `app/api/notion/save/route.ts` - selected-expense save route.
 - `lib/categoryStore.ts` - local category catalog persistence.
 - `lib/openrouter.ts` - OpenRouter request and JSON parsing.
@@ -115,11 +116,11 @@ Every upload creates a directory like:
 
 Files may include:
 
-- Original uploaded PDF.
+- Original uploaded statement file.
 - `upload.json` with upload metadata.
 - `extraction.json` with OpenRouter provider response and normalized extraction.
 - `extraction.json` also records reviewer categorization notes submitted with the upload.
-- `fallback.json` when the local text fallback was used.
+- `fallback.json` when the local PDF text fallback was used.
 - `final-extraction.json` with the payload returned to the UI.
 - `error.json` if extraction fails.
 
@@ -135,13 +136,15 @@ bun run lint
 BUN_INSTALL=/tmp/bun-install BUN_TMPDIR=/tmp/bun-tmp bun run build
 ```
 
-Useful replay command for a saved PDF:
+Useful replay command for a saved statement file:
 
 ```bash
 curl -s -o /tmp/statement-ledger-route-replay.json \
-  -F statementPdf=@/tmp/statement-ledger/uploads/<upload-id>/<file>.pdf \
+  -F statementFile=@/tmp/statement-ledger/uploads/<upload-id>/<file>.pdf \
   http://127.0.0.1:3000/api/extract
 ```
+
+Use the same `statementFile` field for `.csv` artifacts.
 
 Then summarize:
 

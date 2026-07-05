@@ -81,7 +81,9 @@ type ExtractionResponse = {
   artifact?: {
     dir: string;
     fileName?: string;
-    pdfPath: string;
+    filePath: string;
+    pdfPath?: string;
+    mediaType: "pdf" | "csv";
   };
 };
 
@@ -337,7 +339,10 @@ export function StatementWorkspace() {
 
   async function extractStatement() {
     if (!file) {
-      setNotice({ tone: "error", message: "Choose a PDF statement first." });
+      setNotice({
+        tone: "error",
+        message: "Choose a PDF or CSV statement first."
+      });
       return;
     }
 
@@ -347,7 +352,7 @@ export function StatementWorkspace() {
 
     try {
       const formData = new FormData();
-      formData.append("statementPdf", file);
+      formData.append("statementFile", file);
 
       const notes = categorizationNotes.trim();
       if (notes) {
@@ -384,7 +389,7 @@ export function StatementWorkspace() {
         message:
           rowCount > 0
             ? `Extracted ${rowCount} expenses.${artifactMessage}`
-            : `Metadata extracted, but OpenRouter returned no expense rows.${artifactMessage}`
+            : `AI extraction returned no expense rows.${artifactMessage}`
       });
     } catch (error) {
       setNotice({
@@ -943,21 +948,21 @@ export function StatementWorkspace() {
                 : sourceFileName ||
                   (statements.length > 1
                     ? `${statements.length} statements`
-                    : "Choose PDF")}
+                    : "Choose file")}
             </span>
             <small>
               {file
                 ? formatBytes(file.size)
                 : sourceFileName
                   ? "Restored draft"
-                  : "Credit card or bank"}
+                  : "PDF or CSV"}
             </small>
           </label>
           <input
             id="statement-upload"
             className="visually-hidden"
             type="file"
-            accept="application/pdf"
+            accept="application/pdf,text/csv,.pdf,.csv"
             onChange={(event) => setFile(event.target.files?.[0] || null)}
           />
 
@@ -1661,8 +1666,8 @@ export function StatementWorkspace() {
                 <tr>
                   <td colSpan={12}>
                     <div className="empty-state">
-                      No expense rows returned. Re-upload the PDF and inspect the
-                      saved artifact directory shown above.
+                      No expense rows returned. Re-upload the statement file and
+                      inspect the saved artifact directory shown above.
                     </div>
                   </td>
                 </tr>
