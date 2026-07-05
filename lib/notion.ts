@@ -1,10 +1,11 @@
 import {
-  PAYMENT_METHODS,
-  STATEMENT_SECTIONS,
-  STATEMENT_TYPES,
+  normalizeCategoryName,
   type ExpenseCategoryDefinitionInput
 } from "@/lib/categories";
-import { loadCategoryCatalog } from "@/lib/categoryStore";
+import {
+  loadCategoryCatalog,
+  type ExpenseCategoryCatalog
+} from "@/lib/categoryStore";
 import type {
   ExpenseItem,
   SaveExpensesPayload,
@@ -52,12 +53,16 @@ export async function saveExpensesToNotion(
   }
 
   const categoryCatalog = await loadCategoryCatalog();
-  const categoryNames = categoryCatalog.categories.map((category) => category.name);
   const resolvedDataSourceId = await resolveDataSourceId(apiKey, dataSourceId);
-  const schema = await ensureExpenseSchema(
+  const schema = await ensureExpenseSchema(apiKey, resolvedDataSourceId);
+  const categoryResolver = await createCategoryResolver(
     apiKey,
-    resolvedDataSourceId,
-    categoryNames
+    schema,
+    categoryCatalog
+  );
+  const categoryPageIds = await resolveExpenseCategoryPageIds(
+    categoryResolver,
+    payload.expenses
   );
   const statementById = new Map(
     (payload.statements || []).map((statement) => [statement.id, statement])
@@ -76,7 +81,13 @@ export async function saveExpensesToNotion(
         parent: {
           data_source_id: resolvedDataSourceId
         },
-        properties: buildProperties(expense, payload, schema, statementById)
+        properties: buildProperties(
+          expense,
+          payload,
+          schema,
+          statementById,
+          categoryPageIds.get(normalizeCategoryKey(expense.category))
+        )
       })
     });
 
@@ -138,12 +149,11 @@ export async function fetchCategoryDefinitionsFromNotion(dataSourceId?: string) 
 
 async function ensureExpenseSchema(
   apiKey: string,
-  dataSourceId: string,
-  categoryNames: readonly string[]
+  dataSourceId: string
 ) {
   const dataSource = await retrieveDataSource(apiKey, dataSourceId);
   let schema = dataSource.properties;
-  const patch = buildSchemaPatch(schema, categoryNames);
+  const patch = buildSchemaPatch(schema);
 
   if (Object.keys(patch).length === 0) {
     return schema;
@@ -275,10 +285,7 @@ async function queryDataSourcePages(apiKey: string, dataSourceId: string) {
   return pages;
 }
 
-function buildSchemaPatch(
-  schema: NotionPropertyMap,
-  categoryNames: readonly string[]
-) {
+function buildSchemaPatch(schema: NotionPropertyMap) {
   const patch: Record<string, unknown> = {};
 
   addMissingProperty(schema, patch, "Date", "date", { date: {} });
@@ -292,23 +299,8 @@ function buildSchemaPatch(
   addMissingProperty(schema, patch, "Subcategory", "rich_text", {
     rich_text: {}
   });
-  addMissingProperty(schema, patch, "Currency", "select", {
-    select: { options: selectOptions(["USD"]) }
-  });
-  addMissingProperty(schema, patch, "Payment Method", "select", {
-    select: { options: selectOptions(PAYMENT_METHODS) }
-  });
-  addMissingProperty(schema, patch, "Section", "select", {
-    select: { options: selectOptions(STATEMENT_SECTIONS) }
-  });
-  addMissingProperty(schema, patch, "Statement", "select", {
-    select: { options: selectOptions(STATEMENT_TYPES) }
-  });
   addMissingProperty(schema, patch, "Account", "rich_text", { rich_text: {} });
   addMissingProperty(schema, patch, "Institution", "rich_text", {
-    rich_text: {}
-  });
-  addMissingProperty(schema, patch, "Statement Period", "rich_text", {
     rich_text: {}
   });
   addMissingProperty(schema, patch, "Source File", "rich_text", {
@@ -318,17 +310,6 @@ function buildSchemaPatch(
     number: { format: "number" }
   });
   addMissingProperty(schema, patch, "Notes", "rich_text", { rich_text: {} });
-
-  const categoryProperty = schema.Category;
-  if (!categoryProperty) {
-    patch.Category = {
-      select: { options: selectOptions(categoryNames) }
-    };
-  } else if (categoryProperty.type !== "select") {
-    addMissingProperty(schema, patch, "Expense Category", "select", {
-      select: { options: selectOptions(categoryNames) }
-    });
-  }
 
   return patch;
 }
@@ -491,20 +472,191 @@ function addMissingProperty(
   }
 }
 
+async function createCategoryResolver(
+  apiKey: string,
+  expenseSchema: NotionPropertyMap,
+  categoryCatalog: ExpenseCategoryCatalog
+) {
+  const categoryProperty = expenseSchema.Category;
+
+  if (categoryProperty?.type !== "relation") {
+    throw new NotionSaveError(
+      "The Notion expense data source needs a Category relation property before rows can be saved.",
+      400
+    );
+  }
+
+  const categoryDataSourceId =
+    categoryProperty.relation?.data_source_id ||
+    categoryCatalog.sourceDataSourceId ||
+    process.env.NOTION_CATEGORY_DATA_SOURCE_ID;
+
+  if (!categoryDataSourceId) {
+    throw new NotionSaveError(
+      "NOTION_CATEGORY_DATA_SOURCE_ID is missing and the Category relation target could not be detected.",
+      400
+    );
+  }
+
+  const resolvedCategoryDataSourceId = await resolveDataSourceId(
+    apiKey,
+    categoryDataSourceId
+  );
+  const categoryDataSource = await retrieveDataSource(
+    apiKey,
+    resolvedCategoryDataSourceId
+  );
+  const titleProperty = findProperty(categoryDataSource.properties, "title");
+
+  if (!titleProperty) {
+    throw new NotionSaveError(
+      "The Notion category data source needs a title property before categories can be created.",
+      400
+    );
+  }
+
+  const pages = await queryDataSourcePages(apiKey, resolvedCategoryDataSourceId);
+  const pageIdsByName = new Map<string, string>();
+  const catalogSourceMatchesRelation =
+    !categoryCatalog.sourceDataSourceId ||
+    sameNotionId(categoryCatalog.sourceDataSourceId, categoryDataSourceId);
+
+  for (const page of pages) {
+    const name =
+      getTextProperty(page.properties, titleProperty) ||
+      getTextProperty(page.properties, findPropertyInPage(page.properties, "title"));
+    const key = normalizeCategoryKey(name);
+
+    if (key) {
+      pageIdsByName.set(key, page.id);
+    }
+  }
+
+  if (catalogSourceMatchesRelation) {
+    for (const category of categoryCatalog.categories) {
+      const key = normalizeCategoryKey(category.name);
+
+      if (key && category.sourceId && !pageIdsByName.has(key)) {
+        pageIdsByName.set(key, category.sourceId);
+      }
+    }
+  }
+
+  return {
+    async getOrCreatePageId(name: string) {
+      const normalizedName = normalizeCategoryName(name);
+      const key = normalizeCategoryKey(normalizedName);
+
+      if (!key) {
+        return "";
+      }
+
+      const existingPageId = pageIdsByName.get(key);
+
+      if (existingPageId) {
+        return existingPageId;
+      }
+
+      const pageId = await createCategoryPage(
+        apiKey,
+        resolvedCategoryDataSourceId,
+        categoryDataSource.properties,
+        titleProperty,
+        normalizedName
+      );
+      pageIdsByName.set(key, pageId);
+      return pageId;
+    }
+  };
+}
+
+async function resolveExpenseCategoryPageIds(
+  categoryResolver: Awaited<ReturnType<typeof createCategoryResolver>>,
+  expenses: readonly ExpenseItem[]
+) {
+  const pageIds = new Map<string, string>();
+
+  for (const expense of expenses) {
+    const key = normalizeCategoryKey(expense.category);
+
+    if (!key || pageIds.has(key)) {
+      continue;
+    }
+
+    pageIds.set(
+      key,
+      await categoryResolver.getOrCreatePageId(expense.category)
+    );
+  }
+
+  return pageIds;
+}
+
+async function createCategoryPage(
+  apiKey: string,
+  dataSourceId: string,
+  schema: NotionPropertyMap,
+  titleProperty: string,
+  name: string
+) {
+  const properties: Record<string, unknown> = {
+    [titleProperty]: {
+      title: richText(name)
+    }
+  };
+  const enabledProperty = findNamedSchemaProperty(schema, [
+    "Enabled",
+    "Active",
+    "Use",
+    "Include",
+    "Import"
+  ]);
+
+  if (enabledProperty && schema[enabledProperty]?.type === "checkbox") {
+    properties[enabledProperty] = { checkbox: true };
+  }
+
+  const response = await fetch(NOTION_PAGES_URL, {
+    method: "POST",
+    headers: notionHeaders(apiKey),
+    body: JSON.stringify({
+      parent: {
+        data_source_id: dataSourceId
+      },
+      properties
+    })
+  });
+  const result = await readJson(response);
+
+  if (!response.ok) {
+    throw new NotionSaveError(
+      getNotionError(result) || `Could not create Notion category ${name}.`,
+      response.status
+    );
+  }
+
+  const pageId = String((result as { id?: string }).id || "");
+
+  if (!pageId) {
+    throw new NotionSaveError(
+      `Notion created category ${name} without returning a page ID.`,
+      500
+    );
+  }
+
+  return pageId;
+}
+
 function buildProperties(
   expense: ExpenseItem,
   payload: SaveExpensesPayload,
   schema: NotionPropertyMap,
-  statementById: ReadonlyMap<string, SaveStatementSource>
+  statementById: ReadonlyMap<string, SaveStatementSource>,
+  categoryPageId: string | undefined
 ) {
   const source = getStatementSource(expense, payload, statementById);
   const statement = source.statement;
-  const name = [
-    expense.date,
-    expense.merchant || expense.description || "Expense"
-  ]
-    .filter(Boolean)
-    .join(" - ");
+  const name = expense.merchant || expense.description || "Expense";
   const properties: Record<string, unknown> = {};
   const titleProperty = findProperty(schema, "title");
 
@@ -524,25 +676,9 @@ function buildProperties(
   setRichText(properties, schema, "Description", expense.description);
   setRichText(properties, schema, "Subcategory", expense.subcategory);
   setNumber(properties, schema, "Amount", expense.amount);
-  setSelect(
-    properties,
-    schema,
-    "Expense Category",
-    expense.category,
-    "Category"
-  );
-  setSelect(properties, schema, "Currency", expense.currency || statement.currency);
-  setSelect(properties, schema, "Payment Method", expense.paymentMethod);
-  setSelect(properties, schema, "Section", expense.statementSection);
-  setSelect(properties, schema, "Statement", statement.statementType);
+  setRelation(properties, schema, "Category", categoryPageId);
   setRichText(properties, schema, "Account", statement.accountMask);
   setRichText(properties, schema, "Institution", statement.institution);
-  setRichText(
-    properties,
-    schema,
-    "Statement Period",
-    [statement.periodStart, statement.periodEnd].filter(Boolean).join(" to ")
-  );
   setRichText(properties, schema, "Source File", source.sourceFileName);
   setNumber(properties, schema, "Confidence", expense.confidence);
   setRichText(properties, schema, "Notes", expense.notes);
@@ -617,30 +753,46 @@ function setRichText(
   properties[name] = { rich_text: richText(value) };
 }
 
-function setSelect(
+function setRelation(
   properties: Record<string, unknown>,
   schema: NotionPropertyMap,
-  preferredName: string,
-  value: string,
-  fallbackName?: string
+  name: string,
+  pageId: string | undefined
 ) {
-  const propertyName = [preferredName, fallbackName]
-    .filter(Boolean)
-    .find((name) => schema[String(name)]?.type === "select");
-
-  if (!propertyName || !value) {
+  if (!pageId || schema[name]?.type !== "relation") {
     return;
   }
 
-  properties[propertyName] = {
-    select: {
-      name: value
-    }
+  properties[name] = {
+    relation: [{ id: pageId }]
   };
 }
 
 function findProperty(schema: NotionPropertyMap, type: NotionPropertyType) {
   return Object.entries(schema).find(([, property]) => property.type === type)?.[0];
+}
+
+function findNamedSchemaProperty(
+  schema: NotionPropertyMap,
+  names: readonly string[]
+) {
+  const normalizedNames = names.map((name) => name.toLowerCase());
+
+  return Object.keys(schema).find((name) =>
+    normalizedNames.includes(name.toLowerCase())
+  );
+}
+
+function normalizeCategoryKey(value: string) {
+  return normalizeCategoryName(value).toLowerCase();
+}
+
+function sameNotionId(left: string, right: string) {
+  return notionIdKey(left) === notionIdKey(right);
+}
+
+function notionIdKey(value: string) {
+  return value.replace(/-/g, "").toLowerCase();
 }
 
 function richText(content: string) {
@@ -663,13 +815,6 @@ function plainText(items: NotionText[] | undefined) {
         .join("")
         .trim()
     : "";
-}
-
-function selectOptions(options: readonly string[]) {
-  return options.map((name) => ({
-    name,
-    color: "default"
-  }));
 }
 
 function notionHeaders(apiKey: string) {
@@ -722,6 +867,9 @@ type NotionPropertySchema = {
   id: string;
   name: string;
   type: NotionPropertyType;
+  relation?: {
+    data_source_id?: string;
+  };
 };
 
 type NotionPropertyMap = Record<string, NotionPropertySchema>;
@@ -755,6 +903,9 @@ type NotionPageProperty = {
   title?: NotionText[];
   rich_text?: NotionText[];
   checkbox?: boolean;
+  relation?: Array<{
+    id?: string;
+  }>;
   select?: {
     name?: string;
   } | null;

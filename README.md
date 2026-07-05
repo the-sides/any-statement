@@ -80,7 +80,7 @@ The fallback parser expects `pdftotext` from Poppler to be available on the host
 
 The app uses its local category catalog during extraction. The catalog starts with built-in defaults and can import category rows from the Notion data source configured by `NOTION_CATEGORY_DATA_SOURCE_ID`. Imported and built-in categories stay in the catalog when disabled; disabled categories are not offered to the LLM for new extraction rows.
 
-The expense save path uses the expense data source's existing title column and writes generated categories to `Expense Category` if `Category` is already used for a relation.
+The expense save path uses the expense data source's existing title column and writes each row's category to the existing `Category` relation. The relation should point at the category data source configured by `NOTION_CATEGORY_DATA_SOURCE_ID`; missing category rows are created there during save.
 
 Expected writable properties:
 
@@ -91,20 +91,15 @@ Expected writable properties:
 | Merchant | Text |
 | Description | Text |
 | Subcategory | Text |
-| Expense Category | Select |
+| Category | Relation |
 | Amount | Number |
-| Currency | Select |
-| Payment Method | Select |
-| Section | Select |
-| Statement | Select |
 | Account | Text |
 | Institution | Text |
-| Statement Period | Text |
 | Source File | Text |
 | Confidence | Number |
 | Notes | Text |
 
-If the data source is missing optional expense columns, the app adds them before saving rows. It does not delete or overwrite existing columns. An existing `Category` relation can stay in place; the app leaves it alone.
+If the expense data source is missing optional expense columns, the app adds them before saving rows. It does not delete or overwrite existing columns. The app expects `Category` to already be a Notion relation and uses it directly.
 
 ## Extraction Artifacts
 

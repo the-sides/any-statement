@@ -31,7 +31,7 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 - CSV uploads are extracted through OpenRouter from uploaded CSV text.
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` uses `pdftotext -layout` to parse Amex-style `New Charges Details` tables.
 - `/api/notion/save` saves selected reviewed rows to Notion.
-- `lib/notion.ts` reconciles missing optional Notion properties before creating pages and leaves an existing `Category` relation untouched.
+- `lib/notion.ts` reconciles missing optional Notion properties before creating pages, writes the existing `Category` relation, and creates missing category rows in the configured category data source.
 
 ## Important Files
 
