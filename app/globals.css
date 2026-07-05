@@ -855,7 +855,7 @@ button:focus-visible,
   position: relative;
   display: block;
   min-height: 360px;
-  overflow-x: auto;
+  overflow: auto;
   border: 1px solid rgba(23, 26, 22, 0.1);
   border-radius: 8px;
   background:
@@ -868,9 +868,37 @@ button:focus-visible,
   content: none;
 }
 
+.flow-visual-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, rgba(255, 255, 255, 0.76) 100%);
+}
+
+.graph-zoom-reset {
+  display: inline-flex;
+  min-width: 48px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.graph-zoom-reset:hover:not(:disabled) {
+  background: #eef2e9;
+}
+
 .sankey-chart {
   display: block;
-  width: 100%;
   min-width: 0;
   height: auto;
 }

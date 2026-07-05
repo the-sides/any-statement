@@ -22,7 +22,9 @@ import {
   Undo2,
   Upload,
   UserRound,
-  X
+  X,
+  ZoomIn,
+  ZoomOut
 } from "lucide-react";
 import {
   useEffect,
@@ -133,6 +135,9 @@ const REVIEW_DRAFT_STORAGE_EVENT = "statement-ledger-review-draft";
 const REVIEW_HISTORY_STORAGE_EVENT = "statement-ledger-review-history";
 const CASH_FLOW_PLAN_STORAGE_EVENT = "statement-ledger-cash-flow-plan";
 const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
+const GRAPH_ZOOM_LEVELS = [0.35, 0.5, 0.65, 0.75, 1, 1.25, 1.5, 1.75];
+const MIN_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[0];
+const MAX_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[GRAPH_ZOOM_LEVELS.length - 1];
 const SAMPLE_STATEMENT_ID = "sample-statement";
 const EXPENSE_CHAT_PROMPTS = [
   "How could I minimize food costs?",
@@ -203,6 +208,7 @@ export function StatementWorkspace() {
   const [file, setFile] = useState<File | null>(null);
   const [dataSourceId, setDataSourceId] = useState("");
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
+  const [graphZoom, setGraphZoom] = useState(1);
   const [busy, setBusy] = useState<"idle" | "extracting" | "saving">("idle");
   const [categoryBusy, setCategoryBusy] = useState<
     "idle" | "loading" | "importing" | "updating"
@@ -925,6 +931,14 @@ export function StatementWorkspace() {
 
   function clearCategoryFilters() {
     setCategoryFilters([]);
+  }
+
+  function updateGraphZoom(direction: "in" | "out") {
+    setGraphZoom((current) => nextGraphZoomLevel(current, direction));
+  }
+
+  function resetGraphZoom() {
+    setGraphZoom(1);
   }
 
   function toggleItem(id: string) {
@@ -1785,7 +1799,43 @@ export function StatementWorkspace() {
             </div>
 
             <div className="flow-visual" aria-label="Cash flow visualization">
-              <CashFlowSankey summary={cashFlowSummary} currency={currency} />
+              <div className="flow-visual-toolbar">
+                <button
+                  className="mini-icon-button"
+                  type="button"
+                  title="Zoom out"
+                  aria-label="Zoom out graph"
+                  disabled={graphZoom <= MIN_GRAPH_ZOOM}
+                  onClick={() => updateGraphZoom("out")}
+                >
+                  <ZoomOut size={14} {...hydrationSafeIconProps} />
+                </button>
+                <button
+                  className="graph-zoom-reset"
+                  type="button"
+                  title="Reset graph zoom"
+                  aria-label="Reset graph zoom"
+                  disabled={graphZoom === 1}
+                  onClick={resetGraphZoom}
+                >
+                  {Math.round(graphZoom * 100)}%
+                </button>
+                <button
+                  className="mini-icon-button"
+                  type="button"
+                  title="Zoom in"
+                  aria-label="Zoom in graph"
+                  disabled={graphZoom >= MAX_GRAPH_ZOOM}
+                  onClick={() => updateGraphZoom("in")}
+                >
+                  <ZoomIn size={14} {...hydrationSafeIconProps} />
+                </button>
+              </div>
+              <CashFlowSankey
+                summary={cashFlowSummary}
+                currency={currency}
+                zoom={graphZoom}
+              />
             </div>
           </div>
         </section>
@@ -2112,10 +2162,12 @@ type SankeySegment<T> = T & {
 
 function CashFlowSankey({
   summary,
-  currency
+  currency,
+  zoom
 }: {
   summary: CashFlowSummary;
   currency: string;
+  zoom: number;
 }) {
   const width = 760;
   const top = 76;
@@ -2172,6 +2224,10 @@ function CashFlowSankey({
   return (
     <svg
       className="sankey-chart"
+      style={{
+        width: `${Math.round(zoom * 100)}%`,
+        minWidth: `${Math.round(width * zoom)}px`
+      }}
       viewBox={`0 0 ${width} ${height}`}
       role="img"
       aria-label="Income flowing to savings, manual outputs, and statement categories"
@@ -2992,6 +3048,26 @@ function sankeyLabelLeaderPath(
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function nextGraphZoomLevel(
+  current: number,
+  direction: "in" | "out"
+) {
+  const currentIndex = GRAPH_ZOOM_LEVELS.reduce(
+    (closestIndex, level, index) =>
+      Math.abs(level - current) <
+      Math.abs(GRAPH_ZOOM_LEVELS[closestIndex] - current)
+        ? index
+        : closestIndex,
+    0
+  );
+  const nextIndex = Math.min(
+    GRAPH_ZOOM_LEVELS.length - 1,
+    Math.max(0, currentIndex + (direction === "in" ? 1 : -1))
+  );
+
+  return GRAPH_ZOOM_LEVELS[nextIndex];
 }
 
 function inputColor(index: number) {
