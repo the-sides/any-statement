@@ -18,6 +18,7 @@ import {
   Sparkles,
   Tags,
   Trash2,
+  Undo2,
   Upload,
   UserRound,
   X
@@ -62,6 +63,15 @@ import {
   type ReviewDraft,
   type ReviewStatement
 } from "@/lib/reviewDraft";
+import {
+  REVIEW_HISTORY_STORAGE_KEY,
+  createBulkCategoryHistoryEvent,
+  parseReviewHistory,
+  pushReviewHistoryEvent,
+  serializeReviewHistory,
+  undoReviewHistoryEvent,
+  type ReviewHistoryEvent
+} from "@/lib/reviewHistory";
 import { sampleExtraction } from "@/lib/sample";
 import type { ExpenseChatMessage } from "@/lib/expenseChat";
 import type {
@@ -119,6 +129,7 @@ const APP_CATEGORY_VISIBILITY_STORAGE_KEY =
 const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
   "statement-ledger-include-app-categories";
 const REVIEW_DRAFT_STORAGE_EVENT = "statement-ledger-review-draft";
+const REVIEW_HISTORY_STORAGE_EVENT = "statement-ledger-review-history";
 const CASH_FLOW_PLAN_STORAGE_EVENT = "statement-ledger-cash-flow-plan";
 const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 const SAMPLE_STATEMENT_ID = "sample-statement";
@@ -177,6 +188,9 @@ const SAMPLE_CASH_FLOW_PLAN = createCashFlowPlan([
 ]);
 let cachedReviewDraftRaw: string | null = null;
 let cachedReviewDraftSnapshot: ReviewDraft = SAMPLE_REVIEW_DRAFT;
+const EMPTY_REVIEW_HISTORY: ReviewHistoryEvent[] = [];
+let cachedReviewHistoryRaw: string | null | undefined;
+let cachedReviewHistorySnapshot: ReviewHistoryEvent[] = EMPTY_REVIEW_HISTORY;
 let cachedCashFlowPlanRaw: string | null | undefined;
 let cachedCashFlowPlanSnapshot: CashFlowPlan = SAMPLE_CASH_FLOW_PLAN;
 const hydrationSafeIconProps = {
@@ -217,6 +231,11 @@ export function StatementWorkspace() {
     readReviewDraftSnapshot,
     readSampleReviewDraftSnapshot
   );
+  const reviewHistory = useSyncExternalStore(
+    subscribeToReviewHistory,
+    readReviewHistorySnapshot,
+    readEmptyReviewHistorySnapshot
+  );
   const cashFlowPlan = useSyncExternalStore(
     subscribeToCashFlowPlan,
     readCashFlowPlanSnapshot,
@@ -224,6 +243,8 @@ export function StatementWorkspace() {
   );
   const statements = reviewDraft.statements;
   const items = reviewDraft.expenses;
+  const lastReviewHistoryEvent =
+    reviewHistory[reviewHistory.length - 1] || null;
   const selectedIds = useMemo(
     () => new Set(reviewDraft.selectedIds),
     [reviewDraft.selectedIds]
@@ -625,6 +646,32 @@ export function StatementWorkspace() {
     return true;
   }
 
+  function writeReviewHistoryState(
+    nextHistory: readonly ReviewHistoryEvent[]
+  ) {
+    return writeStoredReviewHistory(nextHistory);
+  }
+
+  function recordBulkCategoryUndo(
+    label: string,
+    changedItems: readonly ExpenseItem[],
+    category: ExpenseCategory
+  ) {
+    const event = createBulkCategoryHistoryEvent({
+      id: createClientId("review-history"),
+      label,
+      changes: changedItems.map((item) => ({
+        itemId: item.id,
+        before: { category: item.category },
+        after: { category }
+      }))
+    });
+
+    return writeReviewHistoryState(
+      pushReviewHistoryEvent(readReviewHistorySnapshot(), event)
+    );
+  }
+
   function loadExtraction(
     nextExtraction: StatementExtraction,
     nextSourceFileName = ""
@@ -687,33 +734,61 @@ export function StatementWorkspace() {
   }
 
   function recategorizeSelected(category: ExpenseCategory) {
-    const selectedCount = selectedItems.length;
+    const changedItems = selectedItems.filter(
+      (item) => item.category !== category
+    );
+    const changedItemIds = new Set(changedItems.map((item) => item.id));
+    const changedCount = changedItems.length;
 
-    if (selectedCount === 0) {
+    if (selectedItems.length === 0) {
       setNotice({ tone: "error", message: "Select at least one row." });
+      return;
+    }
+
+    if (changedCount === 0) {
+      setNotice({
+        tone: "neutral",
+        message: `Selected rows already use ${category}.`
+      });
       return;
     }
 
     if (
       !writeReviewState({
         items: items.map((item) =>
-          selectedIds.has(item.id) ? { ...item, category } : item
+          changedItemIds.has(item.id) ? { ...item, category } : item
         )
       })
     ) {
       return;
     }
 
+    const label = `Set ${changedCount} ${
+      changedCount === 1 ? "row" : "rows"
+    } to ${category}`;
+    const undoSaved = recordBulkCategoryUndo(label, changedItems, category);
+
     setNotice({
-      tone: "success",
-      message: `Updated ${selectedCount} ${
-        selectedCount === 1 ? "row" : "rows"
-      } to ${category}.`
+      tone: undoSaved ? "success" : "neutral",
+      message: undoSaved
+        ? `Updated ${changedCount} ${
+            changedCount === 1 ? "row" : "rows"
+          } to ${category}.`
+        : `Updated ${changedCount} ${
+            changedCount === 1 ? "row" : "rows"
+          } to ${category}. Undo could not be saved.`
     });
   }
 
   function recategorizeStatement(statementId: string, category: ExpenseCategory) {
-    const rowCount = items.filter((item) => item.statementId === statementId).length;
+    const statementItems = items.filter(
+      (item) => item.statementId === statementId
+    );
+    const changedItems = statementItems.filter(
+      (item) => item.category !== category
+    );
+    const changedItemIds = new Set(changedItems.map((item) => item.id));
+    const rowCount = statementItems.length;
     const statement = statementById.get(statementId);
 
     if (rowCount === 0) {
@@ -721,10 +796,20 @@ export function StatementWorkspace() {
       return;
     }
 
+    if (changedItems.length === 0) {
+      setNotice({
+        tone: "neutral",
+        message: `${formatStatementTitle(
+          statement
+        )} rows already use ${category}.`
+      });
+      return;
+    }
+
     if (
       !writeReviewState({
         items: items.map((item) =>
-          item.statementId === statementId ? { ...item, category } : item
+          changedItemIds.has(item.id) ? { ...item, category } : item
         ),
         activeStatementId: statementId
       })
@@ -732,11 +817,60 @@ export function StatementWorkspace() {
       return;
     }
 
+    const label = `Set ${changedItems.length} ${
+      changedItems.length === 1 ? "row" : "rows"
+    } from ${formatStatementTitle(statement)} to ${category}`;
+    const undoSaved = recordBulkCategoryUndo(label, changedItems, category);
+
     setNotice({
-      tone: "success",
-      message: `Updated ${rowCount} rows from ${formatStatementTitle(
-        statement
-      )} to ${category}.`
+      tone: undoSaved ? "success" : "neutral",
+      message: undoSaved
+        ? `Updated ${changedItems.length} ${
+            changedItems.length === 1 ? "row" : "rows"
+          } from ${formatStatementTitle(statement)} to ${category}.`
+        : `Updated ${changedItems.length} ${
+            changedItems.length === 1 ? "row" : "rows"
+          } from ${formatStatementTitle(
+            statement
+          )} to ${category}. Undo could not be saved.`
+    });
+  }
+
+  function undoLastItemChange() {
+    if (!lastReviewHistoryEvent) {
+      setNotice({ tone: "error", message: "Nothing to undo." });
+      return;
+    }
+
+    const result = undoReviewHistoryEvent(items, lastReviewHistoryEvent);
+    const nextHistory = reviewHistory.slice(0, -1);
+
+    if (result.restoredCount === 0) {
+      writeReviewHistoryState(nextHistory);
+      setNotice({
+        tone: "error",
+        message: "Nothing to undo for those rows."
+      });
+      return;
+    }
+
+    if (!writeReviewState({ items: result.items })) {
+      return;
+    }
+
+    const historyUpdated = writeReviewHistoryState(nextHistory);
+    const missingMessage =
+      result.missingCount > 0
+        ? ` ${result.missingCount} missing ${
+            result.missingCount === 1 ? "row was" : "rows were"
+          } skipped.`
+        : "";
+
+    setNotice({
+      tone: historyUpdated ? "success" : "error",
+      message: historyUpdated
+        ? `Undid ${lastReviewHistoryEvent.label}.${missingMessage}`
+        : `Undid ${lastReviewHistoryEvent.label}, but history could not be cleared.`
     });
   }
 
@@ -1600,6 +1734,24 @@ export function StatementWorkspace() {
           >
             <Plus size={18} {...hydrationSafeIconProps} />
           </button>
+          <button
+            className="icon-button"
+            type="button"
+            title={
+              lastReviewHistoryEvent
+                ? `Undo: ${lastReviewHistoryEvent.label}`
+                : "Nothing to undo"
+            }
+            aria-label={
+              lastReviewHistoryEvent
+                ? `Undo ${lastReviewHistoryEvent.label}`
+                : "Nothing to undo"
+            }
+            disabled={!lastReviewHistoryEvent || controlsDisabled}
+            onClick={undoLastItemChange}
+          >
+            <Undo2 size={18} {...hydrationSafeIconProps} />
+          </button>
           <label className="bulk-category-control">
             <Tags size={16} {...hydrationSafeIconProps} />
             <select
@@ -2277,6 +2429,73 @@ function writeStoredReviewDraft(draft: ReviewDraft) {
     cachedReviewDraftRaw = raw;
     cachedReviewDraftSnapshot = draft;
     window.dispatchEvent(new Event(REVIEW_DRAFT_STORAGE_EVENT));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function subscribeToReviewHistory(onStoreChange: () => void) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === REVIEW_HISTORY_STORAGE_KEY) {
+      onStoreChange();
+    }
+  };
+
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(REVIEW_HISTORY_STORAGE_EVENT, onStoreChange);
+
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(REVIEW_HISTORY_STORAGE_EVENT, onStoreChange);
+  };
+}
+
+function readEmptyReviewHistorySnapshot() {
+  return EMPTY_REVIEW_HISTORY;
+}
+
+function readReviewHistorySnapshot() {
+  if (typeof window === "undefined") {
+    return EMPTY_REVIEW_HISTORY;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(REVIEW_HISTORY_STORAGE_KEY);
+
+    if (raw === cachedReviewHistoryRaw) {
+      return cachedReviewHistorySnapshot;
+    }
+
+    cachedReviewHistoryRaw = raw;
+    cachedReviewHistorySnapshot = raw
+      ? parseReviewHistory(JSON.parse(raw))
+      : EMPTY_REVIEW_HISTORY;
+    return cachedReviewHistorySnapshot;
+  } catch {
+    cachedReviewHistoryRaw = undefined;
+    cachedReviewHistorySnapshot = EMPTY_REVIEW_HISTORY;
+    return cachedReviewHistorySnapshot;
+  }
+}
+
+function writeStoredReviewHistory(
+  history: readonly ReviewHistoryEvent[]
+) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const raw = JSON.stringify(serializeReviewHistory(history));
+    window.localStorage.setItem(REVIEW_HISTORY_STORAGE_KEY, raw);
+    cachedReviewHistoryRaw = raw;
+    cachedReviewHistorySnapshot = [...history];
+    window.dispatchEvent(new Event(REVIEW_HISTORY_STORAGE_EVENT));
     return true;
   } catch {
     return false;
