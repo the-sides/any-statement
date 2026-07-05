@@ -661,7 +661,6 @@ button:focus-visible,
   gap: 5px;
 }
 
-.statement-category-control,
 .statement-scope-control {
   display: inline-flex;
   min-width: 0;
@@ -674,16 +673,11 @@ button:focus-visible,
   padding: 0 8px;
 }
 
-.statement-category-control {
-  grid-column: 1 / -1;
-}
-
 .statement-scope-control {
   min-width: 210px;
   max-width: min(320px, 100%);
 }
 
-.statement-category-control select,
 .statement-scope-control select {
   min-height: 32px;
   border: 0;
@@ -694,12 +688,10 @@ button:focus-visible,
   font-weight: 800;
 }
 
-.statement-category-control select:focus,
 .statement-scope-control select:focus {
   outline: 0;
 }
 
-.statement-category-control:has(select:disabled),
 .statement-scope-control:has(select:disabled) {
   color: var(--quiet);
   background: #f5f6f2;

@@ -819,62 +819,6 @@ export function StatementWorkspace() {
     });
   }
 
-  function recategorizeStatement(statementId: string, category: ExpenseCategory) {
-    const statementItems = items.filter(
-      (item) => item.statementId === statementId
-    );
-    const changedItems = statementItems.filter(
-      (item) => item.category !== category
-    );
-    const changedItemIds = new Set(changedItems.map((item) => item.id));
-    const rowCount = statementItems.length;
-    const statement = statementById.get(statementId);
-
-    if (rowCount === 0) {
-      setNotice({ tone: "error", message: "No rows for that statement." });
-      return;
-    }
-
-    if (changedItems.length === 0) {
-      setNotice({
-        tone: "neutral",
-        message: `${formatStatementTitle(
-          statement
-        )} rows already use ${category}.`
-      });
-      return;
-    }
-
-    if (
-      !writeReviewState({
-        items: items.map((item) =>
-          changedItemIds.has(item.id) ? { ...item, category } : item
-        ),
-        activeStatementId: statementId
-      })
-    ) {
-      return;
-    }
-
-    const label = `Set ${changedItems.length} ${
-      changedItems.length === 1 ? "row" : "rows"
-    } from ${formatStatementTitle(statement)} to ${category}`;
-    const undoSaved = recordBulkCategoryUndo(label, changedItems, category);
-
-    setNotice({
-      tone: undoSaved ? "success" : "neutral",
-      message: undoSaved
-        ? `Updated ${changedItems.length} ${
-            changedItems.length === 1 ? "row" : "rows"
-          } from ${formatStatementTitle(statement)} to ${category}.`
-        : `Updated ${changedItems.length} ${
-            changedItems.length === 1 ? "row" : "rows"
-          } from ${formatStatementTitle(
-            statement
-          )} to ${category}. Undo could not be saved.`
-    });
-  }
-
   function undoLastItemChange() {
     if (!lastReviewHistoryEvent) {
       setNotice({ tone: "error", message: "Nothing to undo." });
@@ -1356,7 +1300,12 @@ export function StatementWorkspace() {
               <div className="statement-empty">No statements</div>
             ) : null}
             {statementSummaries.map(
-              ({ statement, items: statementItems, selectedItems: selected }) => (
+              ({
+                statement,
+                items: statementItems,
+                selectedItems: selected,
+                amount
+              }) => (
                 <div
                   className={`statement-source ${
                     statement.id === activeStatementId ? "active" : ""
@@ -1376,6 +1325,12 @@ export function StatementWorkspace() {
                     </small>
                     <span>
                       {statementItems.length} rows / {selected.length} selected
+                    </span>
+                    <span>
+                      {formatCurrency(
+                        amount,
+                        statement.statement.currency || currency
+                      )}
                     </span>
                   </button>
 
@@ -1405,38 +1360,6 @@ export function StatementWorkspace() {
                       <Trash2 size={14} {...hydrationSafeIconProps} />
                     </button>
                   </div>
-
-                  <label className="statement-category-control">
-                    <Tags size={14} {...hydrationSafeIconProps} />
-                    <select
-                      value=""
-                      aria-label={`Category for ${formatStatementTitle(
-                        statement
-                      )}`}
-                      disabled={
-                        statementItems.length === 0 || controlsDisabled
-                      }
-                      onChange={(event) => {
-                        const category = event.target.value as ExpenseCategory;
-
-                        if (category) {
-                          recategorizeStatement(statement.id, category);
-                        }
-                      }}
-                    >
-                      <option value="">Set all rows</option>
-                      {bulkCategoryOptions.map((category) => (
-                        <option
-                          key={`${category.source}-${
-                            category.sourceId || category.name
-                          }`}
-                          value={category.name}
-                        >
-                          {category.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                 </div>
               )
             )}
