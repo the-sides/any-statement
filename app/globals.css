@@ -940,7 +940,7 @@ button:focus-visible,
 .pie-chart {
   display: block;
   width: 100%;
-  min-width: 620px;
+  min-width: 880px;
   height: auto;
 }
 
@@ -980,6 +980,43 @@ button:focus-visible,
 
 .pie-slice:hover {
   opacity: 0.86;
+}
+
+.pie-label-line {
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.72;
+}
+
+.pie-label-dot {
+  stroke: #fffefa;
+  stroke-width: 1.5;
+}
+
+.pie-slice-label {
+  fill: var(--ink);
+  font-size: 14px;
+  font-weight: 900;
+  paint-order: stroke;
+  stroke: rgba(255, 254, 250, 0.9);
+  stroke-linejoin: round;
+  stroke-width: 4px;
+}
+
+.pie-slice-label-value {
+  fill: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.pie-slice-label.inside {
+  font-size: 13px;
+}
+
+.pie-slice-label-value.inside {
+  fill: var(--ink);
+  font-size: 12px;
 }
 
 .pie-legend-row {

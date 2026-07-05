@@ -2126,6 +2126,18 @@ type PieSlice = {
   color: string;
   startAngle: number;
   endAngle: number;
+  midAngle: number;
+};
+
+type PieOutsideLabel = {
+  slice: PieSlice;
+  side: "left" | "right";
+  anchor: { x: number; y: number };
+  elbow: { x: number; y: number };
+  labelX: number;
+  labelY: number;
+  leaderEndX: number;
+  textAnchor: "start" | "end";
 };
 
 function CashFlowSankey({
@@ -2417,8 +2429,8 @@ function CashFlowPie({
   summary: CashFlowSummary;
   currency: string;
 }) {
-  const width = 760;
-  const legendX = 398;
+  const width = 980;
+  const legendX = 720;
   const legendTop = 78;
   const legendRowHeight = 46;
   const allocations = summary.allocations.filter(
@@ -2432,10 +2444,20 @@ function CashFlowPie({
     420,
     legendTop + 46 + Math.max(allocations.length, 1) * legendRowHeight
   );
-  const centerX = 210;
+  const centerX = 316;
   const centerY = height / 2;
-  const radius = 146;
+  const radius = 144;
   const slices = layoutPieSlices(allocations);
+  const insideLabels = slices.filter(canPlacePieLabelInside);
+  const outsideLabels = layoutPieOutsideLabels(
+    slices.filter((slice) => !canPlacePieLabelInside(slice)),
+    centerX,
+    centerY,
+    radius,
+    78,
+    height - 42,
+    52
+  );
 
   return (
     <svg
@@ -2493,6 +2515,74 @@ function CashFlowPie({
                 </path>
               ))
             )}
+          </g>
+
+          <g className="pie-labels">
+            {insideLabels.map((slice) => {
+              const labelPoint = piePoint(
+                centerX,
+                centerY,
+                radius * 0.58,
+                slice.midAngle
+              );
+
+              return (
+                <text
+                  className="pie-slice-label inside"
+                  key={`inside-label-${slice.id}`}
+                  x={labelPoint.x}
+                  y={labelPoint.y - 5}
+                  textAnchor="middle"
+                >
+                  <tspan x={labelPoint.x}>
+                    {truncateSvgText(slice.label, 18)}
+                  </tspan>
+                  <tspan
+                    className="pie-slice-label-value inside"
+                    x={labelPoint.x}
+                    dy="18"
+                  >
+                    {formatCurrency(slice.amount, currency)} /{" "}
+                    {formatPercent(slice.percent)}
+                  </tspan>
+                </text>
+              );
+            })}
+            {outsideLabels.map((label) => (
+              <g key={`outside-label-${label.slice.id}`}>
+                <path
+                  className="pie-label-line"
+                  d={pieLabelLeaderPath(label)}
+                  fill="none"
+                  stroke={label.slice.color}
+                />
+                <circle
+                  className="pie-label-dot"
+                  cx={label.anchor.x}
+                  cy={label.anchor.y}
+                  r="3"
+                  fill={label.slice.color}
+                />
+                <text
+                  className="pie-slice-label outside"
+                  x={label.labelX}
+                  y={label.labelY - 5}
+                  textAnchor={label.textAnchor}
+                >
+                  <tspan x={label.labelX}>
+                    {truncateSvgText(label.slice.label, 20)}
+                  </tspan>
+                  <tspan
+                    className="pie-slice-label-value outside"
+                    x={label.labelX}
+                    dy="18"
+                  >
+                    {formatCurrency(label.slice.amount, currency)} /{" "}
+                    {formatPercent(label.slice.percent)}
+                  </tspan>
+                </text>
+              </g>
+            ))}
           </g>
 
           <g className="pie-legend" transform={`translate(${legendX} 0)`}>
@@ -3165,9 +3255,111 @@ function layoutPieSlices(
       percent: (item.amount / total) * 100,
       color: allocationColor(item.source, index),
       startAngle,
-      endAngle
+      endAngle,
+      midAngle: startAngle + angle / 2
     };
   });
+}
+
+function canPlacePieLabelInside(slice: PieSlice) {
+  return slice.endAngle - slice.startAngle >= 48 && slice.percent >= 12;
+}
+
+function layoutPieOutsideLabels(
+  slices: readonly PieSlice[],
+  centerX: number,
+  centerY: number,
+  radius: number,
+  minY: number,
+  maxY: number,
+  minSpacing: number
+): PieOutsideLabel[] {
+  const labels = slices.map((slice) => {
+    const side: PieOutsideLabel["side"] =
+      Math.cos((slice.midAngle * Math.PI) / 180) >= 0 ? "right" : "left";
+    const anchor = piePoint(centerX, centerY, radius + 2, slice.midAngle);
+    const elbow = piePoint(centerX, centerY, radius + 28, slice.midAngle);
+    const labelX = side === "right" ? centerX + radius + 48 : 36;
+
+    return {
+      slice,
+      side,
+      anchor,
+      elbow,
+      labelX,
+      labelY: elbow.y,
+      leaderEndX: labelX - 12,
+      textAnchor: "start" as const
+    };
+  });
+
+  return [
+    ...layoutPieLabelSide(
+      labels.filter((label) => label.side === "right"),
+      minY,
+      maxY,
+      minSpacing
+    ),
+    ...layoutPieLabelSide(
+      labels.filter((label) => label.side === "left"),
+      minY,
+      maxY,
+      minSpacing
+    )
+  ];
+}
+
+function layoutPieLabelSide(
+  labels: readonly PieOutsideLabel[],
+  minY: number,
+  maxY: number,
+  minSpacing: number
+) {
+  if (labels.length === 0) {
+    return [];
+  }
+
+  const sorted = [...labels].sort((left, right) => left.elbow.y - right.elbow.y);
+  const available = Math.max(1, maxY - minY);
+  const spacing =
+    sorted.length > 1
+      ? Math.min(minSpacing, available / (sorted.length - 1))
+      : minSpacing;
+  const positions = sorted.map((label) => clamp(label.elbow.y, minY, maxY));
+
+  for (let index = 1; index < positions.length; index += 1) {
+    positions[index] = Math.max(
+      positions[index],
+      positions[index - 1] + spacing
+    );
+  }
+
+  const overflow = positions[positions.length - 1] - maxY;
+  if (overflow > 0) {
+    for (let index = 0; index < positions.length; index += 1) {
+      positions[index] -= overflow;
+    }
+  }
+
+  for (let index = positions.length - 2; index >= 0; index -= 1) {
+    positions[index] = Math.min(
+      positions[index],
+      positions[index + 1] - spacing
+    );
+  }
+
+  return sorted.map((label, index) => ({
+    ...label,
+    labelY: clamp(positions[index], minY, maxY)
+  }));
+}
+
+function pieLabelLeaderPath(label: PieOutsideLabel) {
+  return [
+    `M ${label.anchor.x} ${label.anchor.y}`,
+    `L ${label.elbow.x} ${label.elbow.y}`,
+    `L ${label.leaderEndX} ${label.labelY}`
+  ].join(" ");
 }
 
 function pieSlicePath(
