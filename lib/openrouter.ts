@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import {
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
   type ExpenseCategoryDefinitionInput,
@@ -40,6 +41,7 @@ export async function extractStatementFromPdf(
   file: File,
   options: {
     bytes?: Buffer;
+    filePath?: string;
     pdfText?: string;
     categories?: readonly ExpenseCategoryDefinitionInput[];
     categorizationNotes?: string;
@@ -64,7 +66,7 @@ export async function extractStatementFromPdf(
         fileName,
         pdfText
       })
-    : await buildPdfExtractionContent(file, options.bytes, {
+    : await buildPdfExtractionContent(file, options.bytes, options.filePath, {
         categoryDefinitions,
         categorizationNotes
       });
@@ -98,6 +100,8 @@ export async function extractStatementFromCsv(
   file: File,
   options: {
     bytes?: Buffer;
+    filePath?: string;
+    csvText?: string;
     categories?: readonly ExpenseCategoryDefinitionInput[];
     categorizationNotes?: string;
     onDebug?: (payload: ExtractionDebugPayload) => Promise<void>;
@@ -110,11 +114,11 @@ export async function extractStatementFromCsv(
     options.categorizationNotes
   );
   const fileName = file.name || "statement.csv";
-  const csvText = normalizeCsvText(
-    options.bytes
-      ? options.bytes.toString("utf8")
-      : await file.text()
-  );
+  const sourceCsvText =
+    options.csvText ??
+    (options.filePath ? await readFile(options.filePath, "utf8") : undefined) ??
+    (options.bytes ? options.bytes.toString("utf8") : await file.text());
+  const csvText = normalizeCsvText(sourceCsvText);
 
   if (!csvText) {
     throw new IntegrationError("CSV upload is empty.", 400);
@@ -233,12 +237,15 @@ async function extractStatementWithOpenRouter(options: {
 async function buildPdfExtractionContent(
   file: File,
   bytes: Buffer | undefined,
+  filePath: string | undefined,
   options: {
     categoryDefinitions: readonly ExpenseCategoryDefinitionInput[];
     categorizationNotes: string;
   }
 ): Promise<OpenRouterContentPart[]> {
-  const pdfBytes = bytes || Buffer.from(await file.arrayBuffer());
+  const pdfBytes =
+    bytes ||
+    (filePath ? await readFile(filePath) : Buffer.from(await file.arrayBuffer()));
   const fileData = `data:application/pdf;base64,${pdfBytes.toString("base64")}`;
 
   return [

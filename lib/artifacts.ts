@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { createWriteStream } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
 const DEFAULT_ARTIFACT_ROOT = "/tmp/statement-ledger";
 
@@ -11,7 +15,6 @@ export type UploadArtifact = {
   pdfPath?: string;
   fileName: string;
   mediaType: "pdf" | "csv";
-  bytes: Buffer;
 };
 
 export type PublicUploadArtifact = {
@@ -31,10 +34,12 @@ export async function saveUploadedStatement(
   const fileName = safeFileName(file.name || `statement.${mediaType}`, mediaType);
   const dir = path.join(artifactRoot(), "uploads", id);
   const filePath = path.join(dir, fileName);
-  const bytes = Buffer.from(await file.arrayBuffer());
 
   await mkdir(dir, { recursive: true });
-  await writeFile(filePath, bytes);
+  await pipeline(
+    Readable.fromWeb(file.stream() as unknown as NodeReadableStream<Uint8Array>),
+    createWriteStream(filePath)
+  );
   await writeArtifactJson(dir, "upload.json", {
     id,
     fileName,
@@ -52,8 +57,7 @@ export async function saveUploadedStatement(
     filePath,
     pdfPath: mediaType === "pdf" ? filePath : undefined,
     fileName,
-    mediaType,
-    bytes
+    mediaType
   };
 }
 

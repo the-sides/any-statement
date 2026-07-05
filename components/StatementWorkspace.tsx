@@ -141,6 +141,7 @@ const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
 const REVIEW_DRAFT_STORAGE_EVENT = "statement-ledger-review-draft";
 const REVIEW_HISTORY_STORAGE_EVENT = "statement-ledger-review-history";
 const CASH_FLOW_PLAN_STORAGE_EVENT = "statement-ledger-cash-flow-plan";
+const MAX_STATEMENT_FILE_SIZE = 12 * 1024 * 1024;
 const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 const GRAPH_ZOOM_LEVELS = [0.35, 0.5, 0.65, 0.75, 1, 1.25, 1.5, 1.75];
 const MIN_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[0];
@@ -401,6 +402,14 @@ export function StatementWorkspace() {
       setNotice({
         tone: "error",
         message: "Choose a PDF or CSV statement first."
+      });
+      return;
+    }
+
+    if (file.size > MAX_STATEMENT_FILE_SIZE) {
+      setNotice({
+        tone: "error",
+        message: "Statement file is too large. The current limit is 12 MB."
       });
       return;
     }

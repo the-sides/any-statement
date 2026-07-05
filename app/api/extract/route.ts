@@ -24,11 +24,20 @@ export const runtime = "nodejs";
 export const maxDuration = 90;
 
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
+const MAX_MULTIPART_OVERHEAD = 1024 * 1024;
+const MAX_REQUEST_BODY_SIZE = MAX_FILE_SIZE + MAX_MULTIPART_OVERHEAD;
 const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 type StatementUploadType = UploadArtifact["mediaType"];
 
 export async function POST(request: Request) {
   try {
+    if (isUploadRequestTooLarge(request)) {
+      return Response.json(
+        { error: "Statement file is too large. The current limit is 12 MB." },
+        { status: 413 }
+      );
+    }
+
     const formData = await request.formData();
     const file = formData.get("statementFile") ?? formData.get("statementPdf");
     const categorizationNotes = readOptionalFormString(
@@ -136,6 +145,18 @@ function getStatementUploadType(file: File): StatementUploadType | null {
   return null;
 }
 
+function isUploadRequestTooLarge(request: Request) {
+  const contentLength = request.headers.get("content-length");
+
+  if (!contentLength) {
+    return false;
+  }
+
+  const parsed = Number(contentLength);
+
+  return Number.isFinite(parsed) && parsed > MAX_REQUEST_BODY_SIZE;
+}
+
 function isPdf(file: File) {
   return (
     file.type === "application/pdf" ||
@@ -208,7 +229,7 @@ async function extractPdfUpload(
   const pdfText = await extractPdfText(artifact.filePath);
 
   return extractStatementFromPdf(file, {
-    bytes: artifact.bytes,
+    filePath: artifact.filePath,
     pdfText,
     categories: extractionCategories,
     categorizationNotes,
@@ -223,7 +244,7 @@ async function extractCsvUpload(
   categorizationNotes: string
 ) {
   return extractStatementFromCsv(file, {
-    bytes: artifact.bytes,
+    filePath: artifact.filePath,
     categories: extractionCategories,
     categorizationNotes,
     onDebug: (payload) => saveExtractionArtifact(artifact, payload)
