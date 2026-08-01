@@ -169,6 +169,7 @@ const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 const GRAPH_ZOOM_LEVELS = [0.35, 0.5, 0.65, 0.75, 1, 1.25, 1.5, 1.75];
 const MIN_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[0];
 const MAX_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[GRAPH_ZOOM_LEVELS.length - 1];
+const DEFAULT_GRAPH_ZOOM = 0.5;
 const EXPENSE_CHAT_PROMPTS = [
   "How could I minimize food costs?",
   "Which merchants cost the most?",
@@ -225,7 +226,7 @@ export function StatementWorkspace() {
   const [file, setFile] = useState<File | null>(null);
   const [dataSourceId, setDataSourceId] = useState("");
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
-  const [graphZoom, setGraphZoom] = useState(1);
+  const [graphZoom, setGraphZoom] = useState(DEFAULT_GRAPH_ZOOM);
   const [cashFlowGraphType, setCashFlowGraphType] =
     useState<CashFlowGraphType>("flow");
   const [busy, setBusy] = useState<"idle" | "extracting" | "saving">("idle");
@@ -997,7 +998,7 @@ export function StatementWorkspace() {
   }
 
   function resetGraphZoom() {
-    setGraphZoom(1);
+    setGraphZoom(DEFAULT_GRAPH_ZOOM);
   }
 
   function toggleItem(id: string) {
@@ -1985,7 +1986,7 @@ export function StatementWorkspace() {
                       type="button"
                       title="Reset graph zoom"
                       aria-label="Reset graph zoom"
-                      disabled={graphZoom === 1}
+                      disabled={graphZoom === DEFAULT_GRAPH_ZOOM}
                       onClick={resetGraphZoom}
                     >
                       {Math.round(graphZoom * 100)}%
