@@ -19,12 +19,15 @@ export type ReviewStatement = SaveStatementSource & {
   importedAt: string;
 };
 
-export type ReviewDraft = {
-  version: typeof REVIEW_DRAFT_VERSION;
+export type ReviewContents = {
   statements: ReviewStatement[];
   expenses: ExpenseItem[];
   selectedIds: string[];
   activeStatementId: string;
+};
+
+export type ReviewDraft = ReviewContents & {
+  version: typeof REVIEW_DRAFT_VERSION;
   savedAt: string;
 };
 
@@ -34,6 +37,19 @@ export function createReviewDraft(input: {
   selectedIds: Iterable<string>;
   activeStatementId?: string;
 }): ReviewDraft {
+  return {
+    version: REVIEW_DRAFT_VERSION,
+    ...normalizeReviewContents(input),
+    savedAt: new Date().toISOString()
+  };
+}
+
+export function normalizeReviewContents(input: {
+  statements: readonly ReviewStatement[];
+  expenses: readonly ExpenseItem[];
+  selectedIds: Iterable<string>;
+  activeStatementId?: string;
+}): ReviewContents {
   const statements = input.statements.map((statement, index) =>
     normalizeReviewStatement(statement, index)
   );
@@ -59,12 +75,64 @@ export function createReviewDraft(input: {
     : fallbackStatementId;
 
   return {
-    version: REVIEW_DRAFT_VERSION,
     statements,
     expenses,
     selectedIds,
-    activeStatementId,
-    savedAt: new Date().toISOString()
+    activeStatementId
+  };
+}
+
+export function parseReviewContents(value: unknown): ReviewContents {
+  const record = asRecord(value);
+
+  if (!record) {
+    return {
+      statements: [],
+      expenses: [],
+      selectedIds: [],
+      activeStatementId: ""
+    };
+  }
+
+  const statements = Array.isArray(record.statements)
+    ? record.statements.flatMap((statement, index) => {
+        const parsed = parseReviewStatement(statement, index);
+
+        return parsed ? [parsed] : [];
+      })
+    : [];
+  const statementIds = new Set(statements.map((statement) => statement.id));
+  const fallbackStatementId = statements[0]?.id || "";
+  const expenses = Array.isArray(record.expenses)
+    ? record.expenses.flatMap((item) => {
+        const expense = parseExpense(item, fallbackStatementId);
+
+        if (!expense) {
+          return [];
+        }
+
+        if (statementIds.size > 0 && !statementIds.has(expense.statementId || "")) {
+          return [];
+        }
+
+        return [expense];
+      })
+    : [];
+  const itemIds = new Set(expenses.map((item) => item.id));
+  const selectedIds = Array.isArray(record.selectedIds)
+    ? record.selectedIds.filter(
+        (id): id is string => typeof id === "string" && itemIds.has(id)
+      )
+    : expenses.map((item) => item.id);
+  const activeStatementId = statementIds.has(asString(record.activeStatementId))
+    ? asString(record.activeStatementId)
+    : fallbackStatementId;
+
+  return {
+    statements,
+    expenses,
+    selectedIds,
+    activeStatementId
   };
 }
 
@@ -121,46 +189,9 @@ export function parseReviewDraft(value: unknown): ReviewDraft | null {
     return null;
   }
 
-  const statements = Array.isArray(record.statements)
-    ? record.statements.flatMap((statement, index) => {
-        const parsed = parseReviewStatement(statement, index);
-
-        return parsed ? [parsed] : [];
-      })
-    : [];
-  const statementIds = new Set(statements.map((statement) => statement.id));
-  const fallbackStatementId = statements[0]?.id || "";
-  const expenses = Array.isArray(record.expenses)
-    ? record.expenses.flatMap((item) => {
-        const expense = parseExpense(item, fallbackStatementId);
-
-        if (!expense) {
-          return [];
-        }
-
-        if (statementIds.size > 0 && !statementIds.has(expense.statementId || "")) {
-          return [];
-        }
-
-        return [expense];
-      })
-    : [];
-  const itemIds = new Set(expenses.map((item) => item.id));
-  const selectedIds = Array.isArray(record.selectedIds)
-    ? record.selectedIds.filter(
-        (id): id is string => typeof id === "string" && itemIds.has(id)
-      )
-    : expenses.map((item) => item.id);
-  const activeStatementId = statementIds.has(asString(record.activeStatementId))
-    ? asString(record.activeStatementId)
-    : fallbackStatementId;
-
   return {
     version: REVIEW_DRAFT_VERSION,
-    statements,
-    expenses,
-    selectedIds,
-    activeStatementId,
+    ...parseReviewContents(record),
     savedAt: asString(record.savedAt)
   };
 }
