@@ -3,7 +3,10 @@
 import {
   AlertTriangle,
   Bot,
+  CalendarRange,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Database,
   FileText,
   Layers,
@@ -57,13 +60,24 @@ import {
   type CashFlowSummary
 } from "@/lib/cashFlowPlan";
 import {
-  REVIEW_DRAFT_STORAGE_KEY,
+  determineStatementMonth,
+  formatMonthLabel,
+  isMonthKey
+} from "@/lib/months";
+import {
+  fileStatement,
+  readInitialMonthsSnapshot,
+  readMonthsSnapshot,
+  reassignStatement,
+  selectMonth,
+  subscribeToMonths,
+  updateActiveMonth,
+  type MonthsState
+} from "@/lib/monthsStore";
+import {
   createReviewStatement,
-  createReviewDraft,
   createStatementExpenses,
-  parseReviewDraft,
   statementSourceForSave,
-  type ReviewDraft,
   type ReviewStatement
 } from "@/lib/reviewDraft";
 import {
@@ -75,7 +89,6 @@ import {
   undoReviewHistoryEvent,
   type ReviewHistoryEvent
 } from "@/lib/reviewHistory";
-import { sampleExtraction } from "@/lib/sample";
 import type { ExpenseChatMessage } from "@/lib/expenseChat";
 import type {
   ExpenseItem,
@@ -122,6 +135,11 @@ type ExpenseChatResponse = {
   error?: string;
 };
 
+type PendingUpload = {
+  statement: ReviewStatement;
+  expenses: ExpenseItem[];
+};
+
 const CASH_FLOW_GRAPH_TYPES = [
   { value: "flow", label: "Flow" },
   { value: "pie", label: "Pie" }
@@ -138,7 +156,6 @@ const APP_CATEGORY_VISIBILITY_STORAGE_KEY =
   "statement-ledger.include-app-categories";
 const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
   "statement-ledger-include-app-categories";
-const REVIEW_DRAFT_STORAGE_EVENT = "statement-ledger-review-draft";
 const REVIEW_HISTORY_STORAGE_EVENT = "statement-ledger-review-history";
 const CASH_FLOW_PLAN_STORAGE_EVENT = "statement-ledger-cash-flow-plan";
 const MAX_STATEMENT_FILE_SIZE = 12 * 1024 * 1024;
@@ -146,7 +163,6 @@ const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 const GRAPH_ZOOM_LEVELS = [0.35, 0.5, 0.65, 0.75, 1, 1.25, 1.5, 1.75];
 const MIN_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[0];
 const MAX_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[GRAPH_ZOOM_LEVELS.length - 1];
-const SAMPLE_STATEMENT_ID = "sample-statement";
 const EXPENSE_CHAT_PROMPTS = [
   "How could I minimize food costs?",
   "Which merchants cost the most?",
@@ -163,20 +179,9 @@ const EMPTY_STATEMENT: StatementSummary = {
   closingBalance: null,
   confidence: 0
 };
-const SAMPLE_REVIEW_STATEMENT = createReviewStatement({
-  id: SAMPLE_STATEMENT_ID,
-  statement: sampleExtraction.statement,
-  sourceFileName: ""
-});
-const SAMPLE_REVIEW_DRAFT = createReviewDraft({
-  statements: [SAMPLE_REVIEW_STATEMENT],
-  expenses: sampleExtraction.expenses.map((item) => ({
-    ...item,
-    statementId: SAMPLE_STATEMENT_ID
-  })),
-  selectedIds: sampleExtraction.expenses.map((item) => item.id),
-  activeStatementId: SAMPLE_STATEMENT_ID
-});
+const EMPTY_STATEMENTS: ReviewStatement[] = [];
+const EMPTY_EXPENSES: ExpenseItem[] = [];
+const EMPTY_SELECTED_IDS: string[] = [];
 const SAMPLE_CASH_FLOW_PLAN = createCashFlowPlan([
   {
     id: "paychecks",
@@ -200,8 +205,6 @@ const SAMPLE_CASH_FLOW_PLAN = createCashFlowPlan([
     enabled: true
   }
 ]);
-let cachedReviewDraftRaw: string | null = null;
-let cachedReviewDraftSnapshot: ReviewDraft = SAMPLE_REVIEW_DRAFT;
 const EMPTY_REVIEW_HISTORY: ReviewHistoryEvent[] = [];
 let cachedReviewHistoryRaw: string | null | undefined;
 let cachedReviewHistorySnapshot: ReviewHistoryEvent[] = EMPTY_REVIEW_HISTORY;
@@ -228,8 +231,10 @@ export function StatementWorkspace() {
   );
   const [notice, setNotice] = useState<Notice>({
     tone: "neutral",
-    message: "Rows are saved locally in this browser."
+    message: "Months are saved on this machine."
   });
+  const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
+  const [pendingUploadMonth, setPendingUploadMonth] = useState("");
   const [lastSave, setLastSave] = useState<SaveExpensesResult | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
@@ -244,10 +249,10 @@ export function StatementWorkspace() {
     readAppCategoryVisibilityPreference,
     () => null
   );
-  const reviewDraft = useSyncExternalStore(
-    subscribeToReviewDraft,
-    readReviewDraftSnapshot,
-    readSampleReviewDraftSnapshot
+  const monthsState = useSyncExternalStore(
+    subscribeToMonths,
+    readMonthsSnapshot,
+    readInitialMonthsSnapshot
   );
   const reviewHistory = useSyncExternalStore(
     subscribeToReviewHistory,
@@ -259,20 +264,33 @@ export function StatementWorkspace() {
     readCashFlowPlanSnapshot,
     readSampleCashFlowPlanSnapshot
   );
-  const statements = reviewDraft.statements;
-  const items = reviewDraft.expenses;
+  const monthDocument = monthsState.document;
+  const activeMonth = monthsState.activeMonth;
+  const months = monthsState.months;
+  const monthsLoading = monthsState.status === "loading";
+  const statements = monthDocument?.statements || EMPTY_STATEMENTS;
+  const items = monthDocument?.expenses || EMPTY_EXPENSES;
+  const monthSelectedIds = monthDocument?.selectedIds || EMPTY_SELECTED_IDS;
   const lastReviewHistoryEvent =
     reviewHistory[reviewHistory.length - 1] || null;
   const selectedIds = useMemo(
-    () => new Set(reviewDraft.selectedIds),
-    [reviewDraft.selectedIds]
+    () => new Set(monthSelectedIds),
+    [monthSelectedIds]
   );
+  const monthIndex = months.findIndex((entry) => entry.month === activeMonth);
+  const previousMonth = monthIndex > 0 ? months[monthIndex - 1].month : "";
+  const nextMonth =
+    monthIndex >= 0 && monthIndex < months.length - 1
+      ? months[monthIndex + 1].month
+      : "";
   const statementById = useMemo(
     () => new Map(statements.map((statement) => [statement.id, statement])),
     [statements]
   );
   const activeStatement =
-    statementById.get(reviewDraft.activeStatementId) || statements[0] || null;
+    statementById.get(monthDocument?.activeStatementId || "") ||
+    statements[0] ||
+    null;
   const activeStatementId = activeStatement?.id || "";
   const activeStatementSummary = activeStatement?.statement || EMPTY_STATEMENT;
   const sourceFileName = activeStatement?.sourceFileName || "";
@@ -360,6 +378,7 @@ export function StatementWorkspace() {
     [activeCategories, items]
   );
   const controlsDisabled = busy !== "idle" || categoryBusy !== "idle";
+  const activeNotice = monthsNotice(monthsState) || notice;
 
   useEffect(() => {
     let active = true;
@@ -396,6 +415,7 @@ export function StatementWorkspace() {
       active = false;
     };
   }, []);
+
 
   async function extractStatement() {
     if (!file) {
@@ -448,17 +468,34 @@ export function StatementWorkspace() {
         ? ` Artifacts: ${extractionResult.artifact.dir}`
         : "";
 
-      loadExtraction(
+      const determined = await loadExtraction(
         extractionResult.extraction,
         extractionResult.artifact?.fileName || file.name
       );
-      setNotice({
-        tone: rowCount > 0 ? "success" : "error",
-        message:
-          rowCount > 0
-            ? `Extracted ${rowCount} expenses.${artifactMessage}`
-            : `AI extraction returned no expense rows.${artifactMessage}`
-      });
+
+      if (rowCount === 0) {
+        setNotice({
+          tone: "error",
+          message: `AI extraction returned no expense rows.${artifactMessage}`
+        });
+      } else if (!determined) {
+        setNotice({
+          tone: "neutral",
+          message: `Extracted ${rowCount} expenses. Choose the month this statement belongs to.${artifactMessage}`
+        });
+      } else {
+        const guessNote =
+          determined.source === "rows"
+            ? " Month came from the row dates, so check it."
+            : "";
+
+        setNotice({
+          tone: "success",
+          message: `Extracted ${rowCount} expenses into ${formatMonthLabel(
+            determined.month || ""
+          )}.${guessNote}${artifactMessage}`
+        });
+      }
     } catch (error) {
       setNotice({
         tone: "error",
@@ -667,25 +704,23 @@ export function StatementWorkspace() {
     }
   }
 
-  function writeReviewState(next: {
+  function writeMonthState(next: {
     statements?: readonly ReviewStatement[];
     items?: readonly ExpenseItem[];
     selectedIds?: Iterable<string>;
     activeStatementId?: string;
   }) {
-    const nextStatements = next.statements || statements;
-    const nextItems = [...(next.items || items)];
-    const draft = createReviewDraft({
-      statements: nextStatements,
-      expenses: nextItems,
-      selectedIds: next.selectedIds ?? selectedIds,
-      activeStatementId: next.activeStatementId ?? activeStatementId
+    const updated = updateActiveMonth({
+      statements: next.statements,
+      expenses: next.items,
+      selectedIds: next.selectedIds,
+      activeStatementId: next.activeStatementId
     });
 
-    if (!writeStoredReviewDraft(draft)) {
+    if (!updated) {
       setNotice({
         tone: "error",
-        message: "Current rows could not be saved in this browser."
+        message: "Upload a statement to start a month first."
       });
       return false;
     }
@@ -719,7 +754,11 @@ export function StatementWorkspace() {
     );
   }
 
-  function loadExtraction(
+  /**
+   * Files an extraction into the month it belongs to. Returns null when the
+   * month could not be determined, which parks the upload until it is chosen.
+   */
+  async function loadExtraction(
     nextExtraction: StatementExtraction,
     nextSourceFileName = ""
   ) {
@@ -733,19 +772,68 @@ export function StatementWorkspace() {
       statementId,
       nextExtraction.expenses
     );
-    const shouldReplaceDraft = !hasStoredReviewDraft();
-    const nextSelectedIds = shouldReplaceDraft
-      ? statementItems.map((item) => item.id)
-      : new Set([
-          ...selectedIds,
-          ...statementItems.map((item) => item.id)
-        ]);
+    const determined = determineStatementMonth({
+      statement: nextExtraction.statement,
+      expenses: statementItems
+    });
 
-    writeReviewState({
-      statements: shouldReplaceDraft ? [statement] : [...statements, statement],
-      items: shouldReplaceDraft ? statementItems : [...items, ...statementItems],
-      selectedIds: nextSelectedIds,
-      activeStatementId: statementId
+    if (!determined.month) {
+      setPendingUpload({ statement, expenses: statementItems });
+      setPendingUploadMonth(activeMonth);
+      return null;
+    }
+
+    await fileStatement({
+      month: determined.month,
+      statement,
+      expenses: statementItems
+    });
+
+    return determined;
+  }
+
+  async function filePendingUpload() {
+    if (!pendingUpload) {
+      return;
+    }
+
+    if (!isMonthKey(pendingUploadMonth)) {
+      setNotice({ tone: "error", message: "Choose a month first." });
+      return;
+    }
+
+    await fileStatement({
+      month: pendingUploadMonth,
+      statement: pendingUpload.statement,
+      expenses: pendingUpload.expenses
+    });
+    setPendingUpload(null);
+    setNotice({
+      tone: "success",
+      message: `Filed ${formatStatementTitle(
+        pendingUpload.statement
+      )} into ${formatMonthLabel(pendingUploadMonth)}.`
+    });
+  }
+
+  function discardPendingUpload() {
+    setPendingUpload(null);
+    setNotice({ tone: "neutral", message: "Upload discarded." });
+  }
+
+  async function changeStatementMonth(statementId: string, month: string) {
+    if (!isMonthKey(month) || month === activeMonth) {
+      return;
+    }
+
+    const statement = statementById.get(statementId);
+
+    await reassignStatement({ statementId, month });
+    setNotice({
+      tone: "success",
+      message: `Moved ${formatStatementTitle(statement)} to ${formatMonthLabel(
+        month
+      )}.`
     });
   }
 
@@ -757,7 +845,7 @@ export function StatementWorkspace() {
       return;
     }
 
-    writeReviewState({
+    writeMonthState({
       statements: statements.map((statement) =>
         statement.id === activeStatement.id
           ? {
@@ -773,7 +861,7 @@ export function StatementWorkspace() {
   }
 
   function updateItem(id: string, patch: Partial<ExpenseItem>) {
-    writeReviewState({
+    writeMonthState({
       items: items.map((item) =>
         item.id === id ? { ...item, ...patch } : item
       )
@@ -811,7 +899,7 @@ export function StatementWorkspace() {
     }
 
     if (
-      !writeReviewState({
+      !writeMonthState({
         items: items.map((item) =>
           changedItemIds.has(item.id) ? { ...item, category } : item
         )
@@ -855,7 +943,7 @@ export function StatementWorkspace() {
       return;
     }
 
-    if (!writeReviewState({ items: result.items })) {
+    if (!writeMonthState({ items: result.items })) {
       return;
     }
 
@@ -911,7 +999,7 @@ export function StatementWorkspace() {
       next.add(id);
     }
 
-    writeReviewState({ selectedIds: next });
+    writeMonthState({ selectedIds: next });
   }
 
   function toggleAll() {
@@ -928,7 +1016,7 @@ export function StatementWorkspace() {
       visibleItemIds.forEach((id) => nextSelectedIds.add(id));
     }
 
-    writeReviewState({
+    writeMonthState({
       selectedIds: nextSelectedIds
     });
   }
@@ -938,7 +1026,7 @@ export function StatementWorkspace() {
       return;
     }
 
-    writeReviewState({ activeStatementId: statementId });
+    writeMonthState({ activeStatementId: statementId });
   }
 
   function selectStatementRows(statementId: string) {
@@ -952,7 +1040,7 @@ export function StatementWorkspace() {
       return;
     }
 
-    writeReviewState({
+    writeMonthState({
       selectedIds: new Set([...selectedIds, ...rowIds]),
       activeStatementId: statementId
     });
@@ -973,7 +1061,7 @@ export function StatementWorkspace() {
     const nextSelectedIds = [...selectedIds].filter((id) => !rowIds.has(id));
     const statement = statementById.get(statementId);
 
-    writeReviewState({
+    writeMonthState({
       selectedIds: nextSelectedIds,
       activeStatementId: statementId
     });
@@ -996,7 +1084,7 @@ export function StatementWorkspace() {
     );
     const statement = statementById.get(statementId);
 
-    writeReviewState({
+    writeMonthState({
       statements: nextStatements,
       items: items.filter((item) => item.statementId !== statementId),
       selectedIds: [...selectedIds].filter((id) => !rowIds.has(id)),
@@ -1040,7 +1128,7 @@ export function StatementWorkspace() {
       notes: ""
     };
 
-    writeReviewState({
+    writeMonthState({
       statements: activeStatement ? statements : [...statements, targetStatement],
       items: [row, ...items],
       selectedIds: new Set([id, ...selectedIds]),
@@ -1052,7 +1140,7 @@ export function StatementWorkspace() {
     const nextSelectedIds = new Set(selectedIds);
     nextSelectedIds.delete(id);
 
-    writeReviewState({
+    writeMonthState({
       items: items.filter((item) => item.id !== id),
       selectedIds: nextSelectedIds
     });
@@ -1304,6 +1392,86 @@ export function StatementWorkspace() {
           </div>
         </section>
 
+        {pendingUpload ? (
+          <section className="panel month-prompt-panel">
+            <div className="panel-heading">
+              <CalendarRange size={18} {...hydrationSafeIconProps} />
+              <h2>Pick a month</h2>
+            </div>
+            <p className="month-prompt-copy">
+              {formatStatementTitle(pendingUpload.statement)} has no usable
+              statement period and no usable row dates. Choose the month it
+              belongs to.
+            </p>
+            <label className="field">
+              <span>Month</span>
+              <input
+                type="month"
+                value={pendingUploadMonth}
+                onChange={(event) => setPendingUploadMonth(event.target.value)}
+              />
+            </label>
+            <button
+              className="secondary-button"
+              type="button"
+              title="File this statement"
+              disabled={!isMonthKey(pendingUploadMonth)}
+              onClick={() => void filePendingUpload()}
+            >
+              <CalendarRange size={18} {...hydrationSafeIconProps} />
+              File statement
+            </button>
+            <button
+              className="filter-clear-button"
+              type="button"
+              onClick={discardPendingUpload}
+            >
+              Discard
+            </button>
+          </section>
+        ) : null}
+
+        <section className="panel month-stepper-panel">
+          <div className="month-stepper">
+            <button
+              className="mini-icon-button"
+              type="button"
+              title="Previous month"
+              aria-label="Previous month"
+              disabled={!previousMonth || monthsLoading}
+              onClick={() => void selectMonth(previousMonth)}
+            >
+              <ChevronLeft size={16} {...hydrationSafeIconProps} />
+            </button>
+            <div className="month-stepper-label">
+              <strong>
+                {activeMonth
+                  ? formatMonthLabel(activeMonth)
+                  : monthsLoading
+                    ? "Loading months"
+                    : "No months yet"}
+              </strong>
+              <small>
+                {activeMonth
+                  ? `${statements.length} ${
+                      statements.length === 1 ? "statement" : "statements"
+                    } / ${items.length} rows`
+                  : "Upload a statement to start one"}
+              </small>
+            </div>
+            <button
+              className="mini-icon-button"
+              type="button"
+              title="Next month"
+              aria-label="Next month"
+              disabled={!nextMonth || monthsLoading}
+              onClick={() => void selectMonth(nextMonth)}
+            >
+              <ChevronRight size={16} {...hydrationSafeIconProps} />
+            </button>
+          </div>
+        </section>
+
         <section className="panel statement-list-panel">
           <div className="panel-heading panel-heading-split">
             <div className="panel-heading-title">
@@ -1315,7 +1483,13 @@ export function StatementWorkspace() {
 
           <div className="statement-list">
             {statementSummaries.length === 0 ? (
-              <div className="statement-empty">No statements</div>
+              <div className="statement-empty">
+                {monthsLoading
+                  ? "Loading months"
+                  : months.length === 0
+                    ? "Upload a statement to start a month"
+                    : "No statements"}
+              </div>
             ) : null}
             {statementSummaries.map(
               ({
@@ -1378,6 +1552,21 @@ export function StatementWorkspace() {
                       <Trash2 size={14} {...hydrationSafeIconProps} />
                     </button>
                   </div>
+
+                  <label className="statement-source-month">
+                    <span>Month</span>
+                    <input
+                      type="month"
+                      value={activeMonth}
+                      disabled={monthsLoading}
+                      onChange={(event) =>
+                        void changeStatementMonth(
+                          statement.id,
+                          event.target.value
+                        )
+                      }
+                    />
+                  </label>
                 </div>
               )
             )}
@@ -1461,7 +1650,9 @@ export function StatementWorkspace() {
       <section className="workspace" aria-label="Expense review table">
         <div className="workspace-top">
           <div>
-            <p className="eyebrow">Review queue</p>
+            <p className="eyebrow">
+              {activeMonth ? formatMonthLabel(activeMonth) : "Review queue"}
+            </p>
             <h2>
               {statements.length > 1
                 ? "Combined review"
@@ -1484,15 +1675,15 @@ export function StatementWorkspace() {
           </div>
         </div>
 
-        <div className={`notice ${notice.tone}`} role="status">
-          {notice.tone === "error" ? (
+        <div className={`notice ${activeNotice.tone}`} role="status">
+          {activeNotice.tone === "error" ? (
             <AlertTriangle size={16} {...hydrationSafeIconProps} />
-          ) : notice.tone === "success" ? (
+          ) : activeNotice.tone === "success" ? (
             <Check size={16} {...hydrationSafeIconProps} />
           ) : (
             <FileText size={16} {...hydrationSafeIconProps} />
           )}
-          <span>{notice.message}</span>
+          <span>{activeNotice.message}</span>
           {lastSave?.pages[0]?.url ? (
             <a href={lastSave.pages[0].url} target="_blank" rel="noreferrer">
               Open first page
@@ -1957,8 +2148,11 @@ export function StatementWorkspace() {
                 <tr>
                   <td colSpan={12}>
                     <div className="empty-state">
-                      No expense rows returned. Re-upload the statement file and
-                      inspect the saved artifact directory shown above.
+                      {monthsLoading
+                        ? "Loading this month..."
+                        : months.length === 0
+                          ? "No months yet. Upload a statement and it is filed into the month it covers."
+                          : "No expense rows in this month. Re-upload the statement file and inspect the saved artifact directory shown above."}
                     </div>
                   </td>
                 </tr>
@@ -2747,70 +2941,6 @@ function writeAppCategoryVisibilityPreference(value: boolean) {
   }
 }
 
-function subscribeToReviewDraft(onStoreChange: () => void) {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === REVIEW_DRAFT_STORAGE_KEY) {
-      onStoreChange();
-    }
-  };
-
-  window.addEventListener("storage", onStorage);
-  window.addEventListener(REVIEW_DRAFT_STORAGE_EVENT, onStoreChange);
-
-  return () => {
-    window.removeEventListener("storage", onStorage);
-    window.removeEventListener(REVIEW_DRAFT_STORAGE_EVENT, onStoreChange);
-  };
-}
-
-function readSampleReviewDraftSnapshot() {
-  return SAMPLE_REVIEW_DRAFT;
-}
-
-function readReviewDraftSnapshot() {
-  if (typeof window === "undefined") {
-    return SAMPLE_REVIEW_DRAFT;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(REVIEW_DRAFT_STORAGE_KEY);
-
-    if (raw === cachedReviewDraftRaw) {
-      return cachedReviewDraftSnapshot;
-    }
-
-    const draft = raw ? parseReviewDraft(JSON.parse(raw)) : null;
-    cachedReviewDraftRaw = raw;
-    cachedReviewDraftSnapshot = draft || SAMPLE_REVIEW_DRAFT;
-    return cachedReviewDraftSnapshot;
-  } catch {
-    cachedReviewDraftRaw = null;
-    cachedReviewDraftSnapshot = SAMPLE_REVIEW_DRAFT;
-    return cachedReviewDraftSnapshot;
-  }
-}
-
-function writeStoredReviewDraft(draft: ReviewDraft) {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  try {
-    const raw = JSON.stringify(draft);
-    window.localStorage.setItem(REVIEW_DRAFT_STORAGE_KEY, raw);
-    cachedReviewDraftRaw = raw;
-    cachedReviewDraftSnapshot = draft;
-    window.dispatchEvent(new Event(REVIEW_DRAFT_STORAGE_EVENT));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function subscribeToReviewHistory(onStoreChange: () => void) {
   if (typeof window === "undefined") {
     return () => {};
@@ -2878,16 +3008,27 @@ function writeStoredReviewHistory(
   }
 }
 
-function hasStoredReviewDraft() {
-  if (typeof window === "undefined") {
-    return false;
+function monthsNotice(state: MonthsState): Notice | null {
+  if (state.error) {
+    return { tone: "error", message: state.error };
   }
 
-  try {
-    return window.localStorage.getItem(REVIEW_DRAFT_STORAGE_KEY) !== null;
-  } catch {
-    return false;
+  if (!state.migration) {
+    return null;
   }
+
+  const { monthCount, statementCount, unresolvedCount } = state.migration;
+  const dropped =
+    unresolvedCount > 0
+      ? ` ${unresolvedCount} could not be dated and were dropped.`
+      : "";
+
+  return {
+    tone: "success",
+    message: `Filed ${statementCount} saved ${
+      statementCount === 1 ? "statement" : "statements"
+    } into ${monthCount} ${monthCount === 1 ? "month" : "months"}.${dropped}`
+  };
 }
 
 function createClientId(prefix: string) {

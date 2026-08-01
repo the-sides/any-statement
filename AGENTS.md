@@ -22,7 +22,15 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 
 ## Current Behavior
 
-- `/` renders the upload/review/save workspace.
+- `/` renders the upload/review/save workspace, scoped to one month at a time.
+- An uploaded statement is filed into the calendar month covering most of its period,
+  falling back to its row dates, and the workspace switches to that month. There is no
+  save-month action; months are derived. See `specs/month-scoped-statements.md`.
+- Month documents live on disk in `./data/months/<YYYY-MM>.json` (gitignored) rather than
+  in the `/tmp` artifact directory, which has been wiped before.
+- The workspace edits the active month optimistically and flushes to the server on a
+  ~500ms debounce, forced on page unload. The cash flow plan, undo history, categorization
+  notes, and the app-category preference stay in browser localStorage and stay global.
 - `/api/extract` accepts `statementFile` as multipart form data, with legacy `statementPdf` replays still accepted.
 - `/api/extract` saves the original PDF or CSV and extraction artifacts to `/tmp/statement-ledger/uploads/<upload-id>/`.
 - OpenRouter is the primary extraction path.
@@ -36,6 +44,12 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 ## Important Files
 
 - `components/StatementWorkspace.tsx` - client UI state, upload, row editing, and save flow.
+- `lib/months.ts` - month determination, filing, reassignment, listing, and legacy draft
+  migration as pure transforms; `lib/months.test.ts` covers it.
+- `lib/monthsStore.ts` - client-side month store: load, debounced writes, unload flush.
+- `lib/monthStore.ts` - server-side month document persistence under `./data/months/`.
+- `app/api/months/route.ts` and `app/api/months/[month]/route.ts` - month list and
+  read/write/delete of one month document.
 - `app/api/categories/route.ts` - category catalog read and enabled/disabled updates.
 - `app/api/categories/import/route.ts` - Notion category import route.
 - `app/api/extract/route.ts` - upload validation, artifact persistence, OpenRouter extraction, fallback application.

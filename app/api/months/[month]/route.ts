@@ -57,6 +57,11 @@ export async function PUT(request: Request, context: RouteContext) {
   }
 }
 
+/** `navigator.sendBeacon` can only POST, so unload flushes land here. */
+export async function POST(request: Request, context: RouteContext) {
+  return PUT(request, context);
+}
+
 export async function DELETE(_request: Request, context: RouteContext) {
   const { month } = await context.params;
 

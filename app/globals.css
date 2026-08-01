@@ -1378,6 +1378,77 @@ meter {
   white-space: nowrap;
 }
 
+.month-stepper-panel {
+  padding: 9px;
+}
+
+.month-stepper {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  gap: 8px;
+  align-items: center;
+}
+
+.month-stepper .mini-icon-button {
+  width: 34px;
+  height: 34px;
+}
+
+.month-stepper-label {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  text-align: center;
+}
+
+.month-stepper-label strong {
+  font-size: 14px;
+}
+
+.month-stepper-label small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.statement-source-month {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 7px;
+}
+
+.statement-source-month span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.statement-source-month input {
+  max-width: 150px;
+  min-height: 32px;
+}
+
+.month-prompt-copy {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.month-prompt-panel .secondary-button {
+  margin-top: 10px;
+}
+
+.month-prompt-panel .filter-clear-button {
+  margin-top: 8px;
+}
+
 .spin {
   animation: spin 0.9s linear infinite;
 }
