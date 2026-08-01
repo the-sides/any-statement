@@ -62,9 +62,11 @@ import {
 import {
   determineStatementMonth,
   formatMonthLabel,
-  isMonthKey
+  isMonthKey,
+  statementMonthSourceOf
 } from "@/lib/months";
 import {
+  clearMonthsNotice,
   fileStatement,
   readInitialMonthsSnapshot,
   readMonthsSnapshot,
@@ -73,7 +75,7 @@ import {
   subscribeToMonths,
   updateActiveMonth,
   type MonthsState
-} from "@/lib/monthsStore";
+} from "@/lib/monthsClientStore";
 import {
   createReviewStatement,
   createStatementExpenses,
@@ -397,7 +399,7 @@ export function StatementWorkspace() {
         }
       } catch {
         if (active) {
-          setNotice({
+          showNotice({
             tone: "neutral",
             message: "Using built-in categories."
           });
@@ -416,10 +418,9 @@ export function StatementWorkspace() {
     };
   }, []);
 
-
   async function extractStatement() {
     if (!file) {
-      setNotice({
+      showNotice({
         tone: "error",
         message: "Choose a PDF or CSV statement first."
       });
@@ -427,7 +428,7 @@ export function StatementWorkspace() {
     }
 
     if (file.size > MAX_STATEMENT_FILE_SIZE) {
-      setNotice({
+      showNotice({
         tone: "error",
         message: "Statement file is too large. The current limit is 12 MB."
       });
@@ -436,7 +437,7 @@ export function StatementWorkspace() {
 
     setBusy("extracting");
     setLastSave(null);
-    setNotice({ tone: "neutral", message: "Extracting statement rows..." });
+    showNotice({ tone: "neutral", message: "Extracting statement rows..." });
 
     try {
       const formData = new FormData();
@@ -474,12 +475,12 @@ export function StatementWorkspace() {
       );
 
       if (rowCount === 0) {
-        setNotice({
+        showNotice({
           tone: "error",
           message: `AI extraction returned no expense rows.${artifactMessage}`
         });
       } else if (!determined) {
-        setNotice({
+        showNotice({
           tone: "neutral",
           message: `Extracted ${rowCount} expenses. Choose the month this statement belongs to.${artifactMessage}`
         });
@@ -489,7 +490,7 @@ export function StatementWorkspace() {
             ? " Month came from the row dates, so check it."
             : "";
 
-        setNotice({
+        showNotice({
           tone: "success",
           message: `Extracted ${rowCount} expenses into ${formatMonthLabel(
             determined.month || ""
@@ -497,7 +498,7 @@ export function StatementWorkspace() {
         });
       }
     } catch (error) {
-      setNotice({
+      showNotice({
         tone: "error",
         message:
           error instanceof Error ? error.message : "Extraction failed."
@@ -509,13 +510,13 @@ export function StatementWorkspace() {
 
   async function saveToNotion() {
     if (!selectedItems.length) {
-      setNotice({ tone: "error", message: "Select at least one row." });
+      showNotice({ tone: "error", message: "Select at least one row." });
       return;
     }
 
     setBusy("saving");
     setLastSave(null);
-    setNotice({ tone: "neutral", message: "Saving selected rows..." });
+    showNotice({ tone: "neutral", message: "Saving selected rows..." });
 
     try {
       const response = await fetch("/api/notion/save", {
@@ -539,12 +540,12 @@ export function StatementWorkspace() {
       }
 
       setLastSave(result);
-      setNotice({
+      showNotice({
         tone: "success",
         message: `Saved ${result.saved} rows to Notion.`
       });
     } catch (error) {
-      setNotice({
+      showNotice({
         tone: "error",
         message: error instanceof Error ? error.message : "Save failed."
       });
@@ -561,7 +562,7 @@ export function StatementWorkspace() {
     }
 
     if (items.length === 0) {
-      setNotice({
+      showNotice({
         tone: "error",
         message: "Add expense rows before using expense chat."
       });
@@ -622,7 +623,7 @@ export function StatementWorkspace() {
           content: message
         }
       ]);
-      setNotice({ tone: "error", message });
+      showNotice({ tone: "error", message });
     } finally {
       setChatBusy(false);
     }
@@ -630,7 +631,7 @@ export function StatementWorkspace() {
 
   async function importCategories() {
     setCategoryBusy("importing");
-    setNotice({ tone: "neutral", message: "Importing categories..." });
+    showNotice({ tone: "neutral", message: "Importing categories..." });
 
     try {
       const response = await fetch("/api/categories/import", {
@@ -643,12 +644,12 @@ export function StatementWorkspace() {
       }
 
       setCategories(result.categories);
-      setNotice({
+      showNotice({
         tone: "success",
         message: `Imported ${result.imported || 0} categories.`
       });
     } catch (error) {
-      setNotice({
+      showNotice({
         tone: "error",
         message:
           error instanceof Error ? error.message : "Category import failed."
@@ -685,7 +686,7 @@ export function StatementWorkspace() {
       setCategories(result.categories);
     } catch (error) {
       setCategories(previousCategories);
-      setNotice({
+      showNotice({
         tone: "error",
         message:
           error instanceof Error ? error.message : "Category update failed."
@@ -697,28 +698,21 @@ export function StatementWorkspace() {
 
   function toggleAppCategoryVisibility(enabled: boolean) {
     if (!writeAppCategoryVisibilityPreference(enabled)) {
-      setNotice({
+      showNotice({
         tone: "error",
         message: "APP category preference could not be saved in this browser."
       });
     }
   }
 
-  function writeMonthState(next: {
-    statements?: readonly ReviewStatement[];
-    items?: readonly ExpenseItem[];
-    selectedIds?: Iterable<string>;
-    activeStatementId?: string;
-  }) {
-    const updated = updateActiveMonth({
-      statements: next.statements,
-      expenses: next.items,
-      selectedIds: next.selectedIds,
-      activeStatementId: next.activeStatementId
-    });
+  function showNotice(next: Notice) {
+    clearMonthsNotice();
+    setNotice(next);
+  }
 
-    if (!updated) {
-      setNotice({
+  function writeMonthState(next: Parameters<typeof updateActiveMonth>[0]) {
+    if (!updateActiveMonth(next)) {
+      showNotice({
         tone: "error",
         message: "Upload a statement to start a month first."
       });
@@ -754,20 +748,12 @@ export function StatementWorkspace() {
     );
   }
 
-  /**
-   * Files an extraction into the month it belongs to. Returns null when the
-   * month could not be determined, which parks the upload until it is chosen.
-   */
+  /** Returns null when the month could not be determined, which parks the upload. */
   async function loadExtraction(
     nextExtraction: StatementExtraction,
     nextSourceFileName = ""
   ) {
     const statementId = createClientId("statement");
-    const statement = createReviewStatement({
-      id: statementId,
-      statement: nextExtraction.statement,
-      sourceFileName: nextSourceFileName
-    });
     const statementItems = createStatementExpenses(
       statementId,
       nextExtraction.expenses
@@ -775,6 +761,14 @@ export function StatementWorkspace() {
     const determined = determineStatementMonth({
       statement: nextExtraction.statement,
       expenses: statementItems
+    });
+    const statement = createReviewStatement({
+      id: statementId,
+      statement: nextExtraction.statement,
+      sourceFileName: nextSourceFileName,
+      monthSource: determined.month
+        ? statementMonthSourceOf(determined)
+        : "manual"
     });
 
     if (!determined.month) {
@@ -798,7 +792,7 @@ export function StatementWorkspace() {
     }
 
     if (!isMonthKey(pendingUploadMonth)) {
-      setNotice({ tone: "error", message: "Choose a month first." });
+      showNotice({ tone: "error", message: "Choose a month first." });
       return;
     }
 
@@ -808,7 +802,7 @@ export function StatementWorkspace() {
       expenses: pendingUpload.expenses
     });
     setPendingUpload(null);
-    setNotice({
+    showNotice({
       tone: "success",
       message: `Filed ${formatStatementTitle(
         pendingUpload.statement
@@ -818,7 +812,7 @@ export function StatementWorkspace() {
 
   function discardPendingUpload() {
     setPendingUpload(null);
-    setNotice({ tone: "neutral", message: "Upload discarded." });
+    showNotice({ tone: "neutral", message: "Upload discarded." });
   }
 
   async function changeStatementMonth(statementId: string, month: string) {
@@ -829,7 +823,7 @@ export function StatementWorkspace() {
     const statement = statementById.get(statementId);
 
     await reassignStatement({ statementId, month });
-    setNotice({
+    showNotice({
       tone: "success",
       message: `Moved ${formatStatementTitle(statement)} to ${formatMonthLabel(
         month
@@ -862,7 +856,7 @@ export function StatementWorkspace() {
 
   function updateItem(id: string, patch: Partial<ExpenseItem>) {
     writeMonthState({
-      items: items.map((item) =>
+      expenses: items.map((item) =>
         item.id === id ? { ...item, ...patch } : item
       )
     });
@@ -877,7 +871,7 @@ export function StatementWorkspace() {
     const changedCount = changedItems.length;
 
     if (targetSelectedItems.length === 0) {
-      setNotice({
+      showNotice({
         tone: "error",
         message:
           categoryFilters.length > 0
@@ -888,7 +882,7 @@ export function StatementWorkspace() {
     }
 
     if (changedCount === 0) {
-      setNotice({
+      showNotice({
         tone: "neutral",
         message:
           categoryFilters.length > 0
@@ -900,7 +894,7 @@ export function StatementWorkspace() {
 
     if (
       !writeMonthState({
-        items: items.map((item) =>
+        expenses: items.map((item) =>
           changedItemIds.has(item.id) ? { ...item, category } : item
         )
       })
@@ -913,7 +907,7 @@ export function StatementWorkspace() {
     } to ${category}`;
     const undoSaved = recordBulkCategoryUndo(label, changedItems, category);
 
-    setNotice({
+    showNotice({
       tone: undoSaved ? "success" : "neutral",
       message: undoSaved
         ? `Updated ${changedCount} ${
@@ -927,7 +921,7 @@ export function StatementWorkspace() {
 
   function undoLastItemChange() {
     if (!lastReviewHistoryEvent) {
-      setNotice({ tone: "error", message: "Nothing to undo." });
+      showNotice({ tone: "error", message: "Nothing to undo." });
       return;
     }
 
@@ -936,14 +930,14 @@ export function StatementWorkspace() {
 
     if (result.restoredCount === 0) {
       writeReviewHistoryState(nextHistory);
-      setNotice({
+      showNotice({
         tone: "error",
         message: "Nothing to undo for those rows."
       });
       return;
     }
 
-    if (!writeMonthState({ items: result.items })) {
+    if (!writeMonthState({ expenses: result.items })) {
       return;
     }
 
@@ -955,7 +949,7 @@ export function StatementWorkspace() {
           } skipped.`
         : "";
 
-    setNotice({
+    showNotice({
       tone: historyUpdated ? "success" : "error",
       message: historyUpdated
         ? `Undid ${lastReviewHistoryEvent.label}.${missingMessage}`
@@ -1036,7 +1030,7 @@ export function StatementWorkspace() {
     const statement = statementById.get(statementId);
 
     if (rowIds.length === 0) {
-      setNotice({ tone: "error", message: "No rows for that statement." });
+      showNotice({ tone: "error", message: "No rows for that statement." });
       return;
     }
 
@@ -1044,7 +1038,7 @@ export function StatementWorkspace() {
       selectedIds: new Set([...selectedIds, ...rowIds]),
       activeStatementId: statementId
     });
-    setNotice({
+    showNotice({
       tone: "success",
       message: `Selected ${rowIds.length} rows from ${formatStatementTitle(
         statement
@@ -1065,7 +1059,7 @@ export function StatementWorkspace() {
       selectedIds: nextSelectedIds,
       activeStatementId: statementId
     });
-    setNotice({
+    showNotice({
       tone: "neutral",
       message: `Cleared ${rowIds.size} rows from ${formatStatementTitle(
         statement
@@ -1086,14 +1080,14 @@ export function StatementWorkspace() {
 
     writeMonthState({
       statements: nextStatements,
-      items: items.filter((item) => item.statementId !== statementId),
+      expenses: items.filter((item) => item.statementId !== statementId),
       selectedIds: [...selectedIds].filter((id) => !rowIds.has(id)),
       activeStatementId:
         activeStatementId === statementId
           ? nextStatements[0]?.id || ""
           : activeStatementId
     });
-    setNotice({
+    showNotice({
       tone: "neutral",
       message: `Removed ${rowIds.size} rows from ${formatStatementTitle(
         statement
@@ -1130,7 +1124,7 @@ export function StatementWorkspace() {
 
     writeMonthState({
       statements: activeStatement ? statements : [...statements, targetStatement],
-      items: [row, ...items],
+      expenses: [row, ...items],
       selectedIds: new Set([id, ...selectedIds]),
       activeStatementId: targetStatementId
     });
@@ -1141,7 +1135,7 @@ export function StatementWorkspace() {
     nextSelectedIds.delete(id);
 
     writeMonthState({
-      items: items.filter((item) => item.id !== id),
+      expenses: items.filter((item) => item.id !== id),
       selectedIds: nextSelectedIds
     });
   }
@@ -1150,7 +1144,7 @@ export function StatementWorkspace() {
     const plan = createCashFlowPlan(entries);
 
     if (!writeStoredCashFlowPlan(plan)) {
-      setNotice({
+      showNotice({
         tone: "error",
         message: "Cash flow inputs could not be saved in this browser."
       });
@@ -1300,7 +1294,7 @@ export function StatementWorkspace() {
             maxLength={MAX_CATEGORIZATION_NOTES_LENGTH}
             onChange={(event) => {
               if (!writeCategorizationNotes(event.target.value)) {
-                setNotice({
+                showNotice({
                   tone: "error",
                   message: "AI notes could not be saved in this browser."
                 });
@@ -1553,8 +1547,17 @@ export function StatementWorkspace() {
                     </button>
                   </div>
 
-                  <label className="statement-source-month">
-                    <span>Month</span>
+                  <label
+                    className="statement-source-month"
+                    title={
+                      statement.monthSource === "rows"
+                        ? "Month came from the row dates, not the statement period."
+                        : "Month this statement is filed under."
+                    }
+                  >
+                    <span>
+                      Month{statement.monthSource === "rows" ? " (guessed)" : ""}
+                    </span>
                     <input
                       type="month"
                       value={activeMonth}
@@ -3018,16 +3021,22 @@ function monthsNotice(state: MonthsState): Notice | null {
   }
 
   const { monthCount, statementCount, unresolvedCount } = state.migration;
-  const dropped =
+  const filed =
+    statementCount > 0
+      ? `Filed ${statementCount} saved ${
+          statementCount === 1 ? "statement" : "statements"
+        } into ${monthCount} ${monthCount === 1 ? "month" : "months"}.`
+      : "";
+  const undated =
     unresolvedCount > 0
-      ? ` ${unresolvedCount} could not be dated and were dropped.`
+      ? `${unresolvedCount} ${
+          unresolvedCount === 1 ? "statement" : "statements"
+        } could not be dated and stayed in this browser's draft.`
       : "";
 
   return {
-    tone: "success",
-    message: `Filed ${statementCount} saved ${
-      statementCount === 1 ? "statement" : "statements"
-    } into ${monthCount} ${monthCount === 1 ? "month" : "months"}.${dropped}`
+    tone: undated ? "neutral" : "success",
+    message: [filed, undated].filter(Boolean).join(" ")
   };
 }
 

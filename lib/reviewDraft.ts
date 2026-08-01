@@ -15,8 +15,16 @@ export const REVIEW_DRAFT_STORAGE_KEY = "statement-ledger.review-draft";
 const REVIEW_DRAFT_VERSION = 2;
 const LEGACY_REVIEW_DRAFT_VERSION = 1;
 
+export const STATEMENT_MONTH_SOURCES = ["period", "rows", "manual"] as const;
+
+/** How a statement's month was decided. Empty for statements filed before this. */
+export type StatementMonthSource =
+  | (typeof STATEMENT_MONTH_SOURCES)[number]
+  | "";
+
 export type ReviewStatement = SaveStatementSource & {
   importedAt: string;
+  monthSource: StatementMonthSource;
 };
 
 export type ReviewContents = {
@@ -141,13 +149,15 @@ export function createReviewStatement(input: {
   statement: StatementSummary;
   sourceFileName: string;
   importedAt?: string;
+  monthSource?: StatementMonthSource;
 }): ReviewStatement {
   return normalizeReviewStatement(
     {
       id: input.id,
       statement: input.statement,
       sourceFileName: input.sourceFileName,
-      importedAt: input.importedAt || new Date().toISOString()
+      importedAt: input.importedAt || new Date().toISOString(),
+      monthSource: input.monthSource || ""
     },
     0
   );
@@ -281,7 +291,8 @@ function parseReviewStatement(
       id: asString(record.id, `statement-${index + 1}`),
       statement,
       sourceFileName: asString(record.sourceFileName),
-      importedAt: asString(record.importedAt)
+      importedAt: asString(record.importedAt),
+      monthSource: parseEnum(record.monthSource, STATEMENT_MONTH_SOURCES) || ""
     },
     index
   );
@@ -295,7 +306,8 @@ function normalizeReviewStatement(
     id: statement.id.trim() || `statement-${index + 1}`,
     statement: statement.statement,
     sourceFileName: statement.sourceFileName.trim(),
-    importedAt: statement.importedAt || new Date().toISOString()
+    importedAt: statement.importedAt || new Date().toISOString(),
+    monthSource: statement.monthSource || ""
   };
 }
 

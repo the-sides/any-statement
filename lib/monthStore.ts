@@ -8,7 +8,7 @@ import {
   type MonthSummary
 } from "@/lib/months";
 
-const DEFAULT_DATA_ROOT = "data";
+const DATA_ROOT = "data";
 const MONTHS_DIRECTORY = "months";
 
 export async function listStoredMonths(): Promise<MonthSummary[]> {
@@ -62,7 +62,7 @@ export async function writeStoredMonth(
   return document;
 }
 
-export async function deleteStoredMonth(month: string) {
+async function deleteStoredMonth(month: string) {
   if (!isMonthKey(month)) {
     return;
   }
@@ -88,9 +88,5 @@ function monthPath(month: string) {
 }
 
 function monthsDirectory() {
-  const root =
-    process.env.STATEMENT_LEDGER_DATA_DIR ||
-    path.join(process.cwd(), DEFAULT_DATA_ROOT);
-
-  return path.join(root, MONTHS_DIRECTORY);
+  return path.join(process.cwd(), DATA_ROOT, MONTHS_DIRECTORY);
 }

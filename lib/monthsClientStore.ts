@@ -1,6 +1,7 @@
 import {
   createMonthDocument,
   fileStatementIntoMonth,
+  mergeMonthDocuments,
   migrateReviewDraftToMonths,
   parseMonthDocument,
   reassignStatementMonth,
@@ -10,7 +11,10 @@ import {
 } from "@/lib/months";
 import {
   REVIEW_DRAFT_STORAGE_KEY,
+  createReviewDraft,
   parseReviewDraft,
+  type ReviewContents,
+  type ReviewDraft,
   type ReviewStatement
 } from "@/lib/reviewDraft";
 import type { ExpenseItem } from "@/lib/types";
@@ -66,20 +70,14 @@ export function readInitialMonthsSnapshot() {
   return INITIAL_STATE;
 }
 
-/**
- * Store notices describe the last thing the store did, so the next action
- * clears them.
- */
-function beginAction() {
+/** Store notices describe the last thing the store did, so anything newer clears them. */
+export function clearMonthsNotice() {
   if (state.error || state.migration) {
     setState({ error: "", migration: null });
   }
 }
 
-/**
- * Applies an edit to the month on screen. State updates immediately and the
- * document is flushed to the server on a debounce.
- */
+/** State updates immediately; the document is flushed on a debounce. */
 export function updateActiveMonth(input: {
   statements?: readonly ReviewStatement[];
   expenses?: readonly ExpenseItem[];
@@ -92,12 +90,12 @@ export function updateActiveMonth(input: {
     return false;
   }
 
-  beginAction();
+  clearMonthsNotice();
 
   const next = createMonthDocument({
     month: current.month,
-    statements: input.statements || current.statements,
-    expenses: input.expenses || current.expenses,
+    statements: input.statements ?? current.statements,
+    expenses: input.expenses ?? current.expenses,
     selectedIds: input.selectedIds ?? current.selectedIds,
     activeStatementId: input.activeStatementId ?? current.activeStatementId
   });
@@ -124,7 +122,7 @@ export async function selectMonth(month: string) {
     return;
   }
 
-  beginAction();
+  clearMonthsNotice();
   await flushMonths();
   setState({ status: "loading", activeMonth: month, document: null });
 
@@ -137,15 +135,12 @@ export async function selectMonth(month: string) {
   }
 }
 
-/**
- * Files a freshly extracted statement into its month and switches to it.
- */
 export async function fileStatement(input: {
   month: string;
   statement: ReviewStatement;
   expenses: readonly ExpenseItem[];
 }) {
-  beginAction();
+  clearMonthsNotice();
   await flushMonths();
 
   try {
@@ -168,10 +163,6 @@ export async function fileStatement(input: {
   }
 }
 
-/**
- * Moves a statement and its rows into another month, creating that month when
- * it does not exist and dropping the source month when it empties.
- */
 export async function reassignStatement(input: {
   statementId: string;
   month: string;
@@ -182,7 +173,7 @@ export async function reassignStatement(input: {
     return;
   }
 
-  beginAction();
+  clearMonthsNotice();
   await flushMonths();
 
   try {
@@ -197,11 +188,7 @@ export async function reassignStatement(input: {
     await enqueueWrite(async () => {
       await putMonthDocument(moved.target);
 
-      if (moved.source) {
-        await putMonthDocument(moved.source);
-      } else {
-        await deleteMonthDocument(source.month);
-      }
+      await putMonthDocument(moved.source || emptyMonthDocument(source.month));
     });
 
     setState({
@@ -281,7 +268,7 @@ async function migrateLegacyReviewDraft(): Promise<MonthsMigration | null> {
     await putMonthDocument(mergeMonthDocuments(existing, document));
   }
 
-  removeLegacyReviewDraft();
+  keepUndatedStatements(draft, migrated.unresolvedStatementIds);
 
   return {
     monthCount: migrated.months.length,
@@ -291,35 +278,9 @@ async function migrateLegacyReviewDraft(): Promise<MonthsMigration | null> {
   };
 }
 
-function mergeMonthDocuments(
-  base: MonthDocument | null,
-  incoming: MonthDocument
-) {
-  const selectedIds = new Set(incoming.selectedIds);
-  const merged = incoming.statements.reduce<MonthDocument | null>(
-    (document, statement) => {
-      const expenses = incoming.expenses.filter(
-        (expense) => expense.statementId === statement.id
-      );
-
-      return fileStatementIntoMonth(document, {
-        month: incoming.month,
-        statement,
-        expenses,
-        selectedIds: expenses
-          .map((expense) => expense.id)
-          .filter((id) => selectedIds.has(id))
-      });
-    },
-    base
-  );
-
-  return merged || incoming;
-}
-
 async function dropMonth(month: string) {
   try {
-    await enqueueWrite(() => deleteMonthDocument(month));
+    await enqueueWrite(() => putMonthDocument(emptyMonthDocument(month)));
 
     const months = withoutMonth(state.months, month);
     const nextMonth = neighbourMonth(months, month);
@@ -329,6 +290,15 @@ async function dropMonth(month: string) {
   } catch (error) {
     setState({ error: errorMessage(error, "Removing the month failed.") });
   }
+}
+
+function emptyMonthDocument(month: string) {
+  return createMonthDocument({
+    month,
+    statements: [],
+    expenses: [],
+    selectedIds: []
+  });
 }
 
 function neighbourMonth(months: readonly MonthSummary[], removed: string) {
@@ -421,14 +391,6 @@ async function putMonthDocument(document: MonthDocument) {
   return result.summary || null;
 }
 
-async function deleteMonthDocument(month: string) {
-  const response = await fetch(`/api/months/${month}`, { method: "DELETE" });
-
-  if (!response.ok) {
-    throw new Error("Removing the month failed.");
-  }
-}
-
 function registerUnloadHandlers() {
   if (typeof window === "undefined") {
     return;
@@ -469,6 +431,44 @@ function readLegacyReviewDraft() {
     return window.localStorage.getItem(REVIEW_DRAFT_STORAGE_KEY);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Statements that could not be dated are left in the browser draft rather than
+ * thrown away. Everything already filed is removed so a later load cannot
+ * overwrite month documents the reviewer has edited since.
+ */
+function keepUndatedStatements(
+  draft: ReviewContents,
+  unresolvedStatementIds: readonly string[]
+) {
+  if (unresolvedStatementIds.length === 0) {
+    removeLegacyReviewDraft();
+
+    return;
+  }
+
+  const unresolved = new Set(unresolvedStatementIds);
+
+  writeLegacyReviewDraft(
+    createReviewDraft({
+      statements: draft.statements.filter((statement) =>
+        unresolved.has(statement.id)
+      ),
+      expenses: draft.expenses.filter((expense) =>
+        unresolved.has(expense.statementId || "")
+      ),
+      selectedIds: draft.selectedIds
+    })
+  );
+}
+
+function writeLegacyReviewDraft(draft: ReviewDraft) {
+  try {
+    window.localStorage.setItem(REVIEW_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  } catch {
+    // A browser that refuses storage has nothing left to keep.
   }
 }
 

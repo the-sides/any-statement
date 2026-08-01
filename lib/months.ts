@@ -2,7 +2,8 @@ import {
   normalizeReviewContents,
   parseReviewContents,
   type ReviewContents,
-  type ReviewStatement
+  type ReviewStatement,
+  type StatementMonthSource
 } from "@/lib/reviewDraft";
 import type { ExpenseItem, StatementSummary } from "@/lib/types";
 
@@ -85,6 +86,12 @@ export function determineStatementMonth(input: {
   }
 
   return { month: null, source: "none" };
+}
+
+export function statementMonthSourceOf(
+  determination: MonthDetermination
+): StatementMonthSource {
+  return determination.source === "rows" ? "rows" : "period";
 }
 
 export function createMonthDocument(input: {
@@ -216,11 +223,39 @@ export function reassignStatementMonth(input: {
     source: remainingSource,
     target: fileStatementIntoMonth(input.target, {
       month: input.month,
-      statement,
+      statement: { ...statement, monthSource: "manual" },
       expenses: movedExpenses,
       selectedIds: movedSelectedIds
     })
   };
+}
+
+/**
+ * Folds one month document into another, statement by statement, so a document
+ * arriving from elsewhere joins what is already filed instead of replacing it.
+ */
+export function mergeMonthDocuments(
+  base: MonthDocument | null,
+  incoming: MonthDocument
+): MonthDocument {
+  const selectedIds = new Set(incoming.selectedIds);
+  const merged = incoming.statements.reduce<MonthDocument | null>(
+    (document, statement) => {
+      const expenses = expensesForStatement(incoming, statement.id);
+
+      return fileStatementIntoMonth(document, {
+        month: incoming.month,
+        statement,
+        expenses,
+        selectedIds: expenses
+          .map((expense) => expense.id)
+          .filter((id) => selectedIds.has(id))
+      });
+    },
+    base
+  );
+
+  return merged || incoming;
 }
 
 export function listMonths(
@@ -250,9 +285,7 @@ export function migrateReviewDraftToMonths(draft: ReviewContents): {
   const documents = new Map<string, MonthDocument>();
 
   for (const statement of draft.statements) {
-    const expenses = draft.expenses.filter(
-      (expense) => expense.statementId === statement.id
-    );
+    const expenses = expensesForStatement(draft, statement.id);
     const determined = determineStatementMonth({
       statement: statement.statement,
       expenses
@@ -267,7 +300,10 @@ export function migrateReviewDraftToMonths(draft: ReviewContents): {
       determined.month,
       fileStatementIntoMonth(documents.get(determined.month) || null, {
         month: determined.month,
-        statement,
+        statement: {
+          ...statement,
+          monthSource: statementMonthSourceOf(determined)
+        },
         expenses,
         selectedIds: expenses
           .map((expense) => expense.id)
@@ -282,6 +318,15 @@ export function migrateReviewDraftToMonths(draft: ReviewContents): {
     ),
     unresolvedStatementIds
   };
+}
+
+function expensesForStatement(
+  contents: Pick<ReviewContents, "expenses">,
+  statementId: string
+) {
+  return contents.expenses.filter(
+    (expense) => expense.statementId === statementId
+  );
 }
 
 function monthFromPeriod(periodStart: string, periodEnd: string) {

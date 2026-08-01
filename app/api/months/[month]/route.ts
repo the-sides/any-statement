@@ -1,9 +1,5 @@
 import { isMonthKey, parseMonthDocument, summarizeMonthDocument } from "@/lib/months";
-import {
-  deleteStoredMonth,
-  readStoredMonth,
-  writeStoredMonth
-} from "@/lib/monthStore";
+import { readStoredMonth, writeStoredMonth } from "@/lib/monthStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,20 +56,4 @@ export async function PUT(request: Request, context: RouteContext) {
 /** `navigator.sendBeacon` can only POST, so unload flushes land here. */
 export async function POST(request: Request, context: RouteContext) {
   return PUT(request, context);
-}
-
-export async function DELETE(_request: Request, context: RouteContext) {
-  const { month } = await context.params;
-
-  if (!isMonthKey(month)) {
-    return Response.json({ error: "Unknown month." }, { status: 400 });
-  }
-
-  try {
-    await deleteStoredMonth(month);
-
-    return Response.json({ month, document: null });
-  } catch {
-    return Response.json({ error: "Removing the month failed." }, { status: 500 });
-  }
 }

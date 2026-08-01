@@ -5,6 +5,7 @@ import {
   fileStatementIntoMonth,
   formatMonthLabel,
   listMonths,
+  mergeMonthDocuments,
   migrateReviewDraftToMonths,
   parseMonthDocument,
   reassignStatementMonth
@@ -277,6 +278,54 @@ describe("month documents", () => {
     expect(moved.target.expenses.length).toBe(1);
   });
 
+  test("marks a reassigned statement's month as chosen by hand", () => {
+    const card = statementWith("statement-card", statementSummary, [
+      "2026-06-04"
+    ]);
+    const source = fileStatementIntoMonth(null, {
+      month: "2026-06",
+      statement: { ...card.statement, monthSource: "period" },
+      expenses: card.expenses
+    });
+    const moved = reassignStatementMonth({
+      statementId: "statement-card",
+      source,
+      target: null,
+      month: "2026-07"
+    });
+
+    expect(moved.target.statements[0].monthSource).toBe("manual");
+  });
+
+  test("merges an incoming month document into what is already filed", () => {
+    const card = statementWith("statement-card", statementSummary, [
+      "2026-06-04"
+    ]);
+    const bank = statementWith("statement-bank", statementSummary, [
+      "2026-06-09"
+    ]);
+    const base = fileStatementIntoMonth(null, {
+      month: "2026-06",
+      statement: card.statement,
+      expenses: card.expenses,
+      selectedIds: []
+    });
+    const incoming = fileStatementIntoMonth(null, {
+      month: "2026-06",
+      statement: bank.statement,
+      expenses: bank.expenses
+    });
+    const merged = mergeMonthDocuments(base, incoming);
+
+    expect(merged.statements.map((statement) => statement.id)).toEqual([
+      "statement-card",
+      "statement-bank"
+    ]);
+    expect(merged.expenses.length).toBe(2);
+    expect(merged.selectedIds).toEqual([bank.expenses[0].id]);
+    expect(mergeMonthDocuments(null, incoming).expenses.length).toBe(1);
+  });
+
   test("round-trips a month document through parse unchanged", () => {
     const card = statementWith("statement-card", statementSummary, [
       "2026-06-04",
@@ -412,6 +461,29 @@ describe("legacy review draft migration", () => {
     ]);
     expect(migrated.months[0].statements.length).toBe(1);
     expect(migrated.months[1].expenses.length).toBe(2);
+  });
+
+  test("records whether each migrated month came from the period or the rows", () => {
+    const dated = statementWith(
+      "statement-dated",
+      summaryWithPeriod("2026-06-01", "2026-06-30"),
+      ["2026-06-14"]
+    );
+    const guessed = statementWith(
+      "statement-guessed",
+      summaryWithPeriod("", ""),
+      ["2026-08-14"]
+    );
+    const draft = createReviewDraft({
+      statements: [dated.statement, guessed.statement],
+      expenses: [...dated.expenses, ...guessed.expenses],
+      selectedIds: [],
+      activeStatementId: dated.statement.id
+    });
+    const migrated = migrateReviewDraftToMonths(draft);
+
+    expect(migrated.months[0].statements[0].monthSource).toBe("period");
+    expect(migrated.months[1].statements[0].monthSource).toBe("rows");
   });
 
   test("reports statements whose month cannot be determined", () => {
