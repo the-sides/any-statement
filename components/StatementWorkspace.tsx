@@ -43,6 +43,9 @@ import {
   FALLBACK_CATEGORY_NAME,
   getDefaultCategoryName,
   getEnabledCategoryNames,
+  hasActiveNotionCategories,
+  resolveIncludeAppCategories,
+  selectActiveCategories,
   type ExpenseCategory,
   type ExpenseCategoryDefinition,
   type PaymentMethod,
@@ -119,6 +122,7 @@ type CategoryResponse = {
   categories: ExpenseCategoryDefinition[];
   enabledCategories?: ExpenseCategoryDefinition[];
   imported?: number;
+  importError?: string;
   error?: string;
 };
 
@@ -357,15 +361,14 @@ export function StatementWorkspace() {
   const appCategoryCount = categories.filter(
     (category) => category.source === "app"
   ).length;
-  const hasNotionCategories = notionCategoryCount > 0;
-  const includeAppCategories =
-    !hasNotionCategories || (appCategoriesPreference ?? false);
+  const hasNotionCategories = hasActiveNotionCategories(categories);
+  const includeAppCategories = resolveIncludeAppCategories(
+    categories,
+    appCategoriesPreference
+  );
   const activeCategories = useMemo(
-    () =>
-      includeAppCategories
-        ? categories
-        : categories.filter((category) => category.source !== "app"),
-    [categories, includeAppCategories]
+    () => selectActiveCategories(categories, appCategoriesPreference),
+    [appCategoriesPreference, categories]
   );
   const enabledCategoryNames = useMemo(
     () => getEnabledCategoryNames(activeCategories),
@@ -396,6 +399,18 @@ export function StatementWorkspace() {
 
         if (active) {
           setCategories(result.categories);
+
+          if (result.importError) {
+            showNotice({
+              tone: "neutral",
+              message: `Notion category import failed. ${result.importError}`
+            });
+          } else if (result.imported) {
+            showNotice({
+              tone: "neutral",
+              message: `Imported ${result.imported} Notion categories.`
+            });
+          }
         }
       } catch {
         if (active) {

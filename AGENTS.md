@@ -34,7 +34,15 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 - `/api/extract` accepts `statementFile` as multipart form data, with legacy `statementPdf` replays still accepted.
 - `/api/extract` saves the original PDF or CSV and extraction artifacts to `/tmp/statement-ledger/uploads/<upload-id>/`.
 - OpenRouter is the primary extraction path.
-- Categories are app-managed, persisted locally, can be imported from `NOTION_CATEGORY_DATA_SOURCE_ID`, and disabled categories remain in the catalog.
+- Categories are app-managed, persisted locally, and disabled categories remain in the catalog.
+- When `NOTION_CATEGORY_DATA_SOURCE_ID` is set, the first catalog load imports the Notion
+  categories and stores `importedAt`. Later loads reuse the stored catalog, so categories
+  turned off by the reviewer are never resurrected; `Import` re-runs it on demand. If the
+  import fails, the catalog falls back to built-ins and retries on the next load.
+- Built-in (`app`) categories are hidden while at least one enabled `notion` category
+  exists. Turning off every Notion category, or ticking the `APP categories` checkbox,
+  brings the built-ins back. `lib/categories.ts` owns that rule and both the workspace and
+  `/api/extract` use it.
 - Reviewer categorization notes are saved in browser localStorage, submitted with `/api/extract`, and included in OpenRouter prompt/debug artifacts.
 - CSV uploads are extracted through OpenRouter from uploaded CSV text.
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` uses `pdftotext -layout` to parse Amex-style `New Charges Details` tables.

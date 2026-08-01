@@ -228,6 +228,36 @@ export function mergeCategoryDefinitions(
   return sortCategoryDefinitions([...definitions.values()]);
 }
 
+export function hasActiveNotionCategories(
+  categories: readonly ExpenseCategoryDefinition[]
+) {
+  return categories.some(
+    (category) => category.source === "notion" && category.enabled
+  );
+}
+
+export function resolveIncludeAppCategories(
+  categories: readonly ExpenseCategoryDefinition[],
+  preference: boolean | null | undefined
+) {
+  if (!hasActiveNotionCategories(categories)) {
+    return true;
+  }
+
+  return preference ?? false;
+}
+
+export function selectActiveCategories(
+  categories: readonly ExpenseCategoryDefinition[],
+  preference: boolean | null | undefined
+) {
+  if (resolveIncludeAppCategories(categories, preference)) {
+    return [...categories];
+  }
+
+  return categories.filter((category) => category.source !== "app");
+}
+
 export function getEnabledCategoryDefinitions(
   categories: readonly ExpenseCategoryDefinitionInput[]
 ) {

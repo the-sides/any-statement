@@ -7,9 +7,10 @@ import {
   saveUploadedStatement,
   type UploadArtifact
 } from "@/lib/artifacts";
-import { loadCategoryCatalog } from "@/lib/categoryStore";
+import { ensureCategoryCatalog } from "@/lib/categoryStore";
 import {
   getEnabledCategoryDefinitions,
+  selectActiveCategories,
   type ExpenseCategoryDefinition
 } from "@/lib/categories";
 import { extractFallbackExpensesFromPdf } from "@/lib/fallbackExtractor";
@@ -74,7 +75,7 @@ export async function POST(request: Request) {
     const artifact = await saveUploadedStatement(file, uploadType);
 
     try {
-      const categoryCatalog = await loadCategoryCatalog();
+      const { catalog: categoryCatalog } = await ensureCategoryCatalog();
       const extractionCategories = categoriesForExtraction(
         categoryCatalog.categories,
         includeAppCategories
@@ -206,14 +207,10 @@ function categoriesForExtraction(
   categories: readonly ExpenseCategoryDefinition[],
   includeAppCategories: boolean | null
 ) {
-  const hasNotionCategories = categories.some(
-    (category) => category.source === "notion"
+  const sourceCategories = selectActiveCategories(
+    categories,
+    includeAppCategories
   );
-  const shouldIncludeAppCategories =
-    includeAppCategories ?? !hasNotionCategories;
-  const sourceCategories = shouldIncludeAppCategories
-    ? categories
-    : categories.filter((category) => category.source !== "app");
 
   return getEnabledCategoryDefinitions(
     sourceCategories.length > 0 ? sourceCategories : categories

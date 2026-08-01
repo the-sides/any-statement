@@ -1,14 +1,18 @@
-import { loadCategoryCatalog, setCategoryEnabled } from "@/lib/categoryStore";
+import { ensureCategoryCatalog, setCategoryEnabled } from "@/lib/categoryStore";
 
 export const runtime = "nodejs";
+export const maxDuration = 90;
 
 export async function GET() {
-  const catalog = await loadCategoryCatalog();
+  const { catalog, imported, importError } = await ensureCategoryCatalog();
 
   return Response.json({
     categories: catalog.categories,
     enabledCategories: catalog.enabledCategories,
     sourceConfigured: Boolean(process.env.NOTION_CATEGORY_DATA_SOURCE_ID),
+    imported,
+    importError,
+    importedAt: catalog.importedAt,
     updatedAt: catalog.updatedAt
   });
 }
