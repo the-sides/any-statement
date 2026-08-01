@@ -556,9 +556,20 @@ export function StatementWorkspace() {
       }
 
       setLastSave(result);
+
+      const unmatchedCategories: string[] = Array.isArray(
+        result.unmatchedCategories
+      )
+        ? result.unmatchedCategories
+        : [];
+
       showNotice({
-        tone: "success",
-        message: `Saved ${result.saved} rows to Notion.`
+        tone: unmatchedCategories.length ? "neutral" : "success",
+        message: unmatchedCategories.length
+          ? `Saved ${result.saved} rows to Notion. No Notion category matched: ${unmatchedCategories.join(
+              ", "
+            )} - those rows have an empty Category.`
+          : `Saved ${result.saved} rows to Notion.`
       });
     } catch (error) {
       showNotice({

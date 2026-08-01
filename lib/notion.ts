@@ -60,10 +60,8 @@ export async function saveExpensesToNotion(
     schema,
     categoryCatalog
   );
-  const categoryPageIds = await resolveExpenseCategoryPageIds(
-    categoryResolver,
-    payload.expenses
-  );
+  const { pageIds: categoryPageIds, unmatchedCategories } =
+    resolveExpenseCategoryPageIds(categoryResolver, payload.expenses);
   const statementById = new Map(
     (payload.statements || []).map((statement) => [statement.id, statement])
   );
@@ -109,7 +107,8 @@ export async function saveExpensesToNotion(
 
   return {
     saved: pages.length,
-    pages
+    pages,
+    unmatchedCategories
   };
 }
 
@@ -543,38 +542,25 @@ async function createCategoryResolver(
   }
 
   return {
-    async getOrCreatePageId(name: string) {
-      const normalizedName = normalizeCategoryName(name);
-      const key = normalizeCategoryKey(normalizedName);
+    /**
+     * Matches a category name to an existing Notion category page. Categories
+     * that do not exist in Notion are never created; the expense row is saved
+     * with an empty Category relation instead.
+     */
+    getPageId(name: string) {
+      const key = normalizeCategoryKey(name);
 
-      if (!key) {
-        return "";
-      }
-
-      const existingPageId = pageIdsByName.get(key);
-
-      if (existingPageId) {
-        return existingPageId;
-      }
-
-      const pageId = await createCategoryPage(
-        apiKey,
-        resolvedCategoryDataSourceId,
-        categoryDataSource.properties,
-        titleProperty,
-        normalizedName
-      );
-      pageIdsByName.set(key, pageId);
-      return pageId;
+      return (key && pageIdsByName.get(key)) || "";
     }
   };
 }
 
-async function resolveExpenseCategoryPageIds(
+function resolveExpenseCategoryPageIds(
   categoryResolver: Awaited<ReturnType<typeof createCategoryResolver>>,
   expenses: readonly ExpenseItem[]
 ) {
   const pageIds = new Map<string, string>();
+  const unmatchedCategories: string[] = [];
 
   for (const expense of expenses) {
     const key = normalizeCategoryKey(expense.category);
@@ -583,68 +569,15 @@ async function resolveExpenseCategoryPageIds(
       continue;
     }
 
-    pageIds.set(
-      key,
-      await categoryResolver.getOrCreatePageId(expense.category)
-    );
-  }
+    const pageId = categoryResolver.getPageId(expense.category);
+    pageIds.set(key, pageId);
 
-  return pageIds;
-}
-
-async function createCategoryPage(
-  apiKey: string,
-  dataSourceId: string,
-  schema: NotionPropertyMap,
-  titleProperty: string,
-  name: string
-) {
-  const properties: Record<string, unknown> = {
-    [titleProperty]: {
-      title: richText(name)
+    if (!pageId) {
+      unmatchedCategories.push(normalizeCategoryName(expense.category));
     }
-  };
-  const enabledProperty = findNamedSchemaProperty(schema, [
-    "Enabled",
-    "Active",
-    "Use",
-    "Include",
-    "Import"
-  ]);
-
-  if (enabledProperty && schema[enabledProperty]?.type === "checkbox") {
-    properties[enabledProperty] = { checkbox: true };
   }
 
-  const response = await fetch(NOTION_PAGES_URL, {
-    method: "POST",
-    headers: notionHeaders(apiKey),
-    body: JSON.stringify({
-      parent: {
-        data_source_id: dataSourceId
-      },
-      properties
-    })
-  });
-  const result = await readJson(response);
-
-  if (!response.ok) {
-    throw new NotionSaveError(
-      getNotionError(result) || `Could not create Notion category ${name}.`,
-      response.status
-    );
-  }
-
-  const pageId = String((result as { id?: string }).id || "");
-
-  if (!pageId) {
-    throw new NotionSaveError(
-      `Notion created category ${name} without returning a page ID.`,
-      500
-    );
-  }
-
-  return pageId;
+  return { pageIds, unmatchedCategories };
 }
 
 function buildProperties(
@@ -770,17 +703,6 @@ function setRelation(
 
 function findProperty(schema: NotionPropertyMap, type: NotionPropertyType) {
   return Object.entries(schema).find(([, property]) => property.type === type)?.[0];
-}
-
-function findNamedSchemaProperty(
-  schema: NotionPropertyMap,
-  names: readonly string[]
-) {
-  const normalizedNames = names.map((name) => name.toLowerCase());
-
-  return Object.keys(schema).find((name) =>
-    normalizedNames.includes(name.toLowerCase())
-  );
 }
 
 function normalizeCategoryKey(value: string) {

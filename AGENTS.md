@@ -47,7 +47,12 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 - CSV uploads are extracted through OpenRouter from uploaded CSV text.
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` uses `pdftotext -layout` to parse Amex-style `New Charges Details` tables.
 - `/api/notion/save` saves selected reviewed rows to Notion.
-- `lib/notion.ts` reconciles missing optional Notion properties before creating pages, writes the existing `Category` relation, and creates missing category rows in the configured category data source.
+- `lib/notion.ts` reconciles missing optional Notion properties before creating pages and writes
+  the existing `Category` relation. It titles each row with the merchant (or description) and never
+  repeats the date there, and it never writes the legacy `Expense Category` select.
+- Category relations are matched by name against existing rows in the category data source. Names
+  with no match are never created in Notion; the row saves with an empty `Category` and the save
+  result returns `unmatchedCategories` so the workspace can name them in the save notice.
 
 ## Important Files
 

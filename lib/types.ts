@@ -59,4 +59,5 @@ export type SaveExpensesResult = {
     id: string;
     url: string;
   }>;
+  unmatchedCategories?: string[];
 };

@@ -80,7 +80,7 @@ The fallback parser expects `pdftotext` from Poppler to be available on the host
 
 The app uses its local category catalog during extraction. The catalog starts with built-in defaults and can import category rows from the Notion data source configured by `NOTION_CATEGORY_DATA_SOURCE_ID`. Imported and built-in categories stay in the catalog when disabled; disabled categories are not offered to the LLM for new extraction rows.
 
-The expense save path uses the expense data source's existing title column and writes each row's category to the existing `Category` relation. The relation should point at the category data source configured by `NOTION_CATEGORY_DATA_SOURCE_ID`; missing category rows are created there during save.
+The expense save path titles each row with the merchant (or description, when there is no merchant) and writes the row's category to the existing `Category` relation. The relation should point at the category data source configured by `NOTION_CATEGORY_DATA_SOURCE_ID`. Categories are matched to existing rows by name, case-insensitively. A category with no matching row is never created in Notion: the expense saves with an empty `Category`, and the save response lists those names so the reviewer sees which rows need a category picked in Notion.
 
 Expected writable properties:
 
