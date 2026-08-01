@@ -2378,8 +2378,9 @@ function CashFlowSankey({
   const leftWidth = 180;
   const bundleX = 286;
   const bundleWidth = 22;
-  const outputX = 520;
-  const outsideLabelX = 552;
+  const outputX = 470;
+  const outsideLabelX = 502;
+  const rightEdgeX = width - 16;
   const positiveInputs = summary.inputs.filter((entry) => entry.amount > 0);
   const allocations = summary.allocations.filter(
     (allocation) => allocation.amount > 0
@@ -2417,9 +2418,9 @@ function CashFlowSankey({
       allocationSegments.filter(
         (segment) => !canPlaceFlowLabelInside(segment)
       ),
-      top + 16,
-      height - bottom - 16,
-      38
+      top + 10,
+      height - bottom - 10,
+      OUTSIDE_FLOW_LABEL_LINE_HEIGHT
     )
   );
 
@@ -2587,54 +2588,71 @@ function CashFlowSankey({
 
         {allocationSegments.map((segment) => {
           const labelInside = canPlaceFlowLabelInside(segment);
-          const labelY = labelInside
-            ? segment.yc
-            : outsideAllocationLabelYs.get(segment.id) || segment.yc;
-          const labelX = labelInside ? outputX - 22 : outsideLabelX;
-          const textAnchor = labelInside ? "end" : "start";
+          const amountText = `${formatCurrency(segment.amount, currency)} (${formatPercent(
+            segment.percent
+          )})`;
+          const terminal = (
+            <circle
+              className="sankey-flow-terminal"
+              cx={outputX}
+              cy={segment.yc}
+              r={Math.max(2.5, Math.min(8, segment.height / 2))}
+              fill={segment.color}
+            />
+          );
+
+          if (!labelInside) {
+            // Too little vertical room for a stacked label, so keep it to a
+            // single line seated beside its own flow instead of pulling it
+            // away on a leader.
+            const labelY =
+              outsideAllocationLabelYs.get(segment.id) || segment.yc;
+            const nameLimit = outsideFlowNameLimit(
+              rightEdgeX - outsideLabelX,
+              amountText
+            );
+
+            return (
+              <g key={`allocation-${segment.id}`}>
+                {terminal}
+                <text
+                  className="sankey-allocation-label outside"
+                  x={outsideLabelX}
+                  y={labelY + 5}
+                  textAnchor="start"
+                >
+                  {truncateSvgText(segment.label, nameLimit)}
+                </text>
+                <text
+                  className="sankey-allocation-amount outside"
+                  x={rightEdgeX}
+                  y={labelY + 5}
+                  textAnchor="end"
+                >
+                  {amountText}
+                </text>
+              </g>
+            );
+          }
 
           return (
             <g key={`allocation-${segment.id}`}>
-              {!labelInside ? (
-                <path
-                  className="sankey-label-leader"
-                  d={sankeyLabelLeaderPath(
-                    outputX + 8,
-                    segment.yc,
-                    labelX - 12,
-                    labelY
-                  )}
-                  fill="none"
-                  stroke={segment.color}
-                />
-              ) : null}
-              <circle
-                className="sankey-flow-terminal"
-                cx={outputX}
-                cy={segment.yc}
-                r={Math.max(2.5, Math.min(8, segment.height / 2))}
-                fill={segment.color}
-              />
+              {terminal}
               <text
-                className={`sankey-allocation-label ${
-                  labelInside ? "inside" : "outside"
-                }`}
-                x={labelX}
-                y={labelY - 5}
-                textAnchor={textAnchor}
+                className="sankey-allocation-label inside"
+                x={outsideLabelX}
+                y={segment.yc - 5}
+                textAnchor="start"
               >
-                {truncateSvgText(segment.label, labelInside ? 24 : 34)}
+                {truncateSvgText(segment.label, 22)}
               </text>
               <text
-                className={`sankey-allocation-amount ${
-                  labelInside ? "inside" : "outside"
-                }`}
-                x={labelX}
-                y={labelY + 14}
-                textAnchor={textAnchor}
+                className="sankey-allocation-amount inside"
+                x={outsideLabelX}
+                y={segment.yc + 14}
+                textAnchor="start"
               >
-                {formatCurrency(segment.amount, currency)} (
-                {formatPercent(segment.percent)})
+                {amountText}
               </text>
             </g>
           );
@@ -3321,6 +3339,19 @@ function canPlaceFlowLabelInside(segment: { height: number }) {
   return segment.height >= 46;
 }
 
+// Single-line outside labels only need one line box of clearance, which the
+// gap between neighbouring flows already provides.
+const OUTSIDE_FLOW_LABEL_LINE_HEIGHT = 16;
+const OUTSIDE_FLOW_NAME_CHAR_WIDTH = 8.1;
+const OUTSIDE_FLOW_AMOUNT_CHAR_WIDTH = 7.4;
+
+function outsideFlowNameLimit(availableWidth: number, amountText: string) {
+  const nameWidth =
+    availableWidth - amountText.length * OUTSIDE_FLOW_AMOUNT_CHAR_WIDTH - 14;
+
+  return clamp(Math.floor(nameWidth / OUTSIDE_FLOW_NAME_CHAR_WIDTH), 6, 34);
+}
+
 function flowBundleY(targetY: number, centerY: number) {
   return centerY + (targetY - centerY) * 0.18;
 }
@@ -3384,20 +3415,6 @@ function sankeyStrokePath(
     `C ${x0 + curve} ${y0 + verticalPull}, ${x1 - curve} ${
       y1 - verticalPull
     }, ${x1} ${y1}`
-  ].join(" ");
-}
-
-function sankeyLabelLeaderPath(
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number
-) {
-  const curve = Math.max(24, (x1 - x0) * 0.52);
-
-  return [
-    `M ${x0} ${y0}`,
-    `C ${x0 + curve} ${y0}, ${x1 - curve} ${y1}, ${x1} ${y1}`
   ].join(" ");
 }
 

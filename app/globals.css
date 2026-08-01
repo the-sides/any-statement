@@ -1077,12 +1077,6 @@ button:focus-visible,
   stroke-width: 1.5;
 }
 
-.sankey-label-leader {
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  opacity: 0.62;
-}
-
 .sankey-node-label,
 .sankey-allocation-label,
 .sankey-income-label {
@@ -1096,7 +1090,16 @@ button:focus-visible,
   paint-order: stroke;
   stroke: #fffefa;
   stroke-linejoin: round;
-  stroke-width: 5px;
+  stroke-width: 4px;
+}
+
+/* Cramped flows get one line, sized to clear the gap between neighbours. */
+.sankey-allocation-label.outside {
+  font-size: 14px;
+}
+
+.sankey-allocation-amount.outside {
+  font-size: 13px;
 }
 
 .sankey-node-amount,
