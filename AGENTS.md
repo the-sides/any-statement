@@ -20,21 +20,37 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 - When verifying the UI locally on this machine, Playwright Chrome may be missing. System Chromium is available at `/usr/bin/chromium`.
 - Localhost and browser commands may need escalation because the sandbox can block server binds and host networking.
 
+## Vercel Env Pull Hazard
+
+`vercel env pull` **overwrites `.env.local` wholesale**, dropping any variable not stored on the
+Vercel project. `vercel integration add` runs an env pull by default and has already destroyed
+the local `OPENROUTER_*` and `NOTION_*` keys once.
+
+- Always pass `--no-env-pull` to `vercel integration add`.
+- Back the file up before any env pull: `cp .env.local .env.local.bak`.
+- The durable fix is to store every secret on the Vercel project too, so a pull reproduces a
+  complete file instead of a partial one.
+
 ## Current Behavior
 
 - `/` renders the upload/review/save workspace, scoped to one month at a time.
 - An uploaded statement is filed into the calendar month covering most of its period,
   falling back to its row dates, and the workspace switches to that month. There is no
   save-month action; months are derived. See `specs/month-scoped-statements.md`.
-- Month documents live on disk in `./data/months/<YYYY-MM>.json` (gitignored) rather than
-  in the `/tmp` artifact directory, which has been wiped before.
+- Month documents live in Postgres (Neon), in relational `months` / `statements` / `expenses`
+  tables defined by `lib/schema.sql`. Writes are whole-month and transactional, matching the
+  file-per-month semantics the app was built around. `./data/months/<YYYY-MM>.json` is now
+  only a legacy import source; see `scripts/import-local-months.ts`.
 - The workspace edits the active month optimistically and flushes to the server on a
   ~500ms debounce, forced on page unload. The cash flow plan, undo history, categorization
   notes, and the app-category preference stay in browser localStorage and stay global.
 - `/api/extract` accepts `statementFile` as multipart form data, with legacy `statementPdf` replays still accepted.
 - `/api/extract` saves the original PDF or CSV and extraction artifacts to `/tmp/statement-ledger/uploads/<upload-id>/`.
 - OpenRouter is the primary extraction path.
-- Categories are app-managed, persisted locally, and disabled categories remain in the catalog.
+- Categories are app-managed, persisted in the single-row `category_catalog` Postgres table, and
+  disabled categories remain in the catalog. Catalog *reads* fall back to the built-in defaults
+  if the database is unreachable, so a database outage cannot break extraction or the Notion save
+  that only resolves category names; writes still surface their errors.
 - When `NOTION_CATEGORY_DATA_SOURCE_ID` is set, the first catalog load imports the Notion
   categories and stores `importedAt`. Later loads reuse the stored catalog, so categories
   turned off by the reviewer are never resurrected; `Import` re-runs it on demand. If the
@@ -45,7 +61,15 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
   `/api/extract` use it.
 - Reviewer categorization notes are saved in browser localStorage, submitted with `/api/extract`, and included in OpenRouter prompt/debug artifacts.
 - CSV uploads are extracted through OpenRouter from uploaded CSV text.
-- If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` uses `pdftotext -layout` to parse Amex-style `New Charges Details` tables.
+- If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` parses
+  Amex-style `New Charges Details` tables. PDF text now comes from `unpdf` in-process, not the
+  `pdftotext` binary, so it works on hosts without Poppler. `lib/pdfText.ts` reconstructs a
+  `pdftotext -layout`-style character grid from text coordinates, because that parser matches on
+  multi-space column gaps. Do not replace it with plain text concatenation: the gaps disappear
+  and the fallback silently returns zero rows.
+- `lib/pdfText.ts` also feeds the *primary* path — `lib/openrouter.ts` sends a cheap text prompt
+  instead of the PDF file when the extracted text looks usable, so breaking it degrades normal
+  extraction too, not just the fallback.
 - `/api/notion/save` saves selected reviewed rows to Notion.
 - `lib/notion.ts` reconciles missing optional Notion properties before creating pages and writes
   the existing `Category` relation. It titles each row with the merchant (or description) and never
@@ -59,15 +83,20 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 - `components/StatementWorkspace.tsx` - client UI state, upload, row editing, and save flow.
 - `lib/months.ts` - month determination, filing, reassignment, listing, and legacy draft
   migration as pure transforms; `lib/months.test.ts` covers it.
-- `lib/monthsStore.ts` - client-side month store: load, debounced writes, unload flush.
-- `lib/monthStore.ts` - server-side month document persistence under `./data/months/`.
+- `lib/monthsClientStore.ts` - client-side month store: load, debounced writes, unload flush.
+- `lib/monthStore.ts` - server-side month document persistence in Postgres.
+- `lib/db.ts` - lazy Neon client (no Proxy wrapper) plus numeric/text column coercion.
+- `lib/schema.sql` - months, statements, expenses, and category catalog tables.
+- `proxy.ts` - WorkOS AuthKit gate over every route except the sign-in flow and static assets.
 - `app/api/months/route.ts` and `app/api/months/[month]/route.ts` - month list and
   read/write/delete of one month document.
 - `app/api/categories/route.ts` - category catalog read and enabled/disabled updates.
 - `app/api/categories/import/route.ts` - Notion category import route.
 - `app/api/extract/route.ts` - upload validation, artifact persistence, OpenRouter extraction, fallback application.
 - `app/api/notion/save/route.ts` - Notion save route.
-- `lib/categoryStore.ts` - local category catalog persistence.
+- `lib/categoryStore.ts` - category catalog persistence in Postgres.
+- `scripts/migrate.ts` - applies `lib/schema.sql`; idempotent.
+- `scripts/import-local-months.ts` - imports legacy `data/months/*.json` into Postgres.
 - `lib/openrouter.ts` - OpenRouter request, prompt, response parsing, debug payload.
 - `lib/fallbackExtractor.ts` - deterministic PDF text fallback.
 - `lib/artifacts.ts` - `/tmp` artifact persistence.
@@ -80,6 +109,12 @@ Install:
 
 ```bash
 bun install
+```
+
+Create the database tables (idempotent, needs `DATABASE_URL`):
+
+```bash
+bun run scripts/migrate.ts
 ```
 
 Run dev server:

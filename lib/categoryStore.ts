@@ -1,5 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { getSql } from "@/lib/db";
 import {
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
   type ExpenseCategoryDefinition,
@@ -10,9 +9,6 @@ import {
   normalizeCategoryName
 } from "@/lib/categories";
 import { fetchCategoryDefinitionsFromNotion } from "@/lib/notion";
-
-const DEFAULT_ARTIFACT_ROOT = "/tmp/statement-ledger";
-const CATEGORY_CATALOG_FILE = "category-catalog.json";
 
 export type ExpenseCategoryCatalog = {
   categories: ExpenseCategoryDefinition[];
@@ -147,53 +143,71 @@ async function saveCategoryCatalog(
     importedAt,
     new Date().toISOString()
   );
-  const filePath = categoryCatalogPath();
 
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(
-    filePath,
-    `${JSON.stringify(
-      {
-        categories: catalog.categories,
-        sourceDataSourceId: catalog.sourceDataSourceId,
-        importedAt: catalog.importedAt,
-        updatedAt: catalog.updatedAt
-      },
-      null,
-      2
-    )}\n`,
-    "utf8"
-  );
+  await getSql()`
+    insert into category_catalog (
+      id, categories, source_data_source_id, imported_at, updated_at
+    ) values (
+      true,
+      ${JSON.stringify(catalog.categories)}::jsonb,
+      ${catalog.sourceDataSourceId ?? null},
+      ${catalog.importedAt ?? null},
+      ${catalog.updatedAt}
+    )
+    on conflict (id) do update
+      set categories = excluded.categories,
+          source_data_source_id = excluded.source_data_source_id,
+          imported_at = excluded.imported_at,
+          updated_at = excluded.updated_at
+  `;
 
   return catalog;
 }
 
+/**
+ * Reads degrade to the built-in defaults when the catalog is unreachable — no
+ * row yet, no database configured, table not migrated. Categories are only a
+ * vocabulary, so a reader outage must not take down extraction or the Notion
+ * save that merely resolves names against it. Writes still surface their errors.
+ */
 async function readStoredCategoryCatalog(): Promise<StoredCategoryCatalog> {
-  try {
-    const raw = await readFile(categoryCatalogPath(), "utf8");
-    const parsed = JSON.parse(raw) as StoredCategoryCatalog;
-
-    return {
-      categories: Array.isArray(parsed.categories) ? parsed.categories : [],
-      sourceDataSourceId:
-        typeof parsed.sourceDataSourceId === "string"
-          ? parsed.sourceDataSourceId
-          : undefined,
-      importedAt:
-        typeof parsed.importedAt === "string" ? parsed.importedAt : undefined,
-      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : undefined
-    };
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error) {
-      const code = String((error as { code?: unknown }).code);
-
-      if (code === "ENOENT") {
-        return {};
+  let row:
+    | {
+        categories: unknown;
+        source_data_source_id: unknown;
+        imported_at: unknown;
+        updated_at: unknown;
       }
-    }
+    | undefined;
 
-    throw error;
+  try {
+    const rows = (await getSql()`
+      select categories, source_data_source_id, imported_at, updated_at
+      from category_catalog
+      where id
+    `) as Array<NonNullable<typeof row>>;
+
+    row = rows[0];
+  } catch {
+    return {};
   }
+
+  if (!row) {
+    return {};
+  }
+
+  return {
+    categories: Array.isArray(row.categories)
+      ? (row.categories as ExpenseCategoryDefinitionInput[])
+      : [],
+    sourceDataSourceId:
+      typeof row.source_data_source_id === "string"
+        ? row.source_data_source_id
+        : undefined,
+    importedAt:
+      typeof row.imported_at === "string" ? row.imported_at : undefined,
+    updatedAt: typeof row.updated_at === "string" ? row.updated_at : undefined
+  };
 }
 
 function toCatalog(
@@ -210,10 +224,4 @@ function toCatalog(
     importedAt,
     updatedAt
   };
-}
-
-function categoryCatalogPath() {
-  const root = process.env.STATEMENT_LEDGER_ARTIFACT_DIR || DEFAULT_ARTIFACT_ROOT;
-
-  return path.join(root, CATEGORY_CATALOG_FILE);
 }
