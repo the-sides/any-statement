@@ -190,7 +190,17 @@ const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 const GRAPH_ZOOM_LEVELS = [0.35, 0.5, 0.65, 0.75, 1, 1.25, 1.5, 1.75];
 const MIN_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[0];
 const MAX_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[GRAPH_ZOOM_LEVELS.length - 1];
-const DEFAULT_GRAPH_ZOOM = 0.5;
+const DEFAULT_GRAPH_ZOOM = 1;
+// The flow chart is wide on purpose: the long horizontal runs are what let a
+// ribbon flatten out before it reaches its label.
+const SANKEY_WIDTH = 1360;
+const SANKEY_MIN_RENDER_WIDTH = 880;
+const SANKEY_TRUNK_HEIGHT = 660;
+const SANKEY_NODE_WIDTH = 14;
+const SANKEY_LABEL_GAP = 16;
+const SANKEY_NODE_GAP = 6;
+const SANKEY_LABEL_SPACING = 50;
+const SANKEY_MIN_NODE_HEIGHT = 3;
 const EXPENSE_CHAT_PROMPTS = [
   "How could I minimize food costs?",
   "Which merchants cost the most?",
@@ -2576,294 +2586,257 @@ function CashFlowSankey({
   currency: string;
   zoom: number;
 }) {
-  const width = 760;
-  const top = 76;
-  const bottom = 64;
-  const leftX = 22;
-  const leftWidth = 180;
-  const bundleX = 286;
-  const bundleWidth = 22;
-  const outputX = 470;
-  const outsideLabelX = 502;
-  const rightEdgeX = width - 16;
+  const width = SANKEY_WIDTH;
+  const top = 84;
+  const bottom = 48;
+  const inputX = 40;
+  const incomeX = 500;
+  const outputX = 1288;
   const positiveInputs = summary.inputs.filter((entry) => entry.amount > 0);
   const allocations = summary.allocations.filter(
     (allocation) => allocation.amount > 0
   );
-  const rowCount = Math.max(positiveInputs.length, allocations.length, 1);
-  const height = Math.max(660, 180 + rowCount * 62);
-  const availableHeight = height - top - bottom;
-  const incomeCenterY = top + availableHeight / 2;
   const inputTotal =
     positiveInputs.reduce((sum, input) => sum + input.amount, 0) || 1;
   const allocationTotal =
     allocations.reduce((sum, allocation) => sum + allocation.amount, 0) || 1;
-  const inputSegments = layoutSankeySegments(
+  const inputNodes = layoutSankeyColumn(
     positiveInputs.map((entry, index) => ({
       ...entry,
       color: inputColor(index)
     })),
     inputTotal,
     top,
-    availableHeight,
-    18
+    SANKEY_TRUNK_HEIGHT
   );
-  const allocationSegments = layoutSankeySegments(
+  const allocationNodes = layoutSankeyColumn(
     allocations.map((allocation, index) => ({
       ...allocation,
       color: allocationColor(allocation.source, index)
     })),
     allocationTotal,
     top,
-    availableHeight,
-    16
+    SANKEY_TRUNK_HEIGHT
   );
-  const outsideAllocationLabelYs = new Map(
-    layoutOutsideFlowLabels(
-      allocationSegments.filter(
-        (segment) => !canPlaceFlowLabelInside(segment)
-      ),
-      top + 10,
-      height - bottom - 10,
-      OUTSIDE_FLOW_LABEL_LINE_HEIGHT
-    )
+  // Both ends of the trunk are packed solid: the income bar is exactly as tall
+  // as the flows entering it and as the flows leaving it, so the volume of one
+  // shape is visibly conserved as it breaks out into categories.
+  const trunkInflow = stackSankeyEnds(inputNodes, top);
+  const trunkOutflow = stackSankeyEnds(allocationNodes, top);
+  const height = Math.round(
+    Math.max(
+      top + SANKEY_TRUNK_HEIGHT,
+      inputNodes[inputNodes.length - 1]?.y1 ?? 0,
+      allocationNodes[allocationNodes.length - 1]?.y1 ?? 0
+    ) + bottom
   );
+  const trunkCenterY = top + SANKEY_TRUNK_HEIGHT / 2;
+  const hasTrunk = positiveInputs.length > 0 || allocations.length > 0;
 
   return (
     <svg
       className="sankey-chart"
       style={{
         width: `${Math.round(zoom * 100)}%`,
-        minWidth: `${Math.round(width * zoom)}px`
+        minWidth: `${Math.round(SANKEY_MIN_RENDER_WIDTH * zoom)}px`
       }}
       viewBox={`0 0 ${width} ${height}`}
       role="img"
       aria-label="Income flowing to savings, manual outputs, and statement categories"
     >
       <defs>
-        <linearGradient id="sankey-input-fill" x1="0" x2="1" y1="0" y2="0">
-          <stop offset="0%" stopColor="var(--chart-input-from)" />
-          <stop offset="100%" stopColor="var(--chart-input-to)" />
-        </linearGradient>
-        <linearGradient id="sankey-input-stroke" x1="0" x2="1" y1="0" y2="0">
-          <stop offset="0%" stopColor="var(--teal)" stopOpacity="0.18" />
-          <stop offset="100%" stopColor="var(--positive)" stopOpacity="0.54" />
-        </linearGradient>
+        {inputNodes.map((node) => (
+          <linearGradient
+            key={`input-gradient-${node.id}`}
+            id={`sankey-input-${svgId(node.id)}`}
+            gradientUnits="userSpaceOnUse"
+            x1={inputX + SANKEY_NODE_WIDTH}
+            x2={incomeX}
+          >
+            <stop offset="0%" stopColor={node.color} />
+            <stop offset="100%" stopColor="var(--positive)" />
+          </linearGradient>
+        ))}
+        {allocationNodes.map((node) => (
+          <linearGradient
+            key={`allocation-gradient-${node.id}`}
+            id={`sankey-allocation-${svgId(node.id)}`}
+            gradientUnits="userSpaceOnUse"
+            x1={incomeX + SANKEY_NODE_WIDTH}
+            x2={outputX}
+          >
+            <stop offset="0%" stopColor="var(--positive)" />
+            <stop offset="100%" stopColor={node.color} />
+          </linearGradient>
+        ))}
       </defs>
 
       <rect className="sankey-stage" width={width} height={height} rx="8" />
-      <text className="sankey-title" x={leftX} y="28">
+      <text className="sankey-title" x={inputX} y="34">
         Inputs
       </text>
-      <text className="sankey-title" x={bundleX - 32} y="28">
+      <text className="sankey-title" x={incomeX} y="34">
         Income
       </text>
-      <text className="sankey-title" x={outsideLabelX} y="28">
+      <text
+        className="sankey-title"
+        x={outputX + SANKEY_NODE_WIDTH}
+        y="34"
+        textAnchor="end"
+      >
         Outputs & categories
       </text>
 
       {positiveInputs.length === 0 ? (
-        <text className="sankey-empty" x={leftX + 18} y={top + 28}>
+        <text className="sankey-empty" x={inputX} y={top + 30}>
           Add income
         </text>
       ) : null}
       {allocations.length === 0 ? (
-        <text className="sankey-empty" x={outsideLabelX} y={top + 28}>
+        <text className="sankey-empty" x={outputX} y={top + 30} textAnchor="end">
           Add outputs or statement rows
         </text>
       ) : null}
 
-      <g className="sankey-flows">
-        {inputSegments.map((segment) => (
-          <g key={`input-flow-${segment.id}`}>
-            <path
-              className="sankey-flow input-flow"
-              d={sankeyStrokePath(
-                leftX + leftWidth + 16,
-                bundleX - 10,
-                segment.yc,
-                flowBundleY(segment.yc, incomeCenterY)
-              )}
-              fill="none"
-              stroke="url(#sankey-input-stroke)"
-              strokeWidth={segment.height}
-            />
-          </g>
+      <g className="sankey-ribbons">
+        {inputNodes.map((node, index) => (
+          <path
+            className="sankey-ribbon"
+            key={`input-ribbon-${node.id}`}
+            d={sankeyRibbonPath(
+              inputX + SANKEY_NODE_WIDTH,
+              incomeX,
+              node.y0,
+              node.y1,
+              trunkInflow[index].y0,
+              trunkInflow[index].y1
+            )}
+            fill={`url(#sankey-input-${svgId(node.id)})`}
+          />
         ))}
-
-        {allocationSegments.map((segment) => (
-          <g key={`allocation-flow-${segment.id}`}>
-            <path
-              className={`sankey-flow allocation-flow ${
-                canPlaceFlowLabelInside(segment)
-                  ? "label-inside"
-                  : "label-outside"
-              }`}
-              d={sankeyStrokePath(
-                bundleX + bundleWidth + 18,
-                outputX,
-                flowBundleY(segment.yc, incomeCenterY),
-                segment.yc
-              )}
-              fill="none"
-              stroke={segment.color}
-              strokeWidth={segment.height}
-            />
-          </g>
+        {allocationNodes.map((node, index) => (
+          <path
+            className="sankey-ribbon"
+            key={`allocation-ribbon-${node.id}`}
+            d={sankeyRibbonPath(
+              incomeX + SANKEY_NODE_WIDTH,
+              outputX,
+              trunkOutflow[index].y0,
+              trunkOutflow[index].y1,
+              node.y0,
+              node.y1
+            )}
+            fill={`url(#sankey-allocation-${svgId(node.id)})`}
+          />
         ))}
       </g>
 
       <g className="sankey-nodes">
-        {inputSegments.map((segment) => {
-          const nodeHeight = Math.max(56, Math.min(segment.height, 104));
-          const nodeY = clamp(
-            segment.yc - nodeHeight / 2,
-            top,
-            height - bottom - nodeHeight
-          );
+        {inputNodes.map((node) => (
+          <SankeyNodeMark
+            key={`input-${node.id}`}
+            x={inputX}
+            node={node}
+            label={truncateSvgText(node.label, 30)}
+            value={`${formatCurrency(node.amount, currency)} (${formatPercent(
+              (node.amount / inputTotal) * 100
+            )})`}
+            side="right"
+          />
+        ))}
 
-          return (
-            <g key={`input-${segment.id}`}>
-              <rect
-                className="sankey-input-node"
-                x={leftX}
-                y={nodeY}
-                width={leftWidth}
-                height={nodeHeight}
-                rx="6"
-              />
-              <rect
-                x={leftX}
-                y={nodeY}
-                width="12"
-                height={nodeHeight}
-                rx="4"
-                fill={segment.color}
-              />
-              <text
-                className="sankey-node-label"
-                x={leftX + 28}
-                y={nodeY + 26}
-              >
-                {truncateSvgText(segment.label, 28)}
-              </text>
-              <text
-                className="sankey-node-amount"
-                x={leftX + 28}
-                y={nodeY + 46}
-              >
-                {formatCurrency(segment.amount, currency)}
-              </text>
-            </g>
-          );
-        })}
-
-        <rect
-          className="sankey-income-node"
-          x={bundleX}
-          y={top}
-          width={bundleWidth}
-          height={availableHeight}
-          rx="12"
-        />
-        <rect
-          className="sankey-income-label-bg"
-          x={bundleX - 56}
-          y={incomeCenterY - 30}
-          width="136"
-          height="60"
-          rx="4"
-        />
-        <text
-          className="sankey-income-label"
-          x={bundleX + bundleWidth / 2}
-          y={incomeCenterY - 7}
-          textAnchor="middle"
-        >
-          Income
-        </text>
-        <text
-          className="sankey-income-amount"
-          x={bundleX + bundleWidth / 2}
-          y={incomeCenterY + 15}
-          textAnchor="middle"
-        >
-          {formatCurrency(summary.incomeTotal, currency)}
-        </text>
-
-        {allocationSegments.map((segment) => {
-          const labelInside = canPlaceFlowLabelInside(segment);
-          const amountText = `${formatCurrency(segment.amount, currency)} (${formatPercent(
-            segment.percent
-          )})`;
-          const terminal = (
-            <circle
-              className="sankey-flow-terminal"
-              cx={outputX}
-              cy={segment.yc}
-              r={Math.max(2.5, Math.min(8, segment.height / 2))}
-              fill={segment.color}
+        {hasTrunk ? (
+          <>
+            <rect
+              className="sankey-income-node"
+              x={incomeX}
+              y={top}
+              width={SANKEY_NODE_WIDTH}
+              height={SANKEY_TRUNK_HEIGHT}
+              rx="2"
             />
-          );
+            <text
+              className="sankey-node-name"
+              x={incomeX + SANKEY_NODE_WIDTH + SANKEY_LABEL_GAP}
+              y={trunkCenterY - 4}
+            >
+              Income
+            </text>
+            <text
+              className="sankey-node-value"
+              x={incomeX + SANKEY_NODE_WIDTH + SANKEY_LABEL_GAP}
+              y={trunkCenterY + 19}
+            >
+              {formatCurrency(summary.incomeTotal, currency)} (100%)
+            </text>
+          </>
+        ) : null}
 
-          if (!labelInside) {
-            // Too little vertical room for a stacked label, so keep it to a
-            // single line seated beside its own flow instead of pulling it
-            // away on a leader.
-            const labelY =
-              outsideAllocationLabelYs.get(segment.id) || segment.yc;
-            const nameLimit = outsideFlowNameLimit(
-              rightEdgeX - outsideLabelX,
-              amountText
-            );
-
-            return (
-              <g key={`allocation-${segment.id}`}>
-                {terminal}
-                <text
-                  className="sankey-allocation-label outside"
-                  x={outsideLabelX}
-                  y={labelY + 5}
-                  textAnchor="start"
-                >
-                  {truncateSvgText(segment.label, nameLimit)}
-                </text>
-                <text
-                  className="sankey-allocation-amount outside"
-                  x={rightEdgeX}
-                  y={labelY + 5}
-                  textAnchor="end"
-                >
-                  {amountText}
-                </text>
-              </g>
-            );
-          }
-
-          return (
-            <g key={`allocation-${segment.id}`}>
-              {terminal}
-              <text
-                className="sankey-allocation-label inside"
-                x={outsideLabelX}
-                y={segment.yc - 5}
-                textAnchor="start"
-              >
-                {truncateSvgText(segment.label, 22)}
-              </text>
-              <text
-                className="sankey-allocation-amount inside"
-                x={outsideLabelX}
-                y={segment.yc + 14}
-                textAnchor="start"
-              >
-                {amountText}
-              </text>
-            </g>
-          );
-        })}
+        {allocationNodes.map((node) => (
+          <SankeyNodeMark
+            key={`allocation-${node.id}`}
+            x={outputX}
+            node={node}
+            label={truncateSvgText(node.label, 30)}
+            value={`${formatCurrency(node.amount, currency)} (${formatPercent(
+              node.percent
+            )})`}
+            side="left"
+          />
+        ))}
       </g>
     </svg>
+  );
+}
+
+function SankeyNodeMark({
+  x,
+  node,
+  label,
+  value,
+  side
+}: {
+  x: number;
+  node: { color: string; height: number; y0: number; yc: number };
+  label: string;
+  value: string;
+  side: "left" | "right";
+}) {
+  // Hairline categories still need a bar you can see and a label you can read,
+  // so the mark keeps a floor height and stays centred on its own flow.
+  const barHeight = Math.max(node.height, SANKEY_MIN_NODE_HEIGHT);
+  const textX =
+    side === "right"
+      ? x + SANKEY_NODE_WIDTH + SANKEY_LABEL_GAP
+      : x - SANKEY_LABEL_GAP;
+
+  return (
+    <g>
+      <rect
+        x={x}
+        y={node.yc - barHeight / 2}
+        width={SANKEY_NODE_WIDTH}
+        height={barHeight}
+        rx="2"
+        fill={node.color}
+      />
+      <text
+        className="sankey-node-name"
+        x={textX}
+        y={node.yc - 4}
+        textAnchor={side === "right" ? "start" : "end"}
+      >
+        {label}
+      </text>
+      <text
+        className="sankey-node-value"
+        x={textX}
+        y={node.yc + 19}
+        textAnchor={side === "right" ? "start" : "end"}
+      >
+        {value}
+      </text>
+    </g>
   );
 }
 
@@ -3506,29 +3479,39 @@ function formatCurrency(value: number, currency: string) {
   }
 }
 
-function layoutSankeySegments<T extends { amount: number; color: string }>(
+// A column stacks its nodes in value order, but a run of tiny categories would
+// otherwise pile their labels on top of each other. Spreading them costs
+// vertical room the chart does not have to fit on screen, so the branch simply
+// reaches further down the canvas instead of squeezing.
+function layoutSankeyColumn<T extends { amount: number; color: string }>(
   items: readonly T[],
   total: number,
   top: number,
-  availableHeight: number,
-  gap: number
+  trunkHeight: number
 ): Array<SankeySegment<T>> {
   if (items.length === 0) {
     return [];
   }
 
-  const totalGap = gap * (items.length - 1);
-  const stackHeight = Math.max(1, availableHeight - totalGap);
+  const heights = items.map((item) =>
+    total > 0 ? (item.amount / total) * trunkHeight : trunkHeight / items.length
+  );
   let cursor = top;
 
-  return items.map((item) => {
-    const height =
-      total > 0
-        ? (item.amount / total) * stackHeight
-        : stackHeight / items.length;
+  return items.map((item, index) => {
+    const height = heights[index];
     const y0 = cursor;
     const y1 = y0 + height;
-    cursor = y1 + gap;
+    const next = heights[index + 1];
+
+    cursor =
+      next === undefined
+        ? y1
+        : y1 +
+          Math.max(
+            SANKEY_NODE_GAP,
+            SANKEY_LABEL_SPACING - (height + next) / 2
+          );
 
     return {
       ...item,
@@ -3540,86 +3523,41 @@ function layoutSankeySegments<T extends { amount: number; color: string }>(
   });
 }
 
-function canPlaceFlowLabelInside(segment: { height: number }) {
-  return segment.height >= 46;
+// The trunk end of every ribbon is packed edge to edge so the bar it meets is
+// exactly the sum of its flows.
+function stackSankeyEnds(
+  nodes: ReadonlyArray<{ height: number }>,
+  top: number
+) {
+  let cursor = top;
+
+  return nodes.map((node) => {
+    const y0 = cursor;
+    cursor = y0 + node.height;
+
+    return { y0, y1: cursor };
+  });
 }
 
-// Single-line outside labels only need one line box of clearance, which the
-// gap between neighbouring flows already provides.
-const OUTSIDE_FLOW_LABEL_LINE_HEIGHT = 16;
-const OUTSIDE_FLOW_NAME_CHAR_WIDTH = 8.1;
-const OUTSIDE_FLOW_AMOUNT_CHAR_WIDTH = 7.4;
-
-function outsideFlowNameLimit(availableWidth: number, amountText: string) {
-  const nameWidth =
-    availableWidth - amountText.length * OUTSIDE_FLOW_AMOUNT_CHAR_WIDTH - 14;
-
-  return clamp(Math.floor(nameWidth / OUTSIDE_FLOW_NAME_CHAR_WIDTH), 6, 34);
-}
-
-function flowBundleY(targetY: number, centerY: number) {
-  return centerY + (targetY - centerY) * 0.18;
-}
-
-function layoutOutsideFlowLabels<T extends { id: string; yc: number }>(
-  segments: readonly T[],
-  minY: number,
-  maxY: number,
-  minSpacing: number
-): Array<readonly [string, number]> {
-  if (segments.length === 0) {
-    return [];
-  }
-
-  const sorted = [...segments].sort((left, right) => left.yc - right.yc);
-  const available = Math.max(1, maxY - minY);
-  const spacing =
-    sorted.length > 1
-      ? Math.min(minSpacing, available / (sorted.length - 1))
-      : minSpacing;
-  const positions = sorted.map((segment) => clamp(segment.yc, minY, maxY));
-
-  for (let index = 1; index < positions.length; index += 1) {
-    positions[index] = Math.max(
-      positions[index],
-      positions[index - 1] + spacing
-    );
-  }
-
-  const overflow = positions[positions.length - 1] - maxY;
-  if (overflow > 0) {
-    for (let index = 0; index < positions.length; index += 1) {
-      positions[index] -= overflow;
-    }
-  }
-
-  for (let index = positions.length - 2; index >= 0; index -= 1) {
-    positions[index] = Math.min(
-      positions[index],
-      positions[index + 1] - spacing
-    );
-  }
-
-  return sorted.map((segment, index) => [
-    segment.id,
-    clamp(positions[index], minY, maxY)
-  ]);
-}
-
-function sankeyStrokePath(
+// A ribbon is a closed shape, not a thick line: its top and bottom edges are
+// separate curves, so the band keeps its own width at each end and the volume
+// entering equals the volume leaving.
+function sankeyRibbonPath(
   x0: number,
   x1: number,
-  y0: number,
-  y1: number
+  a0: number,
+  a1: number,
+  b0: number,
+  b1: number
 ) {
-  const curve = (x1 - x0) * 0.48;
-  const verticalPull = (y1 - y0) * 0.18;
+  const curve = (x1 - x0) * 0.5;
 
   return [
-    `M ${x0} ${y0}`,
-    `C ${x0 + curve} ${y0 + verticalPull}, ${x1 - curve} ${
-      y1 - verticalPull
-    }, ${x1} ${y1}`
+    `M ${x0} ${a0}`,
+    `C ${x0 + curve} ${a0}, ${x1 - curve} ${b0}, ${x1} ${b0}`,
+    `L ${x1} ${b1}`,
+    `C ${x1 - curve} ${b1}, ${x0 + curve} ${a1}, ${x0} ${a1}`,
+    "Z"
   ].join(" ");
 }
 
@@ -3850,6 +3788,12 @@ function allocationColor(source: string, index: number) {
   ];
 
   return colors[index % colors.length];
+}
+
+// Category ids carry the raw label, so they can hold spaces and punctuation
+// that a url(#...) reference cannot.
+function svgId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "-");
 }
 
 function truncateSvgText(value: string, maxLength: number) {

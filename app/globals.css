@@ -63,9 +63,6 @@
   --success-bg: #e7f5ed;
   --error-bg: #fff0eb;
 
-  --chart-input-from: #d9f3f6;
-  --chart-input-to: #effbf2;
-
   --shadow-color: rgba(22, 26, 22, 0.1);
   --shadow: 0 18px 50px var(--shadow-color);
 }
@@ -128,9 +125,6 @@
   --positive-line: rgba(76, 196, 110, 0.32);
   --success-bg: #16301f;
   --error-bg: #341c14;
-
-  --chart-input-from: #123037;
-  --chart-input-to: #14312a;
 
   --shadow-color: rgba(0, 0, 0, 0.55);
   --shadow: 0 18px 50px var(--shadow-color);
@@ -1215,71 +1209,33 @@ button:focus-visible,
   font-weight: 800;
 }
 
-.sankey-flow {
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.5;
-}
-
-.sankey-flow.input-flow {
-  opacity: 0.9;
-}
-
-.sankey-flow.allocation-flow {
-  opacity: 0.5;
-}
-
-.sankey-flow.allocation-flow.label-outside {
-  opacity: 0.72;
-}
-
-.sankey-input-node {
-  fill: url(#sankey-input-fill);
-  stroke: var(--teal-line);
+/* Ribbons are translucent so overlapping bands read as stacked volume rather
+   than as one opaque shape hiding the others. */
+.sankey-ribbon {
+  opacity: 0.4;
 }
 
 .sankey-income-node {
   fill: var(--positive);
 }
 
-.sankey-income-label-bg {
-  fill: var(--panel-glass-strong);
-  stroke: var(--line-faint);
+/* Labels sit over the flat tail of their own ribbon, so they carry a halo to
+   stay legible against whatever colour runs underneath. */
+.sankey-node-name,
+.sankey-node-value {
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-linejoin: round;
+  stroke-width: 3px;
 }
 
-.sankey-flow-terminal {
-  stroke: var(--panel-glass);
-  stroke-width: 1.5;
-}
-
-.sankey-node-label,
-.sankey-allocation-label,
-.sankey-income-label {
+.sankey-node-name {
   fill: var(--ink);
   font-size: 19px;
   font-weight: 900;
 }
 
-.sankey-allocation-label.outside,
-.sankey-allocation-amount.outside {
-  paint-order: stroke;
-  stroke: var(--paper);
-  stroke-linejoin: round;
-  stroke-width: 4px;
-}
-
-/* Cramped flows get one line, sized to clear the gap between neighbours. */
-.sankey-allocation-label.outside {
-  font-size: 14px;
-}
-
-.sankey-allocation-amount.outside {
-  font-size: 13px;
-}
-
-.sankey-node-amount,
-.sankey-allocation-amount,
-.sankey-income-amount {
+.sankey-node-value {
   fill: var(--ink);
   font-size: 17px;
   font-weight: 800;
