@@ -37,6 +37,7 @@ import {
   useState,
   useSyncExternalStore
 } from "react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
   PAYMENT_METHODS,
@@ -1342,6 +1343,7 @@ export function StatementWorkspace() {
             <p className="eyebrow">Statement Ledger</p>
             <h1>Expense intake</h1>
           </div>
+          <ThemeToggle />
         </div>
 
         <section className="panel upload-panel">
@@ -2640,12 +2642,12 @@ function CashFlowSankey({
     >
       <defs>
         <linearGradient id="sankey-input-fill" x1="0" x2="1" y1="0" y2="0">
-          <stop offset="0%" stopColor="#d9f3f6" />
-          <stop offset="100%" stopColor="#effbf2" />
+          <stop offset="0%" stopColor="var(--chart-input-from)" />
+          <stop offset="100%" stopColor="var(--chart-input-to)" />
         </linearGradient>
         <linearGradient id="sankey-input-stroke" x1="0" x2="1" y1="0" y2="0">
-          <stop offset="0%" stopColor="#0ca4b8" stopOpacity="0.18" />
-          <stop offset="100%" stopColor="#2f9e4f" stopOpacity="0.54" />
+          <stop offset="0%" stopColor="var(--teal)" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="var(--positive)" stopOpacity="0.54" />
         </linearGradient>
       </defs>
 
@@ -3814,26 +3816,38 @@ function nextGraphZoomLevel(
   return GRAPH_ZOOM_LEVELS[nextIndex];
 }
 
+// Chart paint goes through the theme tokens so the graphs follow light/dark.
 function inputColor(index: number) {
-  const colors = ["#0ca4b8", "#2f9e4f", "#2448c7", "#f2b705"];
+  const colors = [
+    "var(--teal)",
+    "var(--positive)",
+    "var(--cobalt)",
+    "var(--gold)"
+  ];
 
   return colors[index % colors.length];
 }
 
 function allocationColor(source: string, index: number) {
   if (source === "saved") {
-    return "#2f9e4f";
+    return "var(--positive)";
   }
 
   if (source === "manual-output") {
-    return "#f2b705";
+    return "var(--gold)";
   }
 
   if (source === "overspent") {
-    return "#d45735";
+    return "var(--coral)";
   }
 
-  const colors = ["#c51f87", "#0ca4b8", "#2448c7", "#d45735", "#7a62c9"];
+  const colors = [
+    "var(--magenta)",
+    "var(--teal)",
+    "var(--cobalt)",
+    "var(--coral)",
+    "var(--violet)"
+  ];
 
   return colors[index % colors.length];
 }

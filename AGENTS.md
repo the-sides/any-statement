@@ -84,6 +84,11 @@ precisely so a pull reproduces it.
 - The workspace edits the active month optimistically and flushes to the server on a
   ~500ms debounce, forced on page unload. The cash flow plan, undo history, categorization
   notes, and the app-category preference stay in browser localStorage and stay global.
+- The workspace has a light/dark/system theme toggle in the brand lockup. The preference is
+  stored in `localStorage` under `statement-ledger:theme` and defaults to the system setting.
+  A small inline script in `app/layout.tsx` resolves it onto `<html data-theme>` before first
+  paint, so there is no flash of the light theme. Every colour in `app/globals.css` comes from
+  a token defined for both themes; a raw hex in a rule breaks dark mode silently.
 - `/api/extract` accepts `statementFile` as multipart form data, with legacy `statementPdf` replays still accepted.
 - `/api/extract` saves the original PDF or CSV and extraction artifacts to `/tmp/statement-ledger/uploads/<upload-id>/`.
 - OpenRouter is the primary extraction path.
@@ -125,6 +130,8 @@ precisely so a pull reproduces it.
 ## Important Files
 
 - `components/StatementWorkspace.tsx` - client UI state, upload, row editing, and save flow.
+- `lib/theme.ts` - theme preference storage, resolution, and the pre-paint init script;
+  `components/ThemeToggle.tsx` is the segmented light/dark/system control.
 - `lib/months.ts` - month determination, filing, reassignment, listing, and legacy draft
   migration as pure transforms; `lib/months.test.ts` covers it.
 - `lib/monthsClientStore.ts` - client-side month store: load, debounced writes, unload flush.
