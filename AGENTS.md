@@ -88,6 +88,9 @@ the local `OPENROUTER_*` and `NOTION_*` keys once.
 - `lib/db.ts` - lazy Neon client (no Proxy wrapper) plus numeric/text column coercion.
 - `lib/schema.sql` - months, statements, expenses, and category catalog tables.
 - `proxy.ts` - WorkOS AuthKit gate over every route except the sign-in flow and static assets.
+- `lib/accessControl.ts` - email allowlist decision. A WorkOS session only proves *someone*
+  signed in; without the allowlist anyone able to sign up would reach the ledger. Unset
+  `STATEMENT_LEDGER_ALLOWED_EMAILS` denies everyone rather than falling open.
 - `app/api/months/route.ts` and `app/api/months/[month]/route.ts` - month list and
   read/write/delete of one month document.
 - `app/api/categories/route.ts` - category catalog read and enabled/disabled updates.

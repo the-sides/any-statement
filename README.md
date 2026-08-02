@@ -137,7 +137,10 @@ bun run scripts/import-local-months.ts   # first deploy only
 
 Notes:
 
-- `proxy.ts` protects every route, so an anonymous request never reaches statement data.
+- `proxy.ts` protects every route, so an anonymous request never reaches statement data. It also
+  enforces `STATEMENT_LEDGER_ALLOWED_EMAILS`: a WorkOS session alone only proves someone signed
+  in, so without an allowlist anyone able to sign up would reach the ledger. An unset allowlist
+  denies everyone.
 - Reviewer categorization notes, review history, and the cash flow plan live in browser `localStorage`, not the database. They do not follow you between devices, so a phone starts without the notes that tune extraction.
 - Upload and debug artifacts still go to `/tmp`, which is per-instance and ephemeral on Vercel. They are written and read within a single request, so extraction is unaffected; only after-the-fact debugging is lost.
 

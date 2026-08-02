@@ -1,17 +1,43 @@
-import { authkitProxy } from "@workos-inc/authkit-nextjs";
+import { authkit, handleAuthkitHeaders } from "@workos-inc/authkit-nextjs";
+import type { NextRequest } from "next/server";
+import {
+  ALLOWED_EMAILS_ENV,
+  accessDenialMessage,
+  decideAccess,
+  parseAllowedEmails
+} from "@/lib/accessControl";
 
 /**
- * Secure by default: everything the matcher covers requires a WorkOS session,
- * so no page or API route serves statement data to an anonymous request. The
- * ledger is personal financial history on a public URL — opting routes in one
+ * Secure by default: everything the matcher covers requires a WorkOS session
+ * *and* an allowlisted address, so no page or API route serves statement data to
+ * an anonymous request or to a stranger who simply signed themselves up. The
+ * ledger is personal financial history on a public URL, so opting routes in one
  * at a time would make an omission silently public.
  */
-export default authkitProxy({
-  middlewareAuth: {
-    enabled: true,
-    unauthenticatedPaths: []
+export default async function proxy(request: NextRequest) {
+  const { session, headers, authorizationUrl } = await authkit(request);
+
+  if (!session.user) {
+    return authorizationUrl
+      ? handleAuthkitHeaders(request, headers, { redirect: authorizationUrl })
+      : new Response("Authentication is unavailable.", { status: 503 });
   }
-});
+
+  const decision = decideAccess({
+    email: session.user.email,
+    emailVerified: session.user.emailVerified,
+    allowedEmails: parseAllowedEmails(process.env[ALLOWED_EMAILS_ENV])
+  });
+
+  if (!decision.allowed) {
+    return new Response(accessDenialMessage(decision.reason), {
+      status: 403,
+      headers: { "content-type": "text/plain; charset=utf-8" }
+    });
+  }
+
+  return handleAuthkitHeaders(request, headers);
+}
 
 export const config = {
   // `callback` and `sign-in` drive the sign-in flow itself and must stay
