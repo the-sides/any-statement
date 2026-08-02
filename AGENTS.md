@@ -6,7 +6,13 @@ This project lives at:
 /home/jake/repos/any-statement
 ```
 
-It is a Bun + Next.js app named Statement Ledger. The user is testing it from a phone against localhost and expects uploaded statement files to be saved locally so agents can inspect and replay the exact statements.
+It is a Bun + Next.js app named Statement Ledger. Uploaded statement files are saved locally so
+agents can inspect and replay the exact statements.
+
+It is deployed at `https://any-statement.vercel.app` (Vercel project
+`thesides-projects/any-statement`, personal account — see `Vercel Account`), so the user can
+upload statements from a phone. The published repo is `github.com/the-sides/any-budget`.
+Access is limited to the addresses in `STATEMENT_LEDGER_ALLOWED_EMAILS`.
 
 ## Rules For Future Agents
 
