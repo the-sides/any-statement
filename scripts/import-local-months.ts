@@ -1,7 +1,10 @@
 /**
  * One-shot import of the local file-backed ledger into Postgres.
  *
- *   bun run scripts/import-local-months.ts [dataDir]
+ *   STATEMENT_LEDGER_LEGACY_USER_ID=user_... bun run scripts/import-local-months.ts [dataDir]
+ *
+ * The ledger is per-user, and these files predate that, so the importer has to
+ * be told whose months they are rather than guessing.
  *
  * Re-runnable: writeStoredMonth replaces a month wholesale, so importing the
  * same file twice leaves the same rows.
@@ -10,6 +13,15 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { isMonthKey, parseMonthDocument, summarizeMonthDocument } from "@/lib/months";
 import { writeStoredMonth } from "@/lib/monthStore";
+
+const userId = process.env.STATEMENT_LEDGER_LEGACY_USER_ID;
+
+if (!userId) {
+  console.error(
+    "Set STATEMENT_LEDGER_LEGACY_USER_ID to the WorkOS user id that owns these months."
+  );
+  process.exit(1);
+}
 
 const dataDir =
   process.argv[2] || path.join(process.cwd(), "data", "months");
@@ -42,7 +54,7 @@ for (const entry of entries.sort()) {
     continue;
   }
 
-  await writeStoredMonth(document);
+  await writeStoredMonth(userId, document);
 
   const summary = summarizeMonthDocument(document);
   console.log(

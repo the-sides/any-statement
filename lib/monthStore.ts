@@ -50,12 +50,17 @@ type ExpenseRow = {
   notes: unknown;
 };
 
-export async function listStoredMonths(): Promise<MonthSummary[]> {
+export async function listStoredMonths(
+  userId: string
+): Promise<MonthSummary[]> {
   const sql = getSql();
   const [monthRows, statementRows, expenseRows] = (await Promise.all([
-    sql`select month, active_statement_id, saved_at from months order by month`,
-    sql`select * from statements order by month, position, id`,
-    sql`select * from expenses order by month, position, id`
+    sql`
+      select month, active_statement_id, saved_at from months
+      where user_id = ${userId} order by month
+    `,
+    sql`select * from statements where user_id = ${userId} order by month, position, id`,
+    sql`select * from expenses where user_id = ${userId} order by month, position, id`
   ])) as [MonthRow[], StatementRow[], ExpenseRow[]];
 
   return listMonths(
@@ -64,6 +69,7 @@ export async function listStoredMonths(): Promise<MonthSummary[]> {
 }
 
 export async function readStoredMonth(
+  userId: string,
   month: string
 ): Promise<MonthDocument | null> {
   if (!isMonthKey(month)) {
@@ -73,9 +79,18 @@ export async function readStoredMonth(
   try {
     const sql = getSql();
     const [monthRows, statementRows, expenseRows] = (await Promise.all([
-      sql`select month, active_statement_id, saved_at from months where month = ${month}`,
-      sql`select * from statements where month = ${month} order by position, id`,
-      sql`select * from expenses where month = ${month} order by position, id`
+      sql`
+        select month, active_statement_id, saved_at from months
+        where user_id = ${userId} and month = ${month}
+      `,
+      sql`
+        select * from statements
+        where user_id = ${userId} and month = ${month} order by position, id
+      `,
+      sql`
+        select * from expenses
+        where user_id = ${userId} and month = ${month} order by position, id
+      `
     ])) as [MonthRow[], StatementRow[], ExpenseRow[]];
 
     if (monthRows.length === 0) {
@@ -94,14 +109,19 @@ export async function readStoredMonth(
  * stored, so the stepper never walks an empty month.
  */
 export async function writeStoredMonth(
+  userId: string,
   document: MonthDocument
 ): Promise<MonthDocument | null> {
+  if (!userId) {
+    throw new Error("A month document needs an owner.");
+  }
+
   if (!isMonthKey(document.month)) {
     throw new Error("A month document needs a YYYY-MM month key.");
   }
 
   if (document.statements.length === 0) {
-    await deleteStoredMonth(document.month);
+    await deleteStoredMonth(userId, document.month);
 
     return null;
   }
@@ -114,22 +134,22 @@ export async function writeStoredMonth(
   // to diff rows the UI already resolved client-side.
   await sql.transaction([
     sql`
-      insert into months (month, active_statement_id, saved_at)
-      values (${month}, ${document.activeStatementId}, ${document.savedAt})
-      on conflict (month) do update
+      insert into months (user_id, month, active_statement_id, saved_at)
+      values (${userId}, ${month}, ${document.activeStatementId}, ${document.savedAt})
+      on conflict (user_id, month) do update
         set active_statement_id = excluded.active_statement_id,
             saved_at = excluded.saved_at
     `,
-    sql`delete from statements where month = ${month}`,
-    sql`delete from expenses where month = ${month}`,
+    sql`delete from statements where user_id = ${userId} and month = ${month}`,
+    sql`delete from expenses where user_id = ${userId} and month = ${month}`,
     ...document.statements.map((statement, position) =>
       sql`
         insert into statements (
-          month, id, position, source_file_name, imported_at, month_source,
+          user_id, month, id, position, source_file_name, imported_at, month_source,
           institution, account_mask, statement_type, period_start, period_end,
           currency, opening_balance, closing_balance, confidence
         ) values (
-          ${month}, ${statement.id}, ${position}, ${statement.sourceFileName},
+          ${userId}, ${month}, ${statement.id}, ${position}, ${statement.sourceFileName},
           ${statement.importedAt}, ${statement.monthSource},
           ${statement.statement.institution}, ${statement.statement.accountMask},
           ${statement.statement.statementType}, ${statement.statement.periodStart},
@@ -142,11 +162,11 @@ export async function writeStoredMonth(
     ...document.expenses.map((expense, position) =>
       sql`
         insert into expenses (
-          month, id, position, statement_id, selected, date, posted_date,
+          user_id, month, id, position, statement_id, selected, date, posted_date,
           description, merchant, amount, currency, category, subcategory,
           payment_method, statement_section, confidence, notes
         ) values (
-          ${month}, ${expense.id}, ${position}, ${expense.statementId || ""},
+          ${userId}, ${month}, ${expense.id}, ${position}, ${expense.statementId || ""},
           ${selected.has(expense.id)}, ${expense.date}, ${expense.postedDate},
           ${expense.description}, ${expense.merchant}, ${expense.amount},
           ${expense.currency}, ${expense.category}, ${expense.subcategory},
@@ -160,13 +180,13 @@ export async function writeStoredMonth(
   return document;
 }
 
-async function deleteStoredMonth(month: string) {
+async function deleteStoredMonth(userId: string, month: string) {
   if (!isMonthKey(month)) {
     return;
   }
 
   // Statements and expenses cascade.
-  await getSql()`delete from months where month = ${month}`;
+  await getSql()`delete from months where user_id = ${userId} and month = ${month}`;
 }
 
 function assembleDocuments(

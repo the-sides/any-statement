@@ -2,16 +2,32 @@ import {
   normalizeCategoryName,
   type ExpenseCategoryDefinitionInput
 } from "@/lib/categories";
-import {
-  loadCategoryCatalog,
-  type ExpenseCategoryCatalog
-} from "@/lib/categoryStore";
+import type { ExpenseCategoryCatalog } from "@/lib/categoryStore";
 import type {
   ExpenseItem,
   SaveExpensesPayload,
   SaveExpensesResult,
   SaveStatementSource
 } from "@/lib/types";
+
+/**
+ * One user's Notion workspace. Credentials are passed in rather than read from
+ * the environment: the environment holds at most one workspace, and every user
+ * of the deployed ledger connects their own. `lib/notionConnection.ts` loads
+ * these from the per-user row.
+ */
+export type NotionConnection = {
+  apiKey: string;
+  dataSourceId: string;
+  categoryDataSourceId: string;
+};
+
+export const MISSING_NOTION_API_KEY =
+  "Connect your Notion workspace before saving: add an integration token under Notion.";
+export const MISSING_NOTION_DATA_SOURCE_ID =
+  "Add the Notion expenses data source ID under Notion before saving.";
+export const MISSING_NOTION_CATEGORY_DATA_SOURCE_ID =
+  "Add the Notion category data source ID under Notion before importing categories.";
 
 const NOTION_VERSION = "2026-03-11";
 const NOTION_PAGES_URL = "https://api.notion.com/v1/pages";
@@ -29,36 +45,35 @@ export class NotionSaveError extends Error {
 }
 
 export async function saveExpensesToNotion(
-  payload: SaveExpensesPayload
+  payload: SaveExpensesPayload,
+  context: {
+    connection: NotionConnection;
+    categoryCatalog: ExpenseCategoryCatalog;
+  }
 ): Promise<SaveExpensesResult> {
-  const apiKey = process.env.NOTION_API_KEY;
-  const dataSourceId = payload.dataSourceId || process.env.NOTION_DATA_SOURCE_ID;
+  const { connection, categoryCatalog } = context;
+  const apiKey = connection.apiKey;
+  const dataSourceId = connection.dataSourceId;
 
   if (!apiKey) {
-    throw new NotionSaveError(
-      "NOTION_API_KEY is missing. Add it to .env.local before saving expenses.",
-      503
-    );
+    throw new NotionSaveError(MISSING_NOTION_API_KEY, 400);
   }
 
   if (!dataSourceId) {
-    throw new NotionSaveError(
-      "NOTION_DATA_SOURCE_ID is missing. Add it to .env.local or enter one in the UI.",
-      400
-    );
+    throw new NotionSaveError(MISSING_NOTION_DATA_SOURCE_ID, 400);
   }
 
   if (!payload.expenses.length) {
     throw new NotionSaveError("Select at least one expense to save.", 400);
   }
 
-  const categoryCatalog = await loadCategoryCatalog();
   const resolvedDataSourceId = await resolveDataSourceId(apiKey, dataSourceId);
   const schema = await ensureExpenseSchema(apiKey, resolvedDataSourceId);
   const categoryResolver = await createCategoryResolver(
     apiKey,
     schema,
-    categoryCatalog
+    categoryCatalog,
+    connection.categoryDataSourceId
   );
   const { pageIds: categoryPageIds, unmatchedCategories } =
     resolveExpenseCategoryPageIds(categoryResolver, payload.expenses);
@@ -112,23 +127,18 @@ export async function saveExpensesToNotion(
   };
 }
 
-export async function fetchCategoryDefinitionsFromNotion(dataSourceId?: string) {
-  const apiKey = process.env.NOTION_API_KEY;
-  const categoryDataSourceId =
-    dataSourceId || process.env.NOTION_CATEGORY_DATA_SOURCE_ID;
+export async function fetchCategoryDefinitionsFromNotion(
+  connection: NotionConnection
+) {
+  const apiKey = connection.apiKey;
+  const categoryDataSourceId = connection.categoryDataSourceId;
 
   if (!apiKey) {
-    throw new NotionSaveError(
-      "NOTION_API_KEY is missing. Add it to .env.local before importing categories.",
-      503
-    );
+    throw new NotionSaveError(MISSING_NOTION_API_KEY, 400);
   }
 
   if (!categoryDataSourceId) {
-    throw new NotionSaveError(
-      "NOTION_CATEGORY_DATA_SOURCE_ID is missing. Add it to .env.local before importing categories.",
-      400
-    );
+    throw new NotionSaveError(MISSING_NOTION_CATEGORY_DATA_SOURCE_ID, 400);
   }
 
   const resolvedDataSourceId = await resolveDataSourceId(
@@ -474,7 +484,8 @@ function addMissingProperty(
 async function createCategoryResolver(
   apiKey: string,
   expenseSchema: NotionPropertyMap,
-  categoryCatalog: ExpenseCategoryCatalog
+  categoryCatalog: ExpenseCategoryCatalog,
+  connectionCategoryDataSourceId: string
 ) {
   const categoryProperty = expenseSchema.Category;
 
@@ -488,11 +499,11 @@ async function createCategoryResolver(
   const categoryDataSourceId =
     categoryProperty.relation?.data_source_id ||
     categoryCatalog.sourceDataSourceId ||
-    process.env.NOTION_CATEGORY_DATA_SOURCE_ID;
+    connectionCategoryDataSourceId;
 
   if (!categoryDataSourceId) {
     throw new NotionSaveError(
-      "NOTION_CATEGORY_DATA_SOURCE_ID is missing and the Category relation target could not be detected.",
+      `${MISSING_NOTION_CATEGORY_DATA_SOURCE_ID} The Category relation target could not be detected either.`,
       400
     );
   }

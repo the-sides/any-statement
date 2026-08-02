@@ -1,4 +1,6 @@
--- Statement Ledger schema.
+-- Statement Ledger schema, as it stood before the ledger became multi-tenant.
+-- Kept verbatim so a fresh database replays the same history an existing one
+-- went through; 002_multi_tenant.sql rewrites the keys below.
 --
 -- A month is stored relationally rather than as a JSON blob so the ledger can
 -- be queried across months in SQL. Writes stay whole-document: `writeStoredMonth`

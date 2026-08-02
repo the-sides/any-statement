@@ -7,12 +7,14 @@ import {
   saveUploadedStatement,
   type UploadArtifact
 } from "@/lib/artifacts";
+import { commonErrorResponse } from "@/lib/apiErrors";
 import { ensureCategoryCatalog } from "@/lib/categoryStore";
 import {
   getEnabledCategoryDefinitions,
   selectActiveCategories,
   type ExpenseCategoryDefinition
 } from "@/lib/categories";
+import { requireUserId } from "@/lib/currentUser";
 import { extractFallbackExpensesFromPdf } from "@/lib/fallbackExtractor";
 import {
   extractStatementFromCsv,
@@ -39,6 +41,9 @@ export async function POST(request: Request) {
       );
     }
 
+    // The prompt is built from this user's category catalog, so extraction is
+    // per-user even though it writes nothing to the ledger itself.
+    const userId = await requireUserId();
     const formData = await request.formData();
     const file = formData.get("statementFile") ?? formData.get("statementPdf");
     const categorizationNotes = readOptionalFormString(
@@ -75,7 +80,7 @@ export async function POST(request: Request) {
     const artifact = await saveUploadedStatement(file, uploadType);
 
     try {
-      const { catalog: categoryCatalog } = await ensureCategoryCatalog();
+      const { catalog: categoryCatalog } = await ensureCategoryCatalog(userId);
       const extractionCategories = categoriesForExtraction(
         categoryCatalog.categories,
         includeAppCategories
@@ -127,9 +132,9 @@ export async function POST(request: Request) {
       return Response.json({ error: error.message }, { status: error.status });
     }
 
-    return Response.json(
-      { error: "Statement extraction failed." },
-      { status: 500 }
+    return (
+      commonErrorResponse(error) ??
+      Response.json({ error: "Statement extraction failed." }, { status: 500 })
     );
   }
 }

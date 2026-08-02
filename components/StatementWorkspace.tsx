@@ -15,6 +15,7 @@ import {
   LoaderCircle,
   MessageCircle,
   NotebookPen,
+  Plug,
   Plus,
   RefreshCw,
   Save,
@@ -23,6 +24,7 @@ import {
   Tags,
   Trash2,
   Undo2,
+  Unplug,
   Upload,
   UserRound,
   X,
@@ -126,6 +128,24 @@ type CategoryResponse = {
   error?: string;
 };
 
+/** Mirrors `NotionConnectionStatus` from lib/notionConnection.ts. */
+type NotionConnectionStatus = {
+  hasApiKey: boolean;
+  dataSourceId: string;
+  categoryDataSourceId: string;
+  updatedAt: string;
+  ready: boolean;
+  error?: string;
+};
+
+const EMPTY_NOTION_CONNECTION: NotionConnectionStatus = {
+  hasApiKey: false,
+  dataSourceId: "",
+  categoryDataSourceId: "",
+  updatedAt: "",
+  ready: false
+};
+
 type ExpenseChatUiMessage = ExpenseChatMessage & {
   id: string;
 };
@@ -224,7 +244,14 @@ const hydrationSafeIconProps = {
 
 export function StatementWorkspace() {
   const [file, setFile] = useState<File | null>(null);
+  // The connection lives on the server, per user. The token is never sent back
+  // to the browser, so `apiKeyDraft` is only ever a new value being typed.
+  const [notionConnection, setNotionConnection] =
+    useState<NotionConnectionStatus>(EMPTY_NOTION_CONNECTION);
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [dataSourceId, setDataSourceId] = useState("");
+  const [categoryDataSourceId, setCategoryDataSourceId] = useState("");
+  const [notionBusy, setNotionBusy] = useState(false);
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [graphZoom, setGraphZoom] = useState(DEFAULT_GRAPH_ZOOM);
   const [cashFlowGraphType, setCashFlowGraphType] =
@@ -434,6 +461,105 @@ export function StatementWorkspace() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadNotionConnection() {
+      try {
+        const response = await fetch("/api/notion/connection");
+        const result = (await response.json()) as NotionConnectionStatus;
+
+        if (!response.ok) {
+          throw new Error(result.error || "Loading the connection failed.");
+        }
+
+        if (active) {
+          applyNotionConnection(result);
+        }
+      } catch {
+        // A missing connection is the normal state for a new account; the panel
+        // already reads as "not connected" without an extra error notice.
+      }
+    }
+
+    loadNotionConnection();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function applyNotionConnection(status: NotionConnectionStatus) {
+    setNotionConnection(status);
+    setDataSourceId(status.dataSourceId);
+    setCategoryDataSourceId(status.categoryDataSourceId);
+    setApiKeyDraft("");
+  }
+
+  async function saveNotionConnection() {
+    setNotionBusy(true);
+
+    try {
+      const response = await fetch("/api/notion/connection", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // Omitted rather than blank: an empty draft means "keep the stored
+          // token", not "clear it".
+          apiKey: apiKeyDraft.trim() ? apiKeyDraft.trim() : undefined,
+          dataSourceId,
+          categoryDataSourceId
+        })
+      });
+      const result = (await response.json()) as NotionConnectionStatus;
+
+      if (!response.ok) {
+        throw new Error(result.error || "Saving the connection failed.");
+      }
+
+      applyNotionConnection(result);
+      showNotice({
+        tone: result.ready ? "success" : "neutral",
+        message: result.ready
+          ? "Notion connection saved."
+          : "Notion connection saved. Add an integration token and expenses data source ID to save rows."
+      });
+    } catch (error) {
+      showNotice({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Saving the connection failed."
+      });
+    } finally {
+      setNotionBusy(false);
+    }
+  }
+
+  async function disconnectNotion() {
+    setNotionBusy(true);
+
+    try {
+      const response = await fetch("/api/notion/connection", {
+        method: "DELETE"
+      });
+      const result = (await response.json()) as NotionConnectionStatus;
+
+      if (!response.ok) {
+        throw new Error(result.error || "Disconnecting failed.");
+      }
+
+      applyNotionConnection(result);
+      showNotice({ tone: "neutral", message: "Notion connection removed." });
+    } catch (error) {
+      showNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Disconnecting failed."
+      });
+    } finally {
+      setNotionBusy(false);
+    }
+  }
+
   async function extractStatement() {
     if (!file) {
       showNotice({
@@ -541,7 +667,6 @@ export function StatementWorkspace() {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          dataSourceId: dataSourceId.trim() || undefined,
           sourceFileName:
             sourceFileName || file?.name || "sample-statement.pdf",
           statement: activeStatementSummary,
@@ -1272,23 +1397,90 @@ export function StatementWorkspace() {
         </section>
 
         <section className="panel">
-          <div className="panel-heading">
-            <Database size={18} {...hydrationSafeIconProps} />
-            <h2>Notion</h2>
+          <div className="panel-heading panel-heading-split">
+            <div className="panel-heading-title">
+              <Database size={18} {...hydrationSafeIconProps} />
+              <h2>Notion</h2>
+            </div>
+            <span className="panel-count">
+              {notionConnection.ready
+                ? "Connected"
+                : notionConnection.hasApiKey
+                  ? "Incomplete"
+                  : "Not connected"}
+            </span>
           </div>
           <label className="field">
-            <span>Data source ID</span>
+            <span>Integration token</span>
+            <input
+              type="password"
+              autoComplete="off"
+              value={apiKeyDraft}
+              onChange={(event) => setApiKeyDraft(event.target.value)}
+              placeholder={
+                notionConnection.hasApiKey
+                  ? "Stored - type to replace"
+                  : "secret_..."
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Expenses data source ID</span>
             <input
               value={dataSourceId}
               onChange={(event) => setDataSourceId(event.target.value)}
-              placeholder="Uses env when blank"
+              placeholder="Expenses database or data source"
             />
           </label>
+          <label className="field">
+            <span>Category data source ID</span>
+            <input
+              value={categoryDataSourceId}
+              onChange={(event) => setCategoryDataSourceId(event.target.value)}
+              placeholder="Optional - imports your categories"
+            />
+          </label>
+          <div className="panel-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              title="Save this Notion connection"
+              disabled={notionBusy}
+              onClick={saveNotionConnection}
+            >
+              {notionBusy ? (
+                <LoaderCircle
+                  className="spin"
+                  size={18}
+                  {...hydrationSafeIconProps}
+                />
+              ) : (
+                <Plug size={18} {...hydrationSafeIconProps} />
+              )}
+              Connect
+            </button>
+            {notionConnection.hasApiKey ? (
+              <button
+                className="secondary-button"
+                type="button"
+                title="Remove the stored token and data source IDs"
+                disabled={notionBusy}
+                onClick={disconnectNotion}
+              >
+                <Unplug size={18} {...hydrationSafeIconProps} />
+                Disconnect
+              </button>
+            ) : null}
+          </div>
           <button
             className="secondary-button"
             type="button"
-            title="Save selected expenses"
-            disabled={controlsDisabled}
+            title={
+              notionConnection.ready
+                ? "Save selected expenses"
+                : "Connect Notion first"
+            }
+            disabled={controlsDisabled || !notionConnection.ready}
             onClick={saveToNotion}
           >
             {busy === "saving" ? (

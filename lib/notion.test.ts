@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { saveExpensesToNotion } from "@/lib/notion";
-import type { ExpenseItem, StatementSummary } from "@/lib/types";
+import {
+  DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
+  getEnabledCategoryDefinitions
+} from "@/lib/categories";
+import type { ExpenseCategoryCatalog } from "@/lib/categoryStore";
+import { saveExpensesToNotion, type NotionConnection } from "@/lib/notion";
+import type {
+  ExpenseItem,
+  SaveExpensesPayload,
+  StatementSummary
+} from "@/lib/types";
 
 const EXPENSE_DATA_SOURCE_ID = "ddd53551-1dbb-4073-8fc7-0e7780246fed";
 const CATEGORY_DATA_SOURCE_ID = "5d4f3cbe-4fd7-4b36-80a1-e472c179e472";
@@ -70,24 +79,29 @@ type CapturedPage = {
   properties: Record<string, Record<string, unknown>>;
 };
 
-const originalFetch = globalThis.fetch;
-const originalEnv = {
-  apiKey: process.env.NOTION_API_KEY,
-  dataSourceId: process.env.NOTION_DATA_SOURCE_ID,
-  categoryDataSourceId: process.env.NOTION_CATEGORY_DATA_SOURCE_ID,
-  artifactDir: process.env.STATEMENT_LEDGER_ARTIFACT_DIR
+const CONNECTION: NotionConnection = {
+  apiKey: "test-api-key",
+  dataSourceId: EXPENSE_DATA_SOURCE_ID,
+  categoryDataSourceId: CATEGORY_DATA_SOURCE_ID
 };
+
+// No stored catalog, so the built-in categories stand in -- none of them carry
+// a Notion `sourceId`, which keeps the relation matching in these tests purely
+// name-based.
+const CATEGORY_CATALOG: ExpenseCategoryCatalog = {
+  categories: [...DEFAULT_EXPENSE_CATEGORY_DEFINITIONS],
+  enabledCategories: getEnabledCategoryDefinitions(
+    DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
+  ),
+  updatedAt: ""
+};
+
+const originalFetch = globalThis.fetch;
 
 let createdPages: CapturedPage[] = [];
 
 beforeEach(() => {
   createdPages = [];
-  process.env.NOTION_API_KEY = "test-api-key";
-  process.env.NOTION_DATA_SOURCE_ID = EXPENSE_DATA_SOURCE_ID;
-  process.env.NOTION_CATEGORY_DATA_SOURCE_ID = CATEGORY_DATA_SOURCE_ID;
-  // Missing on purpose: loadCategoryCatalog falls back to the built-in catalog.
-  process.env.STATEMENT_LEDGER_ARTIFACT_DIR =
-    "/tmp/statement-ledger-notion-test-missing";
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -129,18 +143,11 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  restoreEnv("NOTION_API_KEY", originalEnv.apiKey);
-  restoreEnv("NOTION_DATA_SOURCE_ID", originalEnv.dataSourceId);
-  restoreEnv(
-    "NOTION_CATEGORY_DATA_SOURCE_ID",
-    originalEnv.categoryDataSourceId
-  );
-  restoreEnv("STATEMENT_LEDGER_ARTIFACT_DIR", originalEnv.artifactDir);
 });
 
 describe("saveExpensesToNotion", () => {
   test("titles rows with the merchant and links the Notion category relation", async () => {
-    const result = await saveExpensesToNotion({
+    const result = await save({
       sourceFileName: "activity.csv",
       statement: STATEMENT,
       expenses: [
@@ -166,7 +173,7 @@ describe("saveExpensesToNotion", () => {
   });
 
   test("matches category names case-insensitively", async () => {
-    await saveExpensesToNotion({
+    await save({
       statement: STATEMENT,
       expenses: [expenseItem({ category: "  subscription " })]
     });
@@ -177,7 +184,7 @@ describe("saveExpensesToNotion", () => {
   });
 
   test("never writes the legacy Expense Category select", async () => {
-    await saveExpensesToNotion({
+    await save({
       statement: STATEMENT,
       expenses: [expenseItem({ category: "Subscription" })]
     });
@@ -187,7 +194,7 @@ describe("saveExpensesToNotion", () => {
   });
 
   test("leaves the relation empty and reports categories missing from Notion", async () => {
-    const result = await saveExpensesToNotion({
+    const result = await save({
       statement: STATEMENT,
       expenses: [
         expenseItem({ merchant: "Delta", category: "Other" }),
@@ -245,11 +252,9 @@ function jsonResponse(payload: unknown) {
   });
 }
 
-function restoreEnv(name: string, value: string | undefined) {
-  if (value === undefined) {
-    delete process.env[name];
-    return;
-  }
-
-  process.env[name] = value;
+function save(payload: SaveExpensesPayload) {
+  return saveExpensesToNotion(payload, {
+    connection: CONNECTION,
+    categoryCatalog: CATEGORY_CATALOG
+  });
 }

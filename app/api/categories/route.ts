@@ -1,24 +1,39 @@
+import { commonErrorResponse } from "@/lib/apiErrors";
 import { ensureCategoryCatalog, setCategoryEnabled } from "@/lib/categoryStore";
+import { requireUserId } from "@/lib/currentUser";
+import { readNotionConnectionStatus } from "@/lib/notionConnection";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
 
 export async function GET() {
-  const { catalog, imported, importError } = await ensureCategoryCatalog();
+  try {
+    const userId = await requireUserId();
+    const { catalog, imported, importError } = await ensureCategoryCatalog(
+      userId
+    );
+    const connection = await readNotionConnectionStatus(userId);
 
-  return Response.json({
-    categories: catalog.categories,
-    enabledCategories: catalog.enabledCategories,
-    sourceConfigured: Boolean(process.env.NOTION_CATEGORY_DATA_SOURCE_ID),
-    imported,
-    importError,
-    importedAt: catalog.importedAt,
-    updatedAt: catalog.updatedAt
-  });
+    return Response.json({
+      categories: catalog.categories,
+      enabledCategories: catalog.enabledCategories,
+      sourceConfigured: Boolean(connection.categoryDataSourceId),
+      imported,
+      importError,
+      importedAt: catalog.importedAt,
+      updatedAt: catalog.updatedAt
+    });
+  } catch (error) {
+    return (
+      commonErrorResponse(error) ??
+      Response.json({ error: "Loading categories failed." }, { status: 500 })
+    );
+  }
 }
 
 export async function PATCH(request: Request) {
   try {
+    const userId = await requireUserId();
     const payload = (await request.json()) as {
       name?: unknown;
       enabled?: unknown;
@@ -31,17 +46,21 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const catalog = await setCategoryEnabled(payload.name, payload.enabled);
+    const catalog = await setCategoryEnabled(
+      userId,
+      payload.name,
+      payload.enabled
+    );
 
     return Response.json({
       categories: catalog.categories,
       enabledCategories: catalog.enabledCategories,
       updatedAt: catalog.updatedAt
     });
-  } catch {
-    return Response.json(
-      { error: "Updating categories failed." },
-      { status: 500 }
+  } catch (error) {
+    return (
+      commonErrorResponse(error) ??
+      Response.json({ error: "Updating categories failed." }, { status: 500 })
     );
   }
 }

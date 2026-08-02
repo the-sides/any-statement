@@ -247,6 +247,17 @@ a {
   gap: 10px;
 }
 
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 10px;
+}
+
+.panel-actions .secondary-button {
+  flex: 1 1 auto;
+}
+
 .category-panel .secondary-button {
   margin-bottom: 10px;
 }

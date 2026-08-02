@@ -1,4 +1,8 @@
+import { commonErrorResponse } from "@/lib/apiErrors";
+import { loadCategoryCatalog } from "@/lib/categoryStore";
+import { requireUserId } from "@/lib/currentUser";
 import { NotionSaveError, saveExpensesToNotion } from "@/lib/notion";
+import { readNotionConnection } from "@/lib/notionConnection";
 import type { SaveExpensesPayload } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -6,6 +10,7 @@ export const maxDuration = 90;
 
 export async function POST(request: Request) {
   try {
+    const userId = await requireUserId();
     const payload = (await request.json()) as SaveExpensesPayload;
 
     if (
@@ -18,16 +23,27 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await saveExpensesToNotion(payload);
+    const [connection, categoryCatalog] = await Promise.all([
+      readNotionConnection(userId),
+      loadCategoryCatalog(userId)
+    ]);
+    const result = await saveExpensesToNotion(payload, {
+      connection,
+      categoryCatalog
+    });
+
     return Response.json(result);
   } catch (error) {
     if (error instanceof NotionSaveError) {
       return Response.json({ error: error.message }, { status: error.status });
     }
 
-    return Response.json(
-      { error: "Saving expenses to Notion failed." },
-      { status: 500 }
+    return (
+      commonErrorResponse(error) ??
+      Response.json(
+        { error: "Saving expenses to Notion failed." },
+        { status: 500 }
+      )
     );
   }
 }

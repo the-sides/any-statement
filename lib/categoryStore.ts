@@ -8,7 +8,11 @@ import {
   normalizeCategoryDefinitions,
   normalizeCategoryName
 } from "@/lib/categories";
-import { fetchCategoryDefinitionsFromNotion } from "@/lib/notion";
+import {
+  fetchCategoryDefinitionsFromNotion,
+  type NotionConnection
+} from "@/lib/notion";
+import { readUsableNotionConnection } from "@/lib/notionConnection";
 
 export type ExpenseCategoryCatalog = {
   categories: ExpenseCategoryDefinition[];
@@ -31,10 +35,16 @@ type StoredCategoryCatalog = {
   updatedAt?: string;
 };
 
-let pendingAutoImport: Promise<EnsuredCategoryCatalog> | null = null;
+/**
+ * Keyed by user: the catalog is per-user now, so one user's first page load
+ * must not de-duplicate another user's pending import away.
+ */
+const pendingAutoImports = new Map<string, Promise<EnsuredCategoryCatalog>>();
 
-export async function loadCategoryCatalog(): Promise<ExpenseCategoryCatalog> {
-  const stored = await readStoredCategoryCatalog();
+export async function loadCategoryCatalog(
+  userId: string
+): Promise<ExpenseCategoryCatalog> {
+  const stored = await readStoredCategoryCatalog(userId);
   const categories = mergeCategoryDefinitions(
     DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
     stored.categories || []
@@ -53,41 +63,52 @@ export async function loadCategoryCatalog(): Promise<ExpenseCategoryCatalog> {
  * is configured. Later loads reuse the stored catalog so categories the
  * reviewer turned off are not resurrected on every page load.
  */
-export async function ensureCategoryCatalog(): Promise<EnsuredCategoryCatalog> {
-  const catalog = await loadCategoryCatalog();
-  const dataSourceId = process.env.NOTION_CATEGORY_DATA_SOURCE_ID;
+export async function ensureCategoryCatalog(
+  userId: string
+): Promise<EnsuredCategoryCatalog> {
+  const catalog = await loadCategoryCatalog(userId);
+  const connection = await readUsableNotionConnection(userId);
+  const dataSourceId = connection.categoryDataSourceId;
 
   if (!dataSourceId || !shouldAutoImport(catalog, dataSourceId)) {
     return { catalog };
   }
 
-  if (!pendingAutoImport) {
-    pendingAutoImport = autoImportCategoryCatalog(dataSourceId);
-  }
+  const pending =
+    pendingAutoImports.get(userId) ||
+    autoImportCategoryCatalog(userId, connection);
+
+  pendingAutoImports.set(userId, pending);
 
   try {
-    return await pendingAutoImport;
+    return await pending;
   } finally {
-    pendingAutoImport = null;
+    pendingAutoImports.delete(userId);
   }
 }
 
 export async function importCategoryCatalog(
+  userId: string,
   importedCategories: readonly ExpenseCategoryDefinitionInput[],
   sourceDataSourceId: string
 ) {
-  const current = await loadCategoryCatalog();
+  const current = await loadCategoryCatalog(userId);
   const categories = mergeCategoryDefinitions(current.categories, importedCategories);
 
   return saveCategoryCatalog(
+    userId,
     categories,
     sourceDataSourceId,
     new Date().toISOString()
   );
 }
 
-export async function setCategoryEnabled(name: string, enabled: boolean) {
-  const current = await loadCategoryCatalog();
+export async function setCategoryEnabled(
+  userId: string,
+  name: string,
+  enabled: boolean
+) {
+  const current = await loadCategoryCatalog(userId);
   const normalizedName = normalizeCategoryName(name);
   const categories = normalizeCategoryDefinitions(
     current.categories.map((category) =>
@@ -98,6 +119,7 @@ export async function setCategoryEnabled(name: string, enabled: boolean) {
   );
 
   return saveCategoryCatalog(
+    userId,
     categories,
     current.sourceDataSourceId,
     current.importedAt
@@ -105,18 +127,23 @@ export async function setCategoryEnabled(name: string, enabled: boolean) {
 }
 
 async function autoImportCategoryCatalog(
-  dataSourceId: string
+  userId: string,
+  connection: NotionConnection
 ): Promise<EnsuredCategoryCatalog> {
   try {
     const importedCategories = await fetchCategoryDefinitionsFromNotion(
-      dataSourceId
+      connection
     );
-    const catalog = await importCategoryCatalog(importedCategories, dataSourceId);
+    const catalog = await importCategoryCatalog(
+      userId,
+      importedCategories,
+      connection.categoryDataSourceId
+    );
 
     return { catalog, imported: importedCategories.length };
   } catch (error) {
     return {
-      catalog: await loadCategoryCatalog(),
+      catalog: await loadCategoryCatalog(userId),
       importError:
         error instanceof Error
           ? error.message
@@ -133,6 +160,7 @@ function shouldAutoImport(
 }
 
 async function saveCategoryCatalog(
+  userId: string,
   categories: readonly ExpenseCategoryDefinitionInput[],
   sourceDataSourceId?: string,
   importedAt?: string
@@ -146,15 +174,15 @@ async function saveCategoryCatalog(
 
   await getSql()`
     insert into category_catalog (
-      id, categories, source_data_source_id, imported_at, updated_at
+      user_id, categories, source_data_source_id, imported_at, updated_at
     ) values (
-      true,
+      ${userId},
       ${JSON.stringify(catalog.categories)}::jsonb,
       ${catalog.sourceDataSourceId ?? null},
       ${catalog.importedAt ?? null},
       ${catalog.updatedAt}
     )
-    on conflict (id) do update
+    on conflict (user_id) do update
       set categories = excluded.categories,
           source_data_source_id = excluded.source_data_source_id,
           imported_at = excluded.imported_at,
@@ -170,7 +198,9 @@ async function saveCategoryCatalog(
  * vocabulary, so a reader outage must not take down extraction or the Notion
  * save that merely resolves names against it. Writes still surface their errors.
  */
-async function readStoredCategoryCatalog(): Promise<StoredCategoryCatalog> {
+async function readStoredCategoryCatalog(
+  userId: string
+): Promise<StoredCategoryCatalog> {
   let row:
     | {
         categories: unknown;
@@ -184,7 +214,7 @@ async function readStoredCategoryCatalog(): Promise<StoredCategoryCatalog> {
     const rows = (await getSql()`
       select categories, source_data_source_id, imported_at, updated_at
       from category_catalog
-      where id
+      where user_id = ${userId}
     `) as Array<NonNullable<typeof row>>;
 
     row = rows[0];
@@ -219,8 +249,7 @@ function toCatalog(
   return {
     categories,
     enabledCategories: getEnabledCategoryDefinitions(categories),
-    sourceDataSourceId:
-      sourceDataSourceId || process.env.NOTION_CATEGORY_DATA_SOURCE_ID || undefined,
+    sourceDataSourceId: sourceDataSourceId || undefined,
     importedAt,
     updatedAt
   };

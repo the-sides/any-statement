@@ -7,6 +7,7 @@ declare module "bun:test" {
     toContain(expected: unknown): void;
     toHaveLength(expected: number): void;
     toBeUndefined(): void;
+    toThrow(expected?: unknown): void;
   };
 
   export function describe(name: string, fn: TestFn): void;
@@ -15,5 +16,8 @@ declare module "bun:test" {
   export function afterEach(fn: TestFn): void;
   export function expect<T>(value: T): Matchers<T> & {
     not: Matchers<T>;
+  };
+  export const mock: {
+    module(specifier: string, factory: () => unknown): void;
   };
 }

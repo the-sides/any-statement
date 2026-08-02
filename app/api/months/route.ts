@@ -1,3 +1,5 @@
+import { commonErrorResponse } from "@/lib/apiErrors";
+import { requireUserId } from "@/lib/currentUser";
 import { listStoredMonths } from "@/lib/monthStore";
 
 export const runtime = "nodejs";
@@ -5,10 +7,13 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const months = await listStoredMonths();
+    const months = await listStoredMonths(await requireUserId());
 
     return Response.json({ months });
-  } catch {
-    return Response.json({ error: "Loading months failed." }, { status: 500 });
+  } catch (error) {
+    return (
+      commonErrorResponse(error) ??
+      Response.json({ error: "Loading months failed." }, { status: 500 })
+    );
   }
 }

@@ -1,21 +1,26 @@
+import { commonErrorResponse } from "@/lib/apiErrors";
 import { importCategoryCatalog } from "@/lib/categoryStore";
+import { requireUserId } from "@/lib/currentUser";
 import {
   fetchCategoryDefinitionsFromNotion,
   NotionSaveError
 } from "@/lib/notion";
+import { readNotionConnection } from "@/lib/notionConnection";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
 
 export async function POST() {
   try {
-    const dataSourceId = process.env.NOTION_CATEGORY_DATA_SOURCE_ID;
+    const userId = await requireUserId();
+    const connection = await readNotionConnection(userId);
     const importedCategories = await fetchCategoryDefinitionsFromNotion(
-      dataSourceId
+      connection
     );
     const catalog = await importCategoryCatalog(
+      userId,
       importedCategories,
-      dataSourceId || ""
+      connection.categoryDataSourceId
     );
 
     return Response.json({
@@ -29,9 +34,12 @@ export async function POST() {
       return Response.json({ error: error.message }, { status: error.status });
     }
 
-    return Response.json(
-      { error: "Importing categories from Notion failed." },
-      { status: 500 }
+    return (
+      commonErrorResponse(error) ??
+      Response.json(
+        { error: "Importing categories from Notion failed." },
+        { status: 500 }
+      )
     );
   }
 }

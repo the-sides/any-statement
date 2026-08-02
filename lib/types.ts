@@ -40,7 +40,6 @@ export type StatementExtraction = {
 };
 
 export type SaveExpensesPayload = {
-  dataSourceId?: string;
   sourceFileName?: string;
   statement?: StatementSummary;
   statements?: SaveStatementSource[];

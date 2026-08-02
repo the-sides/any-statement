@@ -14,11 +14,19 @@ It is deployed at `https://any-statement.vercel.app` (Vercel project
 upload statements from a phone. The published repo is `github.com/the-sides/any-budget`.
 Access is limited to the addresses in `STATEMENT_LEDGER_ALLOWED_EMAILS`.
 
+The ledger is multi-tenant. Every row belongs to one WorkOS user, and `user_id` is part of every
+primary key, so an unscoped query fails on uniqueness rather than quietly reading someone else's
+statements. The owner of the pre-existing data is `user_01KZ07DZ7ZB8MDNWVA4P3ZMZQB`
+(jacob.r.sides@gmail.com, GitHub sign-in, WorkOS project `Budget` / environment `Production`).
+OpenRouter is the only shared credential; Notion is per-user.
+
 ## Rules For Future Agents
 
 - Use Bun, not npm or pnpm.
 - Preserve `.env.local`; it contains real local API keys and is ignored by git.
 - Do not print API keys or commit secrets.
+- Every store function takes a `userId`. If you add one that does not, you have added a
+  cross-tenant read. Routes get it from `requireUserId()` in `lib/currentUser.ts`.
 - Commit working checkpoints after meaningful changes.
 - Inspect real artifacts under `/tmp/statement-ledger/uploads/` before hypothesizing about extraction bugs.
 - If the user reports an extraction issue, start from `upload.json`, `extraction.json`, `fallback.json`, and `final-extraction.json`.
@@ -54,7 +62,9 @@ Never print or commit the contents of either directory; `auth.json` holds a live
 
 `vercel env pull` **overwrites `.env.local` wholesale**, dropping any variable not stored on the
 Vercel project. `vercel integration add` runs an env pull by default and has already destroyed
-the local `OPENROUTER_*` and `NOTION_*` keys once.
+the local `OPENROUTER_*` and `NOTION_*` keys once. Notion keys now live in Postgres, so an env
+pull can no longer lose them, but `STATEMENT_LEDGER_SECRET_KEY` is stored on the Vercel project
+precisely so a pull reproduces it.
 
 - Always pass `--no-env-pull` to `vercel integration add`.
 - Back the file up before any env pull: `cp .env.local .env.local.bak`.
@@ -68,7 +78,7 @@ the local `OPENROUTER_*` and `NOTION_*` keys once.
   falling back to its row dates, and the workspace switches to that month. There is no
   save-month action; months are derived. See `specs/month-scoped-statements.md`.
 - Month documents live in Postgres (Neon), in relational `months` / `statements` / `expenses`
-  tables defined by `lib/schema.sql`. Writes are whole-month and transactional, matching the
+  tables defined by the migrations in `lib/migrations/`, keyed by `(user_id, month)`. Writes are whole-month and transactional, matching the
   file-per-month semantics the app was built around. `./data/months/<YYYY-MM>.json` is now
   only a legacy import source; see `scripts/import-local-months.ts`.
 - The workspace edits the active month optimistically and flushes to the server on a
@@ -77,12 +87,12 @@ the local `OPENROUTER_*` and `NOTION_*` keys once.
 - `/api/extract` accepts `statementFile` as multipart form data, with legacy `statementPdf` replays still accepted.
 - `/api/extract` saves the original PDF or CSV and extraction artifacts to `/tmp/statement-ledger/uploads/<upload-id>/`.
 - OpenRouter is the primary extraction path.
-- Categories are app-managed, persisted in the single-row `category_catalog` Postgres table, and
-  disabled categories remain in the catalog. Catalog *reads* fall back to the built-in defaults
+- Categories are app-managed, persisted one row per user in the `category_catalog` Postgres table,
+  and disabled categories remain in the catalog. Catalog *reads* fall back to the built-in defaults
   if the database is unreachable, so a database outage cannot break extraction or the Notion save
   that only resolves category names; writes still surface their errors.
-- When `NOTION_CATEGORY_DATA_SOURCE_ID` is set, the first catalog load imports the Notion
-  categories and stores `importedAt`. Later loads reuse the stored catalog, so categories
+- When the user's connection has a category data source ID, the first catalog load imports the
+  Notion categories and stores `importedAt`. Later loads reuse the stored catalog, so categories
   turned off by the reviewer are never resurrected; `Import` re-runs it on demand. If the
   import fails, the catalog falls back to built-ins and retries on the next load.
 - Built-in (`app`) categories are hidden while at least one enabled `notion` category
@@ -100,7 +110,11 @@ the local `OPENROUTER_*` and `NOTION_*` keys once.
 - `lib/pdfText.ts` also feeds the *primary* path — `lib/openrouter.ts` sends a cheap text prompt
   instead of the PDF file when the extracted text looks usable, so breaking it degrades normal
   extraction too, not just the fallback.
-- `/api/notion/save` saves selected reviewed rows to Notion.
+- `/api/notion/save` saves selected reviewed rows to the signed-in user's Notion workspace.
+- `/api/notion/connection` reads, saves, and removes that connection. The integration token is
+  encrypted with `STATEMENT_LEDGER_SECRET_KEY` (AES-256-GCM) and never sent back to the browser.
+  There is no `NOTION_*` environment fallback: one would silently save a stranger's expenses into
+  the deployment owner's Notion.
 - `lib/notion.ts` reconciles missing optional Notion properties before creating pages and writes
   the existing `Category` relation. It titles each row with the merchant (or description) and never
   repeats the date there, and it never writes the legacy `Expense Category` select.
@@ -116,7 +130,12 @@ the local `OPENROUTER_*` and `NOTION_*` keys once.
 - `lib/monthsClientStore.ts` - client-side month store: load, debounced writes, unload flush.
 - `lib/monthStore.ts` - server-side month document persistence in Postgres.
 - `lib/db.ts` - lazy Neon client (no Proxy wrapper) plus numeric/text column coercion.
-- `lib/schema.sql` - months, statements, expenses, and category catalog tables.
+- `lib/migrations/*.sql` - schema history, applied in filename order and tracked in
+  `schema_migrations`.
+- `lib/currentUser.ts` - `requireUserId()`, the tenant key every store call needs.
+- `lib/notionConnection.ts` - per-user Notion credentials.
+- `lib/secrets.ts` - AES-256-GCM encryption for stored credentials.
+- `lib/apiErrors.ts` - shared 401/503 responses for missing sessions and unreadable credentials.
 - `proxy.ts` - WorkOS AuthKit gate over every route except the sign-in flow and static assets.
 - `lib/accessControl.ts` - email allowlist decision. A WorkOS session only proves *someone*
   signed in; without the allowlist anyone able to sign up would reach the ledger. Unset
@@ -128,7 +147,10 @@ the local `OPENROUTER_*` and `NOTION_*` keys once.
 - `app/api/extract/route.ts` - upload validation, artifact persistence, OpenRouter extraction, fallback application.
 - `app/api/notion/save/route.ts` - Notion save route.
 - `lib/categoryStore.ts` - category catalog persistence in Postgres.
-- `scripts/migrate.ts` - applies `lib/schema.sql`; idempotent.
+- `scripts/migrate.ts` - applies pending migrations, then claims rows with an empty `user_id` for
+  `STATEMENT_LEDGER_LEGACY_USER_ID`; idempotent.
+- `scripts/generate-secret-key.ts` - prints a `STATEMENT_LEDGER_SECRET_KEY`.
+- `scripts/import-notion-connection.ts` - one-time move of `NOTION_*` env vars into a user's row.
 - `scripts/import-local-months.ts` - imports legacy `data/months/*.json` into Postgres.
 - `lib/openrouter.ts` - OpenRouter request, prompt, response parsing, debug payload.
 - `lib/fallbackExtractor.ts` - deterministic PDF text fallback.
@@ -144,10 +166,16 @@ Install:
 bun install
 ```
 
-Create the database tables (idempotent, needs `DATABASE_URL`):
+Apply pending migrations (idempotent, needs `DATABASE_URL`):
 
 ```bash
 bun run scripts/migrate.ts
+```
+
+Run the tests (`bunfig.toml` preloads a `server-only` stub so route modules import cleanly):
+
+```bash
+bun test
 ```
 
 Run dev server:

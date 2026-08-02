@@ -1,3 +1,5 @@
+import { commonErrorResponse } from "@/lib/apiErrors";
+import { requireUserId } from "@/lib/currentUser";
 import {
   answerExpenseQuestion,
   ExpenseChatError,
@@ -20,6 +22,10 @@ type ExpenseChatRequest = {
 
 export async function POST(request: Request) {
   try {
+    // Rows arrive in the request rather than from the ledger, but the shared
+    // OpenRouter key is still being spent, so a session is required.
+    await requireUserId();
+
     const payload = (await request.json()) as ExpenseChatRequest;
     const expenses = Array.isArray(payload.expenses)
       ? (payload.expenses as ExpenseItem[])
@@ -64,9 +70,9 @@ export async function POST(request: Request) {
       return Response.json({ error: error.message }, { status: error.status });
     }
 
-    return Response.json(
-      { error: "Expense chat failed." },
-      { status: 500 }
+    return (
+      commonErrorResponse(error) ??
+      Response.json({ error: "Expense chat failed." }, { status: 500 })
     );
   }
 }

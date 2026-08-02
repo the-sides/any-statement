@@ -11,3 +11,4 @@ data/
 bun.lockb
 .vercel
 .claude/worktrees/
+.env.local.bak*
