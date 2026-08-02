@@ -19,6 +19,30 @@ It is a Bun + Next.js app named Statement Ledger. The user is testing it from a 
 - For Next.js work, initialize Next DevTools and use official Next docs through MCP before relying on framework knowledge.
 - When verifying the UI locally on this machine, Playwright Chrome may be missing. System Chromium is available at `/usr/bin/chromium`.
 - Localhost and browser commands may need escalation because the sandbox can block server binds and host networking.
+- Vercel commands here run against the personal account, not the default work login. See `Vercel Account`.
+
+## Vercel Account
+
+The Vercel CLI stores one login per global config directory. The default directory
+(`~/.local/share/com.vercel.cli`) holds the `jacob-mergerai` work account. Personal
+account credentials live in a separate directory:
+
+```text
+~/.vercel-personal
+```
+
+Select it with `-Q` (`--global-config`) on every command; there is no persistent
+"current account" to switch:
+
+```bash
+vercel -Q ~/.vercel-personal whoami
+vercel -Q ~/.vercel-personal deploy
+```
+
+Re-authenticate that store with `vercel login -Q ~/.vercel-personal`. This is
+interactive and opens a browser, so the user has to run it.
+
+Never print or commit the contents of either directory; `auth.json` holds a live token.
 
 ## Current Behavior
 
