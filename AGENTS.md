@@ -90,6 +90,48 @@ precisely so a pull reproduces it.
 - The durable fix is to store every secret on the Vercel project too, so a pull reproduces a
   complete file instead of a partial one.
 
+## Local Sign-In (WorkOS)
+
+Localhost and production share one WorkOS environment (`Budget` / `Production`,
+`environment_01KZ04MTVKKZQMHWJB0A4GWVT1`) and therefore one user pool. `.env.local` and the
+Vercel project carry the same `WORKOS_CLIENT_ID`, so signing in at `localhost:3000` lands on
+the same `user_01KZ07DZ7ZB8MDNWVA4P3ZMZQB` that owns the deployed data. There is no second
+app, no second pool, and nothing to keep in sync.
+
+Two things must be true for local sign-in to work, and neither is inferred:
+
+- `.env.local` sets `NEXT_PUBLIC_WORKOS_REDIRECT_URI=http://localhost:3000/callback`. Without
+  it AuthKit sends an empty `redirect_uri` and WorkOS answers with its
+  `redirect-uri-invalid` error page.
+- `http://localhost:3000/callback` is registered as a redirect URI on the WorkOS environment.
+  It matches exactly - no trailing slash.
+
+The `workos` CLI (`bun add -g workos`) reads that config but **cannot write it**:
+`workos authkit redirect-uris set` validates under `--dry-run` and then fails with
+`{"error":{"code":"graphql_error"}}` for any payload, including re-setting the existing list.
+`workos authkit cors set` writes fine, so it is that one mutation, not auth or permissions.
+Add redirect URIs in the WorkOS Dashboard.
+
+### Ambient env beats `.env.local`
+
+Next never overrides a variable already present in `process.env`, so a stale value inherited
+from the launching process silently wins and no edit to `.env.local` has any effect. This cost
+an hour once: the harness broker held `STATEMENT_LEDGER_ALLOWED_EMAILS` from an older read of
+`.env.local`, every supervised `bun run dev` inherited it, and sign-in kept returning
+`403 This account is not allowed to access this ledger.` while the file on disk was correct.
+
+Confirm what the server actually sees before editing anything else:
+
+```bash
+tr '\0' '\n' < /proc/<dev-pid>/environ | grep STATEMENT_LEDGER_ALLOWED_EMAILS
+```
+
+If a stale value is inherited, drop it at launch rather than editing the file again:
+
+```bash
+env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3000
+```
+
 ## Current Behavior
 
 - `/` renders the upload/review/save workspace, scoped to one month at a time.
@@ -163,6 +205,12 @@ precisely so a pull reproduces it.
 - `lib/secrets.ts` - AES-256-GCM encryption for stored credentials.
 - `lib/apiErrors.ts` - shared 401/503 responses for missing sessions and unreadable credentials.
 - `proxy.ts` - WorkOS AuthKit gate over every route except the sign-in flow and static assets.
+- `app/callback/route.ts` - AuthKit callback. `handleAuth`'s default answer to a missing PKCE
+  cookie, a missing `code`/`state`, or a state mismatch is a bare JSON 500, which strands the
+  user with no way back into the flow; those three codes are recoverable, so `onError` restarts
+  sign-in instead. A 120s `HttpOnly` cookie bounds it to one retry, because `/sign-in` bounces
+  through WorkOS and a query-string marker would not survive the round trip. Any other failure
+  is a real fault and still surfaces.
 - `lib/accessControl.ts` - email allowlist decision. A WorkOS session only proves *someone*
   signed in; without the allowlist anyone able to sign up would reach the ledger. Unset
   `STATEMENT_LEDGER_ALLOWED_EMAILS` denies everyone rather than falling open.
