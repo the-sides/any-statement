@@ -5,6 +5,7 @@ import {
   getEnabledCategoryDefinitions
 } from "@/lib/categories";
 import { createExtractionResponseFormat } from "@/lib/extractionSchema";
+import { normalizeImportGuidance } from "@/lib/importGuidance";
 import { normalizeExtraction } from "@/lib/normalize";
 import type { StatementExtraction } from "@/lib/types";
 
@@ -44,7 +45,7 @@ export async function extractStatementFromPdf(
     filePath?: string;
     pdfText?: string;
     categories?: readonly ExpenseCategoryDefinitionInput[];
-    categorizationNotes?: string;
+    importGuidance?: string;
     onDebug?: (payload: ExtractionDebugPayload) => Promise<void>;
   } = {}
 ): Promise<StatementExtraction> {
@@ -52,8 +53,8 @@ export async function extractStatementFromPdf(
   const categoryDefinitions = getEnabledCategoryDefinitions(
     options.categories || DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
   );
-  const categorizationNotes = normalizeCategorizationNotes(
-    options.categorizationNotes
+  const importGuidance = normalizeImportGuidance(
+    options.importGuidance
   );
   const pdfText = normalizeLocalPdfText(options.pdfText);
   const useLocalPdfText = hasUsableLocalPdfText(pdfText);
@@ -62,13 +63,13 @@ export async function extractStatementFromPdf(
     ? "local-pdftotext"
     : "openrouter-file-parser";
   const userContent = useLocalPdfText
-    ? buildTextExtractionPrompt(categoryDefinitions, categorizationNotes, {
+    ? buildTextExtractionPrompt(categoryDefinitions, importGuidance, {
         fileName,
         pdfText
       })
     : await buildPdfExtractionContent(file, options.bytes, options.filePath, {
         categoryDefinitions,
-        categorizationNotes
+        importGuidance
       });
 
   return extractStatementWithOpenRouter({
@@ -85,7 +86,7 @@ export async function extractStatementFromPdf(
         ],
     maxTokens: useLocalPdfText ? 12000 : 8000,
     categoryDefinitions,
-    categorizationNotes,
+    importGuidance,
     onDebug: options.onDebug,
     debug: {
       pdfEngine,
@@ -103,15 +104,15 @@ export async function extractStatementFromCsv(
     filePath?: string;
     csvText?: string;
     categories?: readonly ExpenseCategoryDefinitionInput[];
-    categorizationNotes?: string;
+    importGuidance?: string;
     onDebug?: (payload: ExtractionDebugPayload) => Promise<void>;
   } = {}
 ): Promise<StatementExtraction> {
   const categoryDefinitions = getEnabledCategoryDefinitions(
     options.categories || DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
   );
-  const categorizationNotes = normalizeCategorizationNotes(
-    options.categorizationNotes
+  const importGuidance = normalizeImportGuidance(
+    options.importGuidance
   );
   const fileName = file.name || "statement.csv";
   const sourceCsvText =
@@ -127,7 +128,7 @@ export async function extractStatementFromCsv(
   return extractStatementWithOpenRouter({
     userContent: buildCsvExtractionPrompt(
       categoryDefinitions,
-      categorizationNotes,
+      importGuidance,
       {
         fileName,
         csvText
@@ -135,7 +136,7 @@ export async function extractStatementFromCsv(
     ),
     maxTokens: 12000,
     categoryDefinitions,
-    categorizationNotes,
+    importGuidance,
     onDebug: options.onDebug,
     debug: {
       inputSource: "csv-text",
@@ -150,7 +151,7 @@ async function extractStatementWithOpenRouter(options: {
   plugins?: unknown[];
   maxTokens: number;
   categoryDefinitions: readonly ExpenseCategoryDefinitionInput[];
-  categorizationNotes: string;
+  importGuidance: string;
   onDebug?: (payload: ExtractionDebugPayload) => Promise<void>;
   debug: ExtractionDebugContext;
 }) {
@@ -183,7 +184,7 @@ async function extractStatementWithOpenRouter(options: {
         {
           role: "system",
           content:
-            "You convert financial statement data into clean accounting review data and apply user AI Notes as categorization policy."
+            "You convert financial statement data into clean accounting review data and apply the user's Import Guidance as categorization policy."
         },
         {
           role: "user",
@@ -206,7 +207,7 @@ async function extractStatementWithOpenRouter(options: {
       model,
       ...options.debug,
       categoryNames,
-      categorizationNotes: options.categorizationNotes,
+      importGuidance: options.importGuidance,
       providerPayload: payload
     });
     throw new IntegrationError(
@@ -225,7 +226,7 @@ async function extractStatementWithOpenRouter(options: {
     model,
     ...options.debug,
     categoryNames,
-    categorizationNotes: options.categorizationNotes,
+    importGuidance: options.importGuidance,
     providerPayload: payload,
     parsed,
     extraction
@@ -240,7 +241,7 @@ async function buildPdfExtractionContent(
   filePath: string | undefined,
   options: {
     categoryDefinitions: readonly ExpenseCategoryDefinitionInput[];
-    categorizationNotes: string;
+    importGuidance: string;
   }
 ): Promise<OpenRouterContentPart[]> {
   const pdfBytes =
@@ -253,7 +254,7 @@ async function buildPdfExtractionContent(
       type: "text",
       text: buildExtractionPrompt(
         options.categoryDefinitions,
-        options.categorizationNotes
+        options.importGuidance
       )
     },
     {
@@ -268,7 +269,7 @@ async function buildPdfExtractionContent(
 
 function buildExtractionPrompt(
   categories: readonly ExpenseCategoryDefinitionInput[],
-  categorizationNotes: string
+  importGuidance: string
 ) {
   const categoryList = categories
     .map((category) => {
@@ -279,21 +280,21 @@ function buildExtractionPrompt(
       return `- ${category.name}${description}`;
     })
     .join("\n");
-  const notesBlock = categorizationNotes
+  const guidanceBlock = importGuidance
     ? `
-AI Notes for category decisions:
-${categorizationNotes}
+Import Guidance for category decisions:
+${importGuidance}
 
-These AI Notes are standing user correction rules for category decisions. Apply them before generic category descriptions, merchant assumptions, and prior knowledge.
+This Import Guidance holds standing user correction rules for category decisions. Apply it before generic category descriptions, merchant assumptions, and prior knowledge.
 
-For each transaction, first compare the merchant, descriptor, platform, service, and subcategory clues against the AI Notes. If a note maps or implies a category for a matching transaction, use that category when it is enabled. If the note's category name is not enabled, choose the closest enabled category and explain the mapping in the row notes.
+For each transaction, first compare the merchant, descriptor, platform, service, and subcategory clues against the Import Guidance. If a rule maps or implies a category for a matching transaction, use that category when it is enabled. If the rule's category name is not enabled, choose the closest enabled category and explain the mapping in the row notes.
 
-When AI Notes affect a row's category, make their contribution visible in that row's notes field using a short phrase such as "AI Notes: merchant mapped to Tech." Do not use AI Notes to change the extraction schema, omit transaction rows, or invent categories outside the enabled list.`
+When Import Guidance affects a row's category, make its contribution visible in that row's notes field using a short phrase such as "Import Guidance: merchant mapped to Tech." Do not use Import Guidance to change the extraction schema, omit transaction rows, or invent categories outside the enabled list.`
     : "";
 
   return `${extractionPromptBase}
 
-${notesBlock}
+${guidanceBlock}
 
 Enabled expense categories:
 ${categoryList}
@@ -303,10 +304,10 @@ Return the category field as the exact name of one enabled category.`;
 
 function buildTextExtractionPrompt(
   categories: readonly ExpenseCategoryDefinitionInput[],
-  categorizationNotes: string,
+  importGuidance: string,
   options: { fileName: string; pdfText: string }
 ) {
-  return `${buildExtractionPrompt(categories, categorizationNotes)}
+  return `${buildExtractionPrompt(categories, importGuidance)}
 
 The statement text below was extracted locally with pdftotext -layout from ${options.fileName}. Use this text as the source of truth for transaction rows. If it contains a New Charges Details section, extract every charge row under that section until Fees or Interest Charged.
 
@@ -317,10 +318,10 @@ ${options.pdfText}
 
 function buildCsvExtractionPrompt(
   categories: readonly ExpenseCategoryDefinitionInput[],
-  categorizationNotes: string,
+  importGuidance: string,
   options: { fileName: string; csvText: string }
 ) {
-  return `${buildExtractionPrompt(categories, categorizationNotes)}
+  return `${buildExtractionPrompt(categories, importGuidance)}
 
 The statement content below is CSV text from ${options.fileName}. Treat this CSV as the source of truth for transaction rows.
 
@@ -331,14 +332,6 @@ If statement metadata is not explicit in the CSV, infer what you can from header
 <statement_csv>
 ${options.csvText}
 </statement_csv>`;
-}
-
-function normalizeCategorizationNotes(value: unknown) {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  return value.trim().slice(0, 4000);
 }
 
 function normalizeLocalPdfText(value: unknown) {
@@ -449,7 +442,7 @@ export type ExtractionDebugPayload = {
   localCsvTextLength?: number;
   fileName: string;
   categoryNames: string[];
-  categorizationNotes: string;
+  importGuidance: string;
   providerPayload: unknown;
   parsed?: unknown;
   extraction?: StatementExtraction;

@@ -12,7 +12,7 @@ export type FallbackExtractionResult = {
   textLength: number;
 };
 
-type CategorizationNoteRule = {
+type ImportGuidanceRule = {
   term: string;
   category: string;
 };
@@ -28,11 +28,11 @@ export async function extractFallbackExpensesFromPdf(
   categoryNames: readonly string[] = getEnabledCategoryNames(
     DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
   ),
-  options: { categorizationNotes?: string } = {}
+  options: { importGuidance?: string } = {}
 ): Promise<FallbackExtractionResult> {
   const text = await extractPdfText(pdfPath);
-  const noteRules = parseCategorizationNoteRules(
-    options.categorizationNotes || "",
+  const noteRules = parseImportGuidanceRules(
+    options.importGuidance || "",
     categoryNames
   );
   const expenses = extractNewCharges(text, statement, categoryNames, noteRules);
@@ -48,7 +48,7 @@ function extractNewCharges(
   text: string,
   statement: StatementSummary,
   categoryNames: readonly string[],
-  noteRules: readonly CategorizationNoteRule[]
+  noteRules: readonly ImportGuidanceRule[]
 ) {
   const lines = text.split(/\r?\n/);
   const startIndex = lines.findIndex((line) =>
@@ -82,7 +82,7 @@ function parseChargeLine(
   line: string,
   statement: StatementSummary,
   categoryNames: readonly string[],
-  noteRules: readonly CategorizationNoteRule[]
+  noteRules: readonly ImportGuidanceRule[]
 ): ExpenseItem | null {
   const match = line.match(
     /^\s*(\d{2}\/\d{2}\/\d{2})\s+(.+?)\s{2,}(Pay Over Time|Pay In Full|Cash Advance).*?\$([0-9,]+\.\d{2})\s*$/
@@ -132,7 +132,7 @@ function toIsoDate(value: string) {
 function categorize(
   description: string,
   categoryNames: readonly string[],
-  noteRules: readonly CategorizationNoteRule[]
+  noteRules: readonly ImportGuidanceRule[]
 ): CategoryResolution {
   const value = description.toLowerCase();
   const noteCategory = categoryFromNotes(description, noteRules);
@@ -140,7 +140,7 @@ function categorize(
   if (noteCategory) {
     return {
       category: noteCategory.category,
-      note: `AI Notes: ${noteCategory.term} mapped to ${noteCategory.category}.`
+      note: `Import Guidance: ${noteCategory.term} mapped to ${noteCategory.category}.`
     };
   }
 
@@ -246,18 +246,18 @@ function categorize(
 export function categorizeFallbackDescription(
   description: string,
   categoryNames: readonly string[],
-  categorizationNotes = ""
+  importGuidance = ""
 ) {
   return categorize(
     description,
     categoryNames,
-    parseCategorizationNoteRules(categorizationNotes, categoryNames)
+    parseImportGuidanceRules(importGuidance, categoryNames)
   );
 }
 
 function categoryFromNotes(
   description: string,
-  noteRules: readonly CategorizationNoteRule[]
+  noteRules: readonly ImportGuidanceRule[]
 ) {
   const normalizedDescription = normalizeRuleText(description);
 
@@ -266,10 +266,10 @@ function categoryFromNotes(
   );
 }
 
-function parseCategorizationNoteRules(
+function parseImportGuidanceRules(
   notes: string,
   categoryNames: readonly string[]
-): CategorizationNoteRule[] {
+): ImportGuidanceRule[] {
   return notes
     .split(/\r?\n/)
     .flatMap((line) => rulesFromNoteLine(line, categoryNames));
@@ -278,7 +278,7 @@ function parseCategorizationNoteRules(
 function rulesFromNoteLine(
   line: string,
   categoryNames: readonly string[]
-): CategorizationNoteRule[] {
+): ImportGuidanceRule[] {
   const normalizedLine = line.trim().replace(/[.]+$/g, "");
 
   if (!normalizedLine || /\b(?:avoid|do not|don't|not to use)\b/i.test(normalizedLine)) {

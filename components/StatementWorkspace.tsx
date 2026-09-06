@@ -65,6 +65,14 @@ import {
   type CashFlowPlan,
   type CashFlowSummary
 } from "@/lib/cashFlowPlan";
+import { MAX_IMPORT_GUIDANCE_LENGTH } from "@/lib/importGuidance";
+import {
+  flushImportGuidance,
+  readImportGuidanceSnapshot,
+  readInitialImportGuidanceSnapshot,
+  setImportGuidance,
+  subscribeToImportGuidance
+} from "@/lib/importGuidanceClientStore";
 import {
   determineStatementMonth,
   formatMonthLabel,
@@ -175,10 +183,6 @@ const CASH_FLOW_GRAPH_TYPES = [
 type CashFlowGraphType = (typeof CASH_FLOW_GRAPH_TYPES)[number]["value"];
 
 const currencyNames = new Intl.DisplayNames(["en"], { type: "currency" });
-const CATEGORIZATION_NOTES_STORAGE_KEY =
-  "statement-ledger.categorization-notes";
-const CATEGORIZATION_NOTES_STORAGE_EVENT =
-  "statement-ledger-categorization-notes";
 const APP_CATEGORY_VISIBILITY_STORAGE_KEY =
   "statement-ledger.include-app-categories";
 const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
@@ -186,7 +190,6 @@ const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
 const REVIEW_HISTORY_STORAGE_EVENT = "statement-ledger-review-history";
 const CASH_FLOW_PLAN_STORAGE_EVENT = "statement-ledger-cash-flow-plan";
 const MAX_STATEMENT_FILE_SIZE = 12 * 1024 * 1024;
-const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 const GRAPH_ZOOM_LEVELS = [0.35, 0.5, 0.65, 0.75, 1, 1.25, 1.5, 1.75];
 const MIN_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[0];
 const MAX_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[GRAPH_ZOOM_LEVELS.length - 1];
@@ -284,10 +287,10 @@ export function StatementWorkspace() {
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [chatMessages, setChatMessages] = useState<ExpenseChatUiMessage[]>([]);
-  const categorizationNotes = useSyncExternalStore(
-    subscribeToCategorizationNotes,
-    readCategorizationNotes,
-    () => ""
+  const importGuidanceState = useSyncExternalStore(
+    subscribeToImportGuidance,
+    readImportGuidanceSnapshot,
+    readInitialImportGuidanceSnapshot
   );
   const appCategoriesPreference = useSyncExternalStore(
     subscribeToAppCategoryVisibilityPreference,
@@ -422,6 +425,15 @@ export function StatementWorkspace() {
     [activeCategories, items]
   );
   const controlsDisabled = busy !== "idle" || categoryBusy !== "idle";
+  const importGuidanceStatus = importGuidanceState.error
+    ? "Error"
+    : importGuidanceState.status === "loading"
+      ? "Loading"
+      : importGuidanceState.pending
+        ? "Saving"
+        : importGuidanceState.guidance.trim()
+          ? "Saved"
+          : "Empty";
   const activeNotice = monthsNotice(monthsState) || notice;
 
   useEffect(() => {
@@ -593,13 +605,12 @@ export function StatementWorkspace() {
     showNotice({ tone: "neutral", message: "Extracting statement rows..." });
 
     try {
+      // Extraction reads the stored guidance row, so an in-flight debounce has
+      // to land before the upload or the model sees the previous version.
+      await flushImportGuidance();
+
       const formData = new FormData();
       formData.append("statementFile", file);
-
-      const notes = categorizationNotes.trim();
-      if (notes) {
-        formData.append("categorizationNotes", notes);
-      }
       formData.append("includeAppCategories", String(includeAppCategories));
 
       const response = await fetch("/api/extract", {
@@ -1512,31 +1523,27 @@ export function StatementWorkspace() {
           <div className="panel-heading panel-heading-split">
             <div className="panel-heading-title">
               <NotebookPen size={18} {...hydrationSafeIconProps} />
-              <h2>AI Notes</h2>
+              <h2>Import Guidance</h2>
             </div>
-            <span className="panel-count">
-              {categorizationNotes.trim() ? "Local" : "Empty"}
-            </span>
+            <span className="panel-count">{importGuidanceStatus}</span>
           </div>
 
           <textarea
             className="note-textarea"
-            value={categorizationNotes}
-            maxLength={MAX_CATEGORIZATION_NOTES_LENGTH}
-            onChange={(event) => {
-              if (!writeCategorizationNotes(event.target.value)) {
-                showNotice({
-                  tone: "error",
-                  message: "AI notes could not be saved in this browser."
-                });
-              }
-            }}
-            placeholder="Steam, Valve, and STEAMGAMES.COM should be Entertainment, not Charity."
+            value={importGuidanceState.guidance}
+            maxLength={MAX_IMPORT_GUIDANCE_LENGTH}
+            disabled={importGuidanceState.status === "loading"}
+            onChange={(event) => setImportGuidance(event.target.value)}
+            placeholder={
+              "Standing rules the AI applies to every statement you import. Correct the categories it keeps getting wrong — one rule per line.\n\nSteam and STEAMGAMES.COM are Entertainment, not Charity.\nSQ *ROASTERS is Coffee."
+            }
           />
           <div className="note-meta">
-            <span>Saved locally</span>
             <span>
-              {categorizationNotes.length}/{MAX_CATEGORIZATION_NOTES_LENGTH}
+              {importGuidanceState.error || "Synced to your account"}
+            </span>
+            <span>
+              {importGuidanceState.guidance.length}/{MAX_IMPORT_GUIDANCE_LENGTH}
             </span>
           </div>
         </section>
@@ -3038,55 +3045,6 @@ function CashFlowPie({
       )}
     </svg>
   );
-}
-
-function subscribeToCategorizationNotes(onStoreChange: () => void) {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === CATEGORIZATION_NOTES_STORAGE_KEY) {
-      onStoreChange();
-    }
-  };
-
-  window.addEventListener("storage", onStorage);
-  window.addEventListener(CATEGORIZATION_NOTES_STORAGE_EVENT, onStoreChange);
-
-  return () => {
-    window.removeEventListener("storage", onStorage);
-    window.removeEventListener(
-      CATEGORIZATION_NOTES_STORAGE_EVENT,
-      onStoreChange
-    );
-  };
-}
-
-function readCategorizationNotes() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  try {
-    return window.localStorage.getItem(CATEGORIZATION_NOTES_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-function writeCategorizationNotes(value: string) {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  try {
-    window.localStorage.setItem(CATEGORIZATION_NOTES_STORAGE_KEY, value);
-    window.dispatchEvent(new Event(CATEGORIZATION_NOTES_STORAGE_EVENT));
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function subscribeToAppCategoryVisibilityPreference(onStoreChange: () => void) {

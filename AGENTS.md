@@ -82,8 +82,8 @@ precisely so a pull reproduces it.
   file-per-month semantics the app was built around. `./data/months/<YYYY-MM>.json` is now
   only a legacy import source; see `scripts/import-local-months.ts`.
 - The workspace edits the active month optimistically and flushes to the server on a
-  ~500ms debounce, forced on page unload. The cash flow plan, undo history, categorization
-  notes, and the app-category preference stay in browser localStorage and stay global.
+  ~500ms debounce, forced on page unload. The cash flow plan, undo history, and the
+  app-category preference stay in browser localStorage and stay global.
 - The workspace has a light/dark/system theme toggle in the brand lockup. The preference is
   stored in `localStorage` under `statement-ledger:theme` and defaults to the system setting.
   A small inline script in `app/layout.tsx` resolves it onto `<html data-theme>` before first
@@ -104,7 +104,14 @@ precisely so a pull reproduces it.
   exists. Turning off every Notion category, or ticking the `APP categories` checkbox,
   brings the built-ins back. `lib/categories.ts` owns that rule and both the workspace and
   `/api/extract` use it.
-- Reviewer categorization notes are saved in browser localStorage, submitted with `/api/extract`, and included in OpenRouter prompt/debug artifacts.
+- Import Guidance is the reviewer's standing extraction instructions, stored one row per user in
+  the `import_guidance` Postgres table and edited in the `Import Guidance` panel. The browser copy
+  is a cache: it is written on a ~600ms debounce, flushed on unload and before an upload, and
+  `/api/extract` reads the row itself rather than trusting a form field, so a stale or absent
+  browser copy cannot extract without the reviewer's rules. Guidance *reads* degrade to empty when
+  the database is unreachable, matching the category catalog; writes surface their errors. A first
+  load with an empty row adopts the legacy `statement-ledger.categorization-notes` localStorage
+  value and clears that key.
 - CSV uploads are extracted through OpenRouter from uploaded CSV text.
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` parses
   Amex-style `New Charges Details` tables. PDF text now comes from `unpdf` in-process, not the
@@ -149,6 +156,11 @@ precisely so a pull reproduces it.
   `STATEMENT_LEDGER_ALLOWED_EMAILS` denies everyone rather than falling open.
 - `app/api/months/route.ts` and `app/api/months/[month]/route.ts` - month list and
   read/write/delete of one month document.
+- `app/api/import-guidance/route.ts` - Import Guidance read and save; `POST` is an alias for
+  `PUT` because `sendBeacon` can only POST.
+- `lib/importGuidance.ts` - shared length cap and normalization;
+  `lib/importGuidanceStore.ts` is the Postgres row, `lib/importGuidanceClientStore.ts` the
+  browser-side load/debounce/flush store.
 - `app/api/categories/route.ts` - category catalog read and enabled/disabled updates.
 - `app/api/categories/import/route.ts` - Notion category import route.
 - `app/api/extract/route.ts` - upload validation, artifact persistence, OpenRouter extraction, fallback application.

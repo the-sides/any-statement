@@ -144,7 +144,7 @@ ${"transactions ".repeat(60)}`;
                       paymentMethod: "card",
                       statementSection: "purchase",
                       confidence: 0.92,
-                      notes: "AI Notes: merchant mapped to Software."
+                      notes: "Import Guidance: merchant mapped to Software."
                     }
                   ]
                 })
@@ -165,7 +165,7 @@ ${"transactions ".repeat(60)}`;
 
       const result = await extractStatementFromCsv(file, {
         categories,
-        categorizationNotes: "Adobe is Software"
+        importGuidance: "Adobe is Software"
       });
 
       if (!requestBody) {
