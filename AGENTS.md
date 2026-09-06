@@ -31,6 +31,10 @@ OpenRouter is the only shared credential; Notion is per-user.
 - Inspect real artifacts under `/tmp/statement-ledger/uploads/` before hypothesizing about extraction bugs.
 - If the user reports an extraction issue, start from `upload.json`, `extraction.json`, `fallback.json`, and `final-extraction.json`.
 - For Next.js work, initialize Next DevTools and use official Next docs through MCP before relying on framework knowledge.
+- `next-env.d.ts` is generated and untracked on purpose. `next dev` writes an import of
+  `.next/dev/types/routes.d.ts` and `next build` writes `.next/types/routes.d.ts`, so a
+  tracked copy flips on every switch between the two. `tsconfig.json` already includes both
+  directories directly, and `bun run typecheck` passes with the file absent. Do not re-add it.
 - When verifying the UI locally on this machine, Playwright Chrome may be missing. System Chromium is available at `/usr/bin/chromium`.
 - Localhost and browser commands may need escalation because the sandbox can block server binds and host networking.
 - Vercel commands here run against the personal account, which is now the CLI default. See `Vercel Account`.
