@@ -143,8 +143,9 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   file-per-month semantics the app was built around. `./data/months/<YYYY-MM>.json` is now
   only a legacy import source; see `scripts/import-local-months.ts`.
 - The workspace edits the active month optimistically and flushes to the server on a
-  ~500ms debounce, forced on page unload. The cash flow plan, undo history, categorization
-  notes, and the app-category preference stay in browser localStorage and stay global.
+  ~500ms debounce, forced on page unload. The cash flow plan and the AI categorization notes
+  are per-user rows in the `user_settings` Postgres table, written the same way; undo history
+  and the app-category preference are still browser localStorage and stay global.
 - The workspace has a light/dark/system theme toggle in the brand lockup. The preference is
   stored in `localStorage` under `statement-ledger:theme` and defaults to the system setting.
   A small inline script in `app/layout.tsx` resolves it onto `<html data-theme>` before first
@@ -165,7 +166,8 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   exists. Turning off every Notion category, or ticking the `APP categories` checkbox,
   brings the built-ins back. `lib/categories.ts` owns that rule and both the workspace and
   `/api/extract` use it.
-- Reviewer categorization notes are saved in browser localStorage, submitted with `/api/extract`, and included in OpenRouter prompt/debug artifacts.
+- Reviewer categorization notes are stored per user in `user_settings`, submitted with
+  `/api/extract`, and included in OpenRouter prompt/debug artifacts.
 - CSV uploads are extracted through OpenRouter from uploaded CSV text.
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` parses
   Amex-style `New Charges Details` tables. PDF text now comes from `unpdf` in-process, not the
@@ -221,6 +223,12 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
 - `app/api/extract/route.ts` - upload validation, artifact persistence, OpenRouter extraction, fallback application.
 - `app/api/notion/save/route.ts` - Notion save route.
 - `lib/categoryStore.ts` - category catalog persistence in Postgres.
+- `app/api/settings/route.ts` - per-user settings read/write (cash flow entries, AI notes).
+- `lib/userSettings.ts` - shared settings shape, defaults, and notes length limit;
+  `lib/userSettingsStore.ts` is the Postgres side and `lib/userSettingsClientStore.ts` the
+  browser store. Unlike the category catalog, a settings *read* failure is surfaced rather
+  than degraded to defaults: the browser writes the whole row back, so answering an outage
+  with an empty plan would let the next edit overwrite the real one.
 - `scripts/migrate.ts` - applies pending migrations, then claims rows with an empty `user_id` for
   `STATEMENT_LEDGER_LEGACY_USER_ID`; idempotent.
 - `scripts/generate-secret-key.ts` - prints a `STATEMENT_LEDGER_SECRET_KEY`.

@@ -56,15 +56,19 @@ import {
   type StatementType
 } from "@/lib/categories";
 import {
-  CASH_FLOW_PLAN_STORAGE_KEY,
-  createCashFlowPlan,
-  parseCashFlowPlan,
   summarizeCashFlow,
   type CashFlowEntry,
   type CashFlowEntryKind,
-  type CashFlowPlan,
   type CashFlowSummary
 } from "@/lib/cashFlowPlan";
+import { MAX_CATEGORIZATION_NOTES_LENGTH } from "@/lib/userSettings";
+import {
+  readInitialUserSettingsSnapshot,
+  readUserSettingsSnapshot,
+  subscribeToUserSettings,
+  updateCashFlowEntries,
+  updateCategorizationNotes
+} from "@/lib/userSettingsClientStore";
 import {
   determineStatementMonth,
   formatMonthLabel,
@@ -175,18 +179,12 @@ const CASH_FLOW_GRAPH_TYPES = [
 type CashFlowGraphType = (typeof CASH_FLOW_GRAPH_TYPES)[number]["value"];
 
 const currencyNames = new Intl.DisplayNames(["en"], { type: "currency" });
-const CATEGORIZATION_NOTES_STORAGE_KEY =
-  "statement-ledger.categorization-notes";
-const CATEGORIZATION_NOTES_STORAGE_EVENT =
-  "statement-ledger-categorization-notes";
 const APP_CATEGORY_VISIBILITY_STORAGE_KEY =
   "statement-ledger.include-app-categories";
 const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
   "statement-ledger-include-app-categories";
 const REVIEW_HISTORY_STORAGE_EVENT = "statement-ledger-review-history";
-const CASH_FLOW_PLAN_STORAGE_EVENT = "statement-ledger-cash-flow-plan";
 const MAX_STATEMENT_FILE_SIZE = 12 * 1024 * 1024;
-const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 const GRAPH_ZOOM_LEVELS = [0.35, 0.5, 0.65, 0.75, 1, 1.25, 1.5, 1.75];
 const MIN_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[0];
 const MAX_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[GRAPH_ZOOM_LEVELS.length - 1];
@@ -220,34 +218,9 @@ const EMPTY_STATEMENT: StatementSummary = {
 const EMPTY_STATEMENTS: ReviewStatement[] = [];
 const EMPTY_EXPENSES: ExpenseItem[] = [];
 const EMPTY_SELECTED_IDS: string[] = [];
-const SAMPLE_CASH_FLOW_PLAN = createCashFlowPlan([
-  {
-    id: "paychecks",
-    kind: "input",
-    label: "Paychecks",
-    amount: 4200,
-    enabled: true
-  },
-  {
-    id: "rent",
-    kind: "output",
-    label: "Rent",
-    amount: 0,
-    enabled: true
-  },
-  {
-    id: "insurance",
-    kind: "output",
-    label: "Insurance",
-    amount: 0,
-    enabled: true
-  }
-]);
 const EMPTY_REVIEW_HISTORY: ReviewHistoryEvent[] = [];
 let cachedReviewHistoryRaw: string | null | undefined;
 let cachedReviewHistorySnapshot: ReviewHistoryEvent[] = EMPTY_REVIEW_HISTORY;
-let cachedCashFlowPlanRaw: string | null | undefined;
-let cachedCashFlowPlanSnapshot: CashFlowPlan = SAMPLE_CASH_FLOW_PLAN;
 const hydrationSafeIconProps = {
   "aria-hidden": "true",
   suppressHydrationWarning: true
@@ -284,11 +257,13 @@ export function StatementWorkspace() {
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [chatMessages, setChatMessages] = useState<ExpenseChatUiMessage[]>([]);
-  const categorizationNotes = useSyncExternalStore(
-    subscribeToCategorizationNotes,
-    readCategorizationNotes,
-    () => ""
+  const settingsState = useSyncExternalStore(
+    subscribeToUserSettings,
+    readUserSettingsSnapshot,
+    readInitialUserSettingsSnapshot
   );
+  const categorizationNotes = settingsState.categorizationNotes;
+  const cashFlowEntries = settingsState.cashFlowEntries;
   const appCategoriesPreference = useSyncExternalStore(
     subscribeToAppCategoryVisibilityPreference,
     readAppCategoryVisibilityPreference,
@@ -304,11 +279,7 @@ export function StatementWorkspace() {
     readReviewHistorySnapshot,
     readEmptyReviewHistorySnapshot
   );
-  const cashFlowPlan = useSyncExternalStore(
-    subscribeToCashFlowPlan,
-    readCashFlowPlanSnapshot,
-    readSampleCashFlowPlanSnapshot
-  );
+  const settingsError = settingsState.error;
   const monthDocument = monthsState.document;
   const activeMonth = monthsState.activeMonth;
   const months = monthsState.months;
@@ -379,13 +350,13 @@ export function StatementWorkspace() {
     [items, selectedIds, statements]
   );
   const cashFlowSummary = useMemo(
-    () => summarizeCashFlow(cashFlowPlan.entries, items),
-    [cashFlowPlan.entries, items]
+    () => summarizeCashFlow(cashFlowEntries, items),
+    [cashFlowEntries, items]
   );
-  const cashFlowInputs = cashFlowPlan.entries.filter(
+  const cashFlowInputs = cashFlowEntries.filter(
     (entry) => entry.kind === "input"
   );
-  const cashFlowOutputs = cashFlowPlan.entries.filter(
+  const cashFlowOutputs = cashFlowEntries.filter(
     (entry) => entry.kind === "output"
   );
   const totalAmount = selectedItems.reduce((sum, item) => sum + item.amount, 0);
@@ -422,7 +393,10 @@ export function StatementWorkspace() {
     [activeCategories, items]
   );
   const controlsDisabled = busy !== "idle" || categoryBusy !== "idle";
-  const activeNotice = monthsNotice(monthsState) || notice;
+  const activeNotice =
+    monthsNotice(monthsState) ||
+    (settingsError ? { tone: "error" as const, message: settingsError } : null) ||
+    notice;
 
   useEffect(() => {
     let active = true;
@@ -1304,12 +1278,10 @@ export function StatementWorkspace() {
   }
 
   function writeCashFlowState(entries: readonly CashFlowEntry[]) {
-    const plan = createCashFlowPlan(entries);
-
-    if (!writeStoredCashFlowPlan(plan)) {
+    if (!updateCashFlowEntries(entries)) {
       showNotice({
         tone: "error",
-        message: "Cash flow inputs could not be saved in this browser."
+        message: settingsError || "Your settings are still loading."
       });
       return false;
     }
@@ -1326,7 +1298,7 @@ export function StatementWorkspace() {
       enabled: true
     };
 
-    writeCashFlowState([...cashFlowPlan.entries, entry]);
+    writeCashFlowState([...cashFlowEntries, entry]);
   }
 
   function updateCashFlowEntry(
@@ -1334,14 +1306,14 @@ export function StatementWorkspace() {
     patch: Partial<Pick<CashFlowEntry, "amount" | "enabled" | "label">>
   ) {
     writeCashFlowState(
-      cashFlowPlan.entries.map((entry) =>
+      cashFlowEntries.map((entry) =>
         entry.id === id ? { ...entry, ...patch } : entry
       )
     );
   }
 
   function removeCashFlowEntry(id: string) {
-    writeCashFlowState(cashFlowPlan.entries.filter((entry) => entry.id !== id));
+    writeCashFlowState(cashFlowEntries.filter((entry) => entry.id !== id));
   }
 
   return (
@@ -1515,7 +1487,7 @@ export function StatementWorkspace() {
               <h2>AI Notes</h2>
             </div>
             <span className="panel-count">
-              {categorizationNotes.trim() ? "Local" : "Empty"}
+              {categorizationNotes.trim() ? "Saved" : "Empty"}
             </span>
           </div>
 
@@ -1524,17 +1496,17 @@ export function StatementWorkspace() {
             value={categorizationNotes}
             maxLength={MAX_CATEGORIZATION_NOTES_LENGTH}
             onChange={(event) => {
-              if (!writeCategorizationNotes(event.target.value)) {
+              if (!updateCategorizationNotes(event.target.value)) {
                 showNotice({
                   tone: "error",
-                  message: "AI notes could not be saved in this browser."
+                  message: settingsError || "Your settings are still loading."
                 });
               }
             }}
             placeholder="Steam, Valve, and STEAMGAMES.COM should be Entertainment, not Charity."
           />
           <div className="note-meta">
-            <span>Saved locally</span>
+            <span>Saved to your account</span>
             <span>
               {categorizationNotes.length}/{MAX_CATEGORIZATION_NOTES_LENGTH}
             </span>
@@ -3040,55 +3012,6 @@ function CashFlowPie({
   );
 }
 
-function subscribeToCategorizationNotes(onStoreChange: () => void) {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === CATEGORIZATION_NOTES_STORAGE_KEY) {
-      onStoreChange();
-    }
-  };
-
-  window.addEventListener("storage", onStorage);
-  window.addEventListener(CATEGORIZATION_NOTES_STORAGE_EVENT, onStoreChange);
-
-  return () => {
-    window.removeEventListener("storage", onStorage);
-    window.removeEventListener(
-      CATEGORIZATION_NOTES_STORAGE_EVENT,
-      onStoreChange
-    );
-  };
-}
-
-function readCategorizationNotes() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  try {
-    return window.localStorage.getItem(CATEGORIZATION_NOTES_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-function writeCategorizationNotes(value: string) {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  try {
-    window.localStorage.setItem(CATEGORIZATION_NOTES_STORAGE_KEY, value);
-    window.dispatchEvent(new Event(CATEGORIZATION_NOTES_STORAGE_EVENT));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function subscribeToAppCategoryVisibilityPreference(onStoreChange: () => void) {
   if (typeof window === "undefined") {
     return () => {};
@@ -3298,70 +3221,6 @@ function truncateText(value: string, maxLength: number) {
   }
 
   return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
-}
-
-function subscribeToCashFlowPlan(onStoreChange: () => void) {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === CASH_FLOW_PLAN_STORAGE_KEY) {
-      onStoreChange();
-    }
-  };
-
-  window.addEventListener("storage", onStorage);
-  window.addEventListener(CASH_FLOW_PLAN_STORAGE_EVENT, onStoreChange);
-
-  return () => {
-    window.removeEventListener("storage", onStorage);
-    window.removeEventListener(CASH_FLOW_PLAN_STORAGE_EVENT, onStoreChange);
-  };
-}
-
-function readSampleCashFlowPlanSnapshot() {
-  return SAMPLE_CASH_FLOW_PLAN;
-}
-
-function readCashFlowPlanSnapshot() {
-  if (typeof window === "undefined") {
-    return SAMPLE_CASH_FLOW_PLAN;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(CASH_FLOW_PLAN_STORAGE_KEY);
-
-    if (raw === cachedCashFlowPlanRaw) {
-      return cachedCashFlowPlanSnapshot;
-    }
-
-    const plan = raw ? parseCashFlowPlan(JSON.parse(raw)) : null;
-    cachedCashFlowPlanRaw = raw;
-    cachedCashFlowPlanSnapshot = plan || SAMPLE_CASH_FLOW_PLAN;
-    return cachedCashFlowPlanSnapshot;
-  } catch {
-    cachedCashFlowPlanRaw = undefined;
-    cachedCashFlowPlanSnapshot = SAMPLE_CASH_FLOW_PLAN;
-    return cachedCashFlowPlanSnapshot;
-  }
-}
-
-function writeStoredCashFlowPlan(plan: CashFlowPlan) {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  try {
-    const raw = JSON.stringify(plan);
-    window.localStorage.setItem(CASH_FLOW_PLAN_STORAGE_KEY, raw);
-    cachedCashFlowPlanRaw = raw;
-    cachedCashFlowPlanSnapshot = plan;
-    window.dispatchEvent(new Event(CASH_FLOW_PLAN_STORAGE_EVENT));
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function categoryOptionsForItem(

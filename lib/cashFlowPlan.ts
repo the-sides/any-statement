@@ -65,15 +65,20 @@ export function parseCashFlowPlan(value: unknown): CashFlowPlan | null {
 
   return {
     version: CASH_FLOW_PLAN_VERSION,
-    entries: Array.isArray(record.entries)
-      ? record.entries.flatMap((entry, index) => {
-          const parsed = parseEntry(entry, index);
-
-          return parsed ? [parsed] : [];
-        })
-      : [],
+    entries: parseCashFlowEntries(record.entries),
     savedAt: asString(record.savedAt)
   };
+}
+
+/** Entries arrive on their own from the settings row, without a plan wrapper. */
+export function parseCashFlowEntries(value: unknown): CashFlowEntry[] {
+  return Array.isArray(value)
+    ? value.flatMap((entry, index) => {
+        const parsed = parseEntry(entry, index);
+
+        return parsed ? [parsed] : [];
+      })
+    : [];
 }
 
 export function summarizeCashFlow(

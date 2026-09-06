@@ -22,6 +22,7 @@ import {
   IntegrationError
 } from "@/lib/openrouter";
 import { extractPdfText } from "@/lib/pdfText";
+import { MAX_CATEGORIZATION_NOTES_LENGTH } from "@/lib/userSettings";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -29,7 +30,6 @@ export const maxDuration = 90;
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 const MAX_MULTIPART_OVERHEAD = 1024 * 1024;
 const MAX_REQUEST_BODY_SIZE = MAX_FILE_SIZE + MAX_MULTIPART_OVERHEAD;
-const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
 type StatementUploadType = UploadArtifact["mediaType"];
 
 export async function POST(request: Request) {
