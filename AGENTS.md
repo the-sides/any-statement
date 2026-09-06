@@ -33,30 +33,45 @@ OpenRouter is the only shared credential; Notion is per-user.
 - For Next.js work, initialize Next DevTools and use official Next docs through MCP before relying on framework knowledge.
 - When verifying the UI locally on this machine, Playwright Chrome may be missing. System Chromium is available at `/usr/bin/chromium`.
 - Localhost and browser commands may need escalation because the sandbox can block server binds and host networking.
-- Vercel commands here run against the personal account, not the default work login. See `Vercel Account`.
+- Vercel commands here run against the personal account, which is now the CLI default. See `Vercel Account`.
 
 ## Vercel Account
 
-The Vercel CLI stores one login per global config directory. The default directory
-(`~/.local/share/com.vercel.cli`) holds the `jacob-mergerai` work account. Personal
-account credentials live in a separate directory:
+The Vercel CLI stores one login per global config directory. **The default directory
+(`~/.local/share/com.vercel.cli`) holds the personal `the-sides` account** — this project
+deploys there, so plain `vercel` commands are already correct and need no `-Q`:
+
+```bash
+vercel whoami          # -> the-sides
+vercel deploy
+```
+
+The `jacob-mergerai` **work** account lives in a separate directory:
 
 ```text
-~/.vercel-personal
+~/.vercel-work
 ```
 
 Select it with `-Q` (`--global-config`) on every command; there is no persistent
 "current account" to switch:
 
 ```bash
-vercel -Q ~/.vercel-personal whoami
-vercel -Q ~/.vercel-personal deploy
+vercel -Q ~/.vercel-work whoami          # -> jacob-mergerai
+vercel -Q ~/.vercel-work deploy --scope merger-ai
 ```
 
-Re-authenticate that store with `vercel login -Q ~/.vercel-personal`. This is
-interactive and opens a browser, so the user has to run it.
+Personal scope is `thesides-projects`; work scope is `merger-ai`. When running
+non-interactively the CLI applies no default scope, so pass `--scope` explicitly.
+
+Re-authenticate a store with `vercel login` (personal) or `vercel login -Q ~/.vercel-work`
+(work). This is interactive and opens a browser, so the user has to run it.
 
 Never print or commit the contents of either directory; `auth.json` holds a live token.
+
+> Swapped on 2026-08-02. Personal is the default because most new projects are personal;
+> before that date the default held the work account and personal lived in
+> `~/.vercel-personal`, which no longer exists. Older notes referencing
+> `-Q ~/.vercel-personal` are stale.
 
 ## Vercel Env Pull Hazard
 
