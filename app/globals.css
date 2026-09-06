@@ -545,7 +545,7 @@ button:focus-visible,
 }
 
 .note-textarea {
-  min-height: 132px;
+  min-height: 196px;
   resize: vertical;
   line-height: 1.35;
 }

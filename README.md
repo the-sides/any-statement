@@ -25,7 +25,7 @@ The current flow is intentionally simple:
   encrypted in Postgres, keyed by user; there is no deployment-wide `NOTION_*` fallback.
 - OpenRouter is the one credential shared by everyone, and it stays in the environment.
 - Categories are managed by the app, can be imported from a Notion category data source, and can be disabled without being deleted. Category reads fall back to the built-in defaults if the database is unreachable, so extraction and Notion saves keep working.
-- Reviewer categorization notes are saved in browser localStorage and sent to OpenRouter with each extraction.
+- Import Guidance is the reviewer's standing extraction instructions. It is stored per user in Postgres, so it follows the user between devices, and every extraction reads it from the ledger.
 - Uploaded statement files and extraction artifacts are persisted under `/tmp/statement-ledger/uploads/<upload-id>/`.
 
 ## Stack
@@ -169,7 +169,7 @@ Notes:
   denies everyone.
 - Adding a user means adding their address to `STATEMENT_LEDGER_ALLOWED_EMAILS`. Their ledger
   starts empty and they connect their own Notion workspace; nothing is shared but the OpenRouter key.
-- Reviewer categorization notes, review history, and the cash flow plan live in browser `localStorage`, not the database. They are per-browser, not per-user, so a shared browser shares them. They do not follow you between devices, so a phone starts without the notes that tune extraction.
+- Review history and the cash flow plan live in browser `localStorage`, not the database. They are per-browser, not per-user, so a shared browser shares them and they do not follow you between devices.
 - Upload and debug artifacts still go to `/tmp`, which is per-instance and ephemeral on Vercel. They are written and read within a single request, so extraction is unaffected; only after-the-fact debugging is lost.
 
 ## Extraction Artifacts
@@ -185,7 +185,7 @@ Files may include:
 - Original uploaded statement file.
 - `upload.json` with upload metadata.
 - `extraction.json` with OpenRouter provider response and normalized extraction.
-- `extraction.json` also records reviewer categorization notes submitted with the upload.
+- `extraction.json` also records the Import Guidance applied to the upload.
 - `fallback.json` when the local PDF text fallback was used.
 - `final-extraction.json` with the payload returned to the UI.
 - `error.json` if extraction fails.

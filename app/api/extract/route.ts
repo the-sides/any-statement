@@ -16,6 +16,7 @@ import {
 } from "@/lib/categories";
 import { requireUserId } from "@/lib/currentUser";
 import { extractFallbackExpensesFromPdf } from "@/lib/fallbackExtractor";
+import { readImportGuidance } from "@/lib/importGuidanceStore";
 import {
   extractStatementFromCsv,
   extractStatementFromPdf,
@@ -29,7 +30,7 @@ export const maxDuration = 90;
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 const MAX_MULTIPART_OVERHEAD = 1024 * 1024;
 const MAX_REQUEST_BODY_SIZE = MAX_FILE_SIZE + MAX_MULTIPART_OVERHEAD;
-const MAX_CATEGORIZATION_NOTES_LENGTH = 4000;
+
 type StatementUploadType = UploadArtifact["mediaType"];
 
 export async function POST(request: Request) {
@@ -46,10 +47,10 @@ export async function POST(request: Request) {
     const userId = await requireUserId();
     const formData = await request.formData();
     const file = formData.get("statementFile") ?? formData.get("statementPdf");
-    const categorizationNotes = readOptionalFormString(
-      formData.get("categorizationNotes"),
-      MAX_CATEGORIZATION_NOTES_LENGTH
-    );
+    // Guidance is read from the ledger, not from the request: the browser copy
+    // is a cache of this row, and a stale or absent one would silently extract
+    // without the reviewer's correction rules.
+    const { guidance: importGuidance } = await readImportGuidance(userId);
     const includeAppCategories = readOptionalBoolean(
       formData.get("includeAppCategories")
     );
@@ -92,25 +93,25 @@ export async function POST(request: Request) {
               file,
               artifact,
               extractionCategories,
-              categorizationNotes
+              importGuidance
             )
           : await extractCsvUpload(
               file,
               artifact,
               extractionCategories,
-              categorizationNotes
+              importGuidance
             );
       const finalExtraction = await applyPdfFallbackIfNeeded(
         artifact,
         extraction,
         extractionCategories.map((category) => category.name),
-        categorizationNotes
+        importGuidance
       );
 
       if (finalExtraction !== extraction) {
         await saveFallbackArtifact(artifact, {
           reason: "openrouter-empty-expenses",
-          categorizationNotes,
+          importGuidance,
           extraction: finalExtraction
         });
       }
@@ -181,17 +182,6 @@ function isCsv(file: File) {
   );
 }
 
-function readOptionalFormString(
-  value: FormDataEntryValue | null,
-  maxLength: number
-) {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  return value.trim().slice(0, maxLength);
-}
-
 function readOptionalBoolean(value: FormDataEntryValue | null) {
   if (typeof value !== "string") {
     return null;
@@ -226,7 +216,7 @@ async function extractPdfUpload(
   file: File,
   artifact: UploadArtifact,
   extractionCategories: readonly ExpenseCategoryDefinition[],
-  categorizationNotes: string
+  importGuidance: string
 ) {
   const pdfText = await extractPdfText(artifact.filePath);
 
@@ -234,7 +224,7 @@ async function extractPdfUpload(
     filePath: artifact.filePath,
     pdfText,
     categories: extractionCategories,
-    categorizationNotes,
+    importGuidance,
     onDebug: (payload) => saveExtractionArtifact(artifact, payload)
   });
 }
@@ -243,12 +233,12 @@ async function extractCsvUpload(
   file: File,
   artifact: UploadArtifact,
   extractionCategories: readonly ExpenseCategoryDefinition[],
-  categorizationNotes: string
+  importGuidance: string
 ) {
   return extractStatementFromCsv(file, {
     filePath: artifact.filePath,
     categories: extractionCategories,
-    categorizationNotes,
+    importGuidance,
     onDebug: (payload) => saveExtractionArtifact(artifact, payload)
   });
 }
@@ -257,7 +247,7 @@ async function applyPdfFallbackIfNeeded(
   artifact: UploadArtifact,
   extraction: Awaited<ReturnType<typeof extractStatementFromPdf>>,
   categoryNames: readonly string[],
-  categorizationNotes: string
+  importGuidance: string
 ) {
   if (artifact.mediaType !== "pdf") {
     return extraction;
@@ -271,7 +261,7 @@ async function applyPdfFallbackIfNeeded(
     artifact.filePath,
     extraction.statement,
     categoryNames,
-    { categorizationNotes }
+    { importGuidance }
   );
 
   if (fallback.expenses.length === 0) {
