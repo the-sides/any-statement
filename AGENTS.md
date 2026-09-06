@@ -11,7 +11,9 @@ agents can inspect and replay the exact statements.
 
 It is deployed at `https://any-statement.vercel.app` (Vercel project
 `thesides-projects/any-statement`, personal account — see `Vercel Account`), so the user can
-upload statements from a phone. The published repo is `github.com/the-sides/any-budget`.
+upload statements from a phone. The published repo is `github.com/the-sides/any-statement`
+(renamed from `any-budget`; the old URL still redirects). Vercel's GitHub link keys on the
+numeric repo id, so pushing `main` still deploys to production.
 Access is limited to the addresses in `STATEMENT_LEDGER_ALLOWED_EMAILS`.
 
 The ledger is multi-tenant. Every row belongs to one WorkOS user, and `user_id` is part of every
