@@ -535,6 +535,18 @@ textarea {
   padding: 7px 9px;
 }
 
+/*
+ * Chromium paints the native popup with the select's own background, and the
+ * controls below deliberately set `background: transparent` so they blend into
+ * their wrapper. That leaves the popup white while the options inherit
+ * `var(--ink)`, which is near-white in dark mode. Pin the option colours.
+ */
+select option,
+select optgroup {
+  background-color: var(--panel);
+  color: var(--ink);
+}
+
 input:focus,
 select:focus,
 textarea:focus,
