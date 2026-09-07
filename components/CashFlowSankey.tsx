@@ -18,8 +18,10 @@ const SANKEY_LABEL_GAP = 16;
 const SANKEY_NODE_GAP = 6;
 const SANKEY_LABEL_SPACING = 50;
 const SANKEY_MIN_NODE_HEIGHT = 3;
-/** Riser shape ends above the canvas so saved/overspent reads as off-page. */
-const RISER_TOP_Y = -60;
+/** Strip above the page the riser climbs through before it fades out. */
+const RISER_HEADROOM = 230;
+/** How far the riser leans away from the trunk before it turns vertical. */
+const RISER_RUN = 90;
 
 export type SankeySegment<T> = T & {
   color: string;
@@ -96,24 +98,15 @@ function CashFlowSankey({
   // Both ends of the trunk are packed solid: the income bar is exactly as tall
   // as the flows entering it and as the flows leaving it, so the volume of one
   // shape is visibly conserved as it breaks out into categories. The remainder
-  // takes the leftover share at the bottom of the end its side does not fill.
-  const remainderSlot = (amount: number) => ({
-    height: SANKEY_TRUNK_HEIGHT * (amount / trunkTotal)
-  });
-  const trunkInflow = stackTrunkEnds(
-    [
-      ...inputNodes,
-      ...(overspent ? [remainderSlot(overspent.amount)] : [])
-    ],
-    top
-  );
-  const trunkOutflow = stackTrunkEnds(
-    [
-      ...allocationNodes,
-      ...(saved ? [remainderSlot(saved.amount)] : [])
-    ],
-    top
-  );
+  // takes the leftover share at the *top* of the end its side does not fill,
+  // so its riser peels straight off the top edge of the trunk instead of
+  // climbing across every other ribbon on the way out.
+  const remainderHeight = (amount: number) =>
+    SANKEY_TRUNK_HEIGHT * (amount / trunkTotal);
+  const overspentHeight = overspent ? remainderHeight(overspent.amount) : 0;
+  const savedHeight = saved ? remainderHeight(saved.amount) : 0;
+  const trunkInflow = stackTrunkEnds(inputNodes, top + overspentHeight);
+  const trunkOutflow = stackTrunkEnds(allocationNodes, top + savedHeight);
   const height = Math.round(
     Math.max(
       top + SANKEY_TRUNK_HEIGHT,
@@ -121,6 +114,9 @@ function CashFlowSankey({
       allocationNodes[allocationNodes.length - 1]?.y1 ?? 0
     ) + bottom
   );
+  // Headroom is the strip the riser climbs through before it fades out of the
+  // frame. Only a month with a remainder pays for it.
+  const headroom = remainder ? RISER_HEADROOM : 0;
   const trunkCenterY = top + SANKEY_TRUNK_HEIGHT / 2;
   const hasTrunk = positiveInputs.length > 0 || allocationNodes.length > 0;
 
@@ -135,7 +131,7 @@ function CashFlowSankey({
               minWidth: `${Math.round(SANKEY_MIN_RENDER_WIDTH * zoom)}px`
             }
       }
-      viewBox={`0 0 ${width} ${height}`}
+      viewBox={`0 ${-headroom} ${width} ${height + headroom}`}
       role="img"
       aria-label="Income flowing to savings, manual outputs, and statement categories"
     >
@@ -166,7 +162,13 @@ function CashFlowSankey({
         ))}
       </defs>
 
-      <rect className="sankey-stage" width={width} height={height} rx="8" />
+      <rect
+        className="sankey-stage"
+        y={-headroom}
+        width={width}
+        height={height + headroom}
+        rx="8"
+      />
       <text className="sankey-title" x={inputX} y="34">
         Inputs
       </text>
@@ -226,24 +228,30 @@ function CashFlowSankey({
         ))}
 
         {/* Saved climbs out of the top of the frame from the output end of the
-            trunk; overspent pours in from the top to the input end. */}
+            trunk; overspent pours in from the top to the input end. Both peel
+            off the top edge of the trunk, so neither crosses a category
+            ribbon on its way through the headroom. */}
         {saved ? (
           <RiserRibbon
             allocation={saved}
-            anchorY={trunkOutflow[trunkOutflow.length - 1].y0}
-            bottomY={trunkOutflow[trunkOutflow.length - 1].y1}
             currency={currency}
             direction="up"
+            headroom={headroom}
+            idPrefix={idPrefix}
+            thickness={savedHeight}
+            topY={top}
             x={incomeX + SANKEY_NODE_WIDTH}
           />
         ) : null}
         {overspent ? (
           <RiserRibbon
             allocation={overspent}
-            anchorY={trunkInflow[trunkInflow.length - 1].y0}
-            bottomY={trunkInflow[trunkInflow.length - 1].y1}
             currency={currency}
             direction="down"
+            headroom={headroom}
+            idPrefix={idPrefix}
+            thickness={overspentHeight}
+            topY={top}
             x={incomeX}
           />
         ) : null}
@@ -361,52 +369,95 @@ function SankeyNodeMark({
 }
 
 /**
- * The remainder ribbon: a vertical run whose top edge is off the canvas, so
- * saved money visibly leaves the page and overspent money visibly arrives
- * from outside it. `down` hangs from the frame top into the trunk; `up` climbs
- * out of the trunk past the frame top.
+ * The remainder ribbon. It peels off the top edge of the trunk, turns
+ * vertical, and fades out through the top of the frame, so saved money
+ * visibly leaves the page and overspent money visibly arrives from outside
+ * it. `down` pours into the input end of the trunk; `up` climbs out of the
+ * output end.
  */
 function RiserRibbon({
   allocation,
-  anchorY,
-  bottomY,
   currency,
   direction,
+  headroom,
+  idPrefix,
+  thickness,
+  topY,
   x
 }: {
   allocation: { amount: number; percent: number };
-  anchorY: number;
-  bottomY: number;
   currency: string;
   direction: "up" | "down";
+  headroom: number;
+  idPrefix: string;
+  /** Trunk share of the remainder: the band keeps this width all the way up. */
+  thickness: number;
+  /** Top edge of the trunk, which is the edge the band leaves from. */
+  topY: number;
   x: number;
 }) {
-  // The horizontal run sits above the canvas, so only the vertical climb and
-  // its bend are visible; the shape reads as leaving or entering the page.
-  const turnX = x + 44;
-  const offX = x + 300;
-  const width = bottomY - anchorY;
-  const topY = RISER_TOP_Y;
+  const exitY = -headroom;
+  // Rising bands lean right of the trunk, falling ones left, so the climb
+  // never runs back through the column it came from.
+  const bandLeft =
+    direction === "up" ? x + RISER_RUN : x - RISER_RUN - thickness;
+  const bandRight = bandLeft + thickness;
+  const climb = topY - exitY;
+  // The inner edge of the bend turns tighter than the outer one; equal
+  // control lengths would pinch the band shut at the corner.
+  const inner = climb * 0.45;
+  const outer = inner + thickness * 0.5;
+  const innerX = direction === "up" ? bandLeft : bandRight;
+  const outerX = direction === "up" ? bandRight : bandLeft;
+  const innerRun = direction === "up" ? RISER_RUN : -RISER_RUN;
+  const gradientId = `${idPrefix}-riser-${direction}`;
   const path = [
-    `M ${x} ${anchorY}`,
-    `C ${x + 130} ${anchorY}, ${turnX} ${topY + 110}, ${turnX} ${topY}`,
-    `L ${offX} ${topY}`,
-    `L ${offX} ${topY + width}`,
-    `C ${offX + 44} ${topY + width + 110}, ${x + 130} ${bottomY}, ${x} ${bottomY}`,
+    `M ${x} ${topY}`,
+    `C ${x + innerRun} ${topY}, ${innerX} ${exitY + inner}, ${innerX} ${exitY}`,
+    `L ${outerX} ${exitY}`,
+    `C ${outerX} ${exitY + outer}, ${x + innerRun} ${topY + thickness}, ${x} ${
+      topY + thickness
+    }`,
     "Z"
   ].join(" ");
+  const labelX = Math.min(
+    Math.max((bandLeft + bandRight) / 2, 150),
+    SANKEY_WIDTH - 150
+  );
 
   return (
     <g className="sankey-ribbon-group">
+      <defs>
+        <linearGradient
+          id={gradientId}
+          gradientUnits="userSpaceOnUse"
+          x1={0}
+          y1={exitY}
+          x2={0}
+          y2={topY}
+        >
+          <stop
+            offset="0%"
+            stopColor={direction === "down" ? "var(--coral)" : "var(--positive)"}
+            stopOpacity="0"
+          />
+          <stop
+            offset="70%"
+            stopColor={direction === "down" ? "var(--coral)" : "var(--positive)"}
+            stopOpacity="1"
+          />
+        </linearGradient>
+      </defs>
       <path
         className="sankey-ribbon sankey-riser"
         d={path}
-        fill={direction === "down" ? "var(--coral)" : "var(--positive)"}
+        fill={`url(#${gradientId})`}
       />
       <text
         className={`sankey-riser-label ${direction === "down" ? "incoming" : ""}`}
-        x={x + 150}
-        y={58}
+        x={labelX}
+        y={exitY + 54}
+        textAnchor="middle"
       >
         {direction === "down" ? "Overspent " : "Saved "}
         {formatCurrency(allocation.amount, currency)} (

@@ -120,8 +120,8 @@ export function AllMonthsView({
       <div className="all-months-toolbar">
         <p>
           Every month&apos;s cash flow side by side. Savings climb out of the
-          top of a month&apos;s frame; overspending pours in from the top. Click
-          a month to open it.
+          top of a month&apos;s frame; overspending pours in from the top.
+          Click a month to open it.
         </p>
         <button
           className="icon-button"
@@ -182,11 +182,11 @@ function MonthFlowCard({
   month: MonthTimelineEntry;
   onSelect: (month: string) => void;
 }) {
-  const saved = month.summary.savedAmount;
-
   return (
     <article
-      className={`all-months-month ${saved < 0 ? "overspent" : "saved"}`}
+      className={`all-months-month ${
+        month.summary.savedAmount < 0 ? "overspent" : "saved"
+      }`}
     >
       <button
         className="all-months-month-heading"
@@ -194,11 +194,7 @@ function MonthFlowCard({
         title="Open this month"
         onClick={() => onSelect(month.month)}
       >
-        <strong>{formatMonthLabel(month.month)}</strong>
-        <span className={saved < 0 ? "negative" : ""}>
-          {saved < 0 ? "Overspent " : "Saved "}
-          {formatCurrency(Math.abs(saved), currency)}
-        </span>
+        {formatMonthLabel(month.month)}
       </button>
       {/* Riser shapes leave through the top of the card, which is what reads
           as money going off-page; the card clips them. */}

@@ -740,59 +740,53 @@ button:focus-visible,
   margin: 0;
 }
 
-/* One cash flow graph per month, laid out left to right and scrolled
-   horizontally: each keeps the wide shape it has as a single-month chart
-   instead of being squeezed into a shared column. */
+/* One cash flow graph per month, laid out left to right. The months share the
+   width evenly and only start scrolling once a column would be too narrow to
+   read, so a normal year of statements is a row of full graphs, not a
+   scroller. */
 .all-months-row {
   display: flex;
-  gap: 14px;
+  gap: 12px;
   overflow-x: auto;
   padding-bottom: 6px;
 }
 
 .all-months-month {
   display: flex;
-  flex: 0 0 auto;
-  width: min(640px, 82vw);
+  flex: 1 1 0;
+  min-width: min(420px, 84vw);
   flex-direction: column;
-  gap: 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-glass-strong);
-  padding: 10px;
+  gap: 6px;
 }
 
+/* The month name is the only chrome on a card: the amount it saved or
+   overspent is already the riser label inside the graph, so repeating it in a
+   heading was noise. */
 .all-months-month-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
+  display: block;
   border: none;
   background: none;
-  padding: 0;
-  font: inherit;
+  padding: 0 2px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14px;
+  color: var(--muted);
   text-align: left;
   cursor: pointer;
 }
 
-.all-months-month-heading strong {
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 20px;
+.all-months-month-heading:hover {
+  color: var(--ink);
+  text-decoration: underline;
 }
 
-.all-months-month-heading span {
-  color: var(--positive);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.all-months-month-heading span.negative {
+.all-months-month.overspent .all-months-month-heading:hover {
   color: var(--coral);
 }
 
 /* The riser shapes are meant to be cut off by the top of the card: that cutoff
    is what reads as money leaving or arriving off-page. */
 .all-months-month-chart {
+  flex: 1 1 auto;
   overflow: hidden;
   border: 1px solid var(--line-soft);
   border-radius: 8px;

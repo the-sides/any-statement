@@ -178,19 +178,27 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
 - The header month stepper has an `All` toggle (`allView` in `StatementWorkspace`).
   It hides the review workspace (with `hidden`, not unmounting — the drawer lane
   measures those panels) and shows `AllMonthsView`: every filed month's cash flow
-  as its own Sankey in a horizontally scrolled row of cards, plus totals across
-  months. Clicking a card (or the stepper arrows) returns to that month. Data
-  comes from `/api/months/overview`, which folds all month documents through
-  `summarizeCashFlow` per month (`lib/allMonths.ts`); the view flushes pending
-  month writes first so the active month's debounced edits are included.
-- In every Sankey, savings and overspending are no longer plain output nodes:
-  `components/CashFlowSankey.tsx` draws the remainder as a riser ribbon attached
-  to the trunk (saved at the output end, overspent at the input end) whose top
-  edge is above the viewBox, so saving visibly climbs out of the top of the
-  frame and overspending pours in from the top. The trunk is scaled to the
-  larger of income/spend so both packed ends plus the remainder slot fill it
-  exactly. `fit` + `idPrefix` props exist because the all-months row renders
-  many of these on one page.
+  as its own Sankey, plus totals across months. The cards share the row width
+  evenly (`flex: 1 1 0` with a `420px` floor) and only scroll horizontally once a
+  column would be too narrow to read, so a handful of months is a row of full
+  graphs rather than a scroller. A card's only chrome is the month name, which
+  opens that month; the saved/overspent amount is the riser label inside the
+  graph, so a heading would repeat it. Data comes from `/api/months/overview`,
+  which folds all month documents through `summarizeCashFlow` per month
+  (`lib/allMonths.ts`); the view flushes pending month writes first so the active
+  month's debounced edits are included.
+- In every Sankey, savings and overspending are not plain output nodes:
+  `components/CashFlowSankey.tsx` draws the remainder as a riser ribbon that
+  peels off the *top edge* of the trunk (saved at the output end, overspent at
+  the input end), turns vertical, and fades out through the top of the frame, so
+  saving visibly climbs off the page and overspending pours in from above. The
+  remainder takes the top slot at its end of the trunk on purpose: from the
+  bottom it had to climb across every category ribbon on the way out.
+  `RISER_HEADROOM` is the strip above the page it climbs through, added to the
+  viewBox only when a remainder exists, so a break-even month pays no empty
+  space. The trunk is scaled to the larger of income/spend so both packed ends
+  plus the remainder slot fill it exactly. `fit` + `idPrefix` props exist because
+  the all-months row renders many of these on one page.
 - The workspace has a light/dark/system theme toggle at the top right of the header, after
   `Extract`. The preference is
   stored in `localStorage` under `statement-ledger:theme` and defaults to the system setting.
