@@ -10,6 +10,14 @@ import type { NextConfig } from "next";
  * section of AGENTS.md.
  */
 const nextConfig: NextConfig = {
+  /**
+   * `next dev` prints `Local: http://localhost:3000`, but agents and scripts
+   * browse `http://127.0.0.1:3000`. Next treats that as a cross-origin dev
+   * request and blocks `/_next/webpack-hmr`, which leaves the page served but
+   * never hydrated - clicks do nothing and the failure looks like a bug in the
+   * component. Same machine, dev only.
+   */
+  allowedDevOrigins: ["127.0.0.1"],
   turbopack: {
     root: dirname(fileURLToPath(import.meta.url))
   }

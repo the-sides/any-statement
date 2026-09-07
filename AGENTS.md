@@ -342,11 +342,55 @@ Run the tests (`bunfig.toml` preloads a `server-only` stub so route modules impo
 bun test
 ```
 
-Run dev server:
+### Dev server
 
-```bash
-BUN_INSTALL=/tmp/bun-install BUN_TMPDIR=/tmp/bun-tmp bun run dev --hostname 127.0.0.1
+The dev server is a **supervised omp process named `dev`**, never a foreground `bash` command.
+A foreground `bun run dev` blocks the tool call until it is killed by the 300s timeout, and its
+output belongs to that one chat.
+
+Start it (idempotent per project: a live `dev` must be stopped or restarted first):
+
+```jsonc
+// hub op:"start"
+{
+  "name": "dev",
+  "application": "bun",
+  "args": ["run", "dev", "--hostname", "127.0.0.1", "--port", "3000"],
+  "env": { "BUN_INSTALL": "/tmp/bun-install", "BUN_TMPDIR": "/tmp/bun-tmp" },
+  "persist": true,
+  "restart": "on-failure",
+  "ready": { "log": "Ready in", "port": 3000, "timeout": 90 }
+}
 ```
+
+Why this shape:
+
+- **Not chat-scoped.** The first process op starts a detached broker on a private socket under
+  `~/.omp/run/daemons/<project-hash>/`, and *every* omp instance in this directory shares the
+  same names, logs and state. A new chat, a `/new`, or a second terminal sees the same `dev`
+  through `hub op:"ps"` — nothing to hand over.
+- **`persist: true`.** Without it the broker stops the process when the *last* omp instance
+  exits. With it the server survives quitting omp entirely.
+- **Not `detached: true`.** Detached survives even broker shutdown, but it forces `pty: false`
+  and disables stdin. `persist` already covers closing chats, so keep the PTY.
+- **`restart: "on-failure"`** with bounded backoff, so a crash from a bad edit comes back.
+- **`--hostname 127.0.0.1`** matches `next.config.ts`'s `allowedDevOrigins`, so HMR is not
+  blocked as cross-origin. A blocked `/_next/webpack-hmr` still serves HTML but never
+  hydrates, which looks exactly like a broken component: clicks do nothing.
+
+Reading it later, from any chat:
+
+```jsonc
+{ "op": "ps" }                                                  // is it alive, restarts, uptime
+{ "op": "logs", "name": "dev", "lines": 80 }                    // tail
+{ "op": "logs", "name": "dev", "grep": "error|⨯|Error" }        // failures only
+{ "op": "logs", "name": "dev", "follow": true, "cursor": 1842 } // stream past a cursor
+{ "op": "restart", "name": "dev" }                              // reuses the launch spec
+{ "op": "stop", "name": "dev" }                                 // graceful tree kill
+```
+
+The broker keeps a 25 MiB current log plus one rotated log, so the logs outlive the chat that
+started the server. Never `kill` a dev PID found through `ps`; use `hub op:"stop"`.
 
 Verify:
 
