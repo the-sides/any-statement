@@ -145,9 +145,13 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   file-per-month semantics the app was built around. `./data/months/<YYYY-MM>.json` is now
   only a legacy import source; see `scripts/import-local-months.ts`.
 - The workspace edits the active month optimistically and flushes to the server on a
-  ~500ms debounce, forced on page unload. The cash flow plan and the AI categorization notes
-  are per-user rows in the `user_settings` Postgres table, written the same way; undo history
-  and the app-category preference are still browser localStorage and stay global.
+  ~500ms debounce, forced on page unload. The AI categorization notes are a per-user row in
+  the `user_settings` Postgres table, written the same way; undo history and the
+  app-category preference are still browser localStorage and stay global.
+- The `Income allocation` cash flow panel is gone: no Sankey, no pie, no manual input/output
+  editor. `lib/cashFlowPlan.ts` and the stored `cashFlowEntries` remain because
+  `summarizeCashFlow` still supplies the expense chat's cash-flow context, but nothing in the
+  UI writes those entries any more, so they stay at whatever the row already holds.
 - The workspace has a light/dark/system theme toggle in the brand lockup. The preference is
   stored in `localStorage` under `statement-ledger:theme` and defaults to the system setting.
   A small inline script in `app/layout.tsx` resolves it onto `<html data-theme>` before first
@@ -193,11 +197,12 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
 - Bank statements also carry income: extraction returns an `incomes` array
   (payroll, interest, other deposits; never own-account transfers) alongside
   expenses, stored in the `incomes` table (`lib/migrations/005_income_rows.sql`)
-  and reviewed in the workspace Income panel. Notion save still covers expenses
-  only.
-  Recognized income drives the cash flow Sankey's inputs for the month,
-  replacing the plan's manual input entries when present (see
-  `summarizeCashFlow`).
+  and reviewed in the Income drawer. Notion save still covers expenses only.
+  The drawer is absolutely positioned inside `.workspace`, parked off its left edge with only
+  a 32px vertical `Income` tab showing in the reserved `padding-left` lane, and slides over
+  the transaction table on hover or `:focus-within`. `overflow: hidden` on `.workspace` is
+  what hides the parked panel: remove it and the income table bleeds over the side panel.
+  Below 980px the drawer reverts to a plain stacked panel and the tab is hidden.
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` parses
   Amex-style `New Charges Details` tables. PDF text now comes from `unpdf` in-process, not the
   `pdftotext` binary, so it works on hosts without Poppler. `lib/pdfText.ts` reconstructs a

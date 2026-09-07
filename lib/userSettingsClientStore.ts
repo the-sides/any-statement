@@ -1,6 +1,5 @@
 import {
   CASH_FLOW_PLAN_STORAGE_KEY,
-  parseCashFlowEntries,
   parseCashFlowPlan,
   type CashFlowEntry
 } from "@/lib/cashFlowPlan";
@@ -57,13 +56,9 @@ export function readInitialUserSettingsSnapshot() {
 /**
  * Edits apply to local state immediately and are flushed on a debounce, so
  * typing in the notes box does not issue a request per keystroke. Refused
- * before the stored settings have loaded: writing then would push the
- * placeholder plan over whatever the server still holds.
+ * before the stored settings have loaded: writing then would push an empty
+ * placeholder over whatever the server still holds.
  */
-export function updateCashFlowEntries(entries: readonly CashFlowEntry[]) {
-  return update({ cashFlowEntries: parseCashFlowEntries(entries) });
-}
-
 export function updateCategorizationNotes(notes: string) {
   return update({ categorizationNotes: normalizeCategorizationNotes(notes) });
 }

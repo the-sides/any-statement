@@ -575,14 +575,18 @@ button:focus-visible,
 
 .workspace {
   display: flex;
+  position: relative;
   min-width: 0;
   flex-direction: column;
   gap: 12px;
+  /* The parked income drawer hangs off the left edge; clipping here is what
+     keeps it hidden, and the wide left padding is the lane its tab sits in. */
+  overflow: hidden;
   border: 1px solid var(--line-mild);
   border-radius: 8px;
   background: var(--panel-glass);
   box-shadow: var(--shadow);
-  padding: 14px;
+  padding: 14px 14px 14px 46px;
 }
 
 .workspace-top {
@@ -878,130 +882,66 @@ button:focus-visible,
   background: var(--surface-sunken);
 }
 
-.cash-flow-panel {
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background:
-    linear-gradient(115deg, var(--teal-wash), transparent 36%),
-    linear-gradient(285deg, var(--gold-wash), transparent 42%),
-    var(--paper);
-  padding: 14px;
-}
-
-.cash-flow-heading {
+/* The income table parks off the left edge of the review table, showing only
+   the tab that sits in the lane between the side panel and the transactions,
+   and slides over the transactions on hover or keyboard focus. */
+.income-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 6;
   display: flex;
+  width: min(760px, 100%);
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 12px;
+  transform: translateX(calc(-100% + 32px));
+  transition: transform 0.24s ease;
 }
 
-.cash-flow-heading h3 {
-  margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 24px;
-  line-height: 1.05;
-  letter-spacing: 0;
+.income-drawer:hover,
+.income-drawer:focus-within {
+  transform: translateX(0);
 }
 
-.cash-flow-balance {
-  min-width: 154px;
-  border: 1px solid var(--positive-line);
-  border-left: 8px solid var(--positive);
-  border-radius: 8px;
-  background: var(--positive-bg);
-  padding: 8px 10px;
-  text-align: right;
+.income-drawer .income-panel {
+  min-width: 0;
+  max-height: min(68vh, 620px);
+  flex: 1;
+  overflow: auto;
+  border-radius: 0 8px 8px 0;
+  background: var(--panel);
+  box-shadow: var(--shadow);
 }
 
-.cash-flow-balance.negative {
-  border-color: var(--coral-line);
-  border-left-color: var(--coral);
-  background: var(--error-bg);
-}
-
-.cash-flow-balance span,
-.cash-flow-entry-heading span {
+.income-drawer-tab {
+  display: flex;
+  width: 32px;
+  min-height: 132px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  background: var(--panel);
+  box-shadow: var(--shadow);
   color: var(--muted);
+  padding: 8px 0;
   font-size: 11px;
   font-weight: 900;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
+  writing-mode: vertical-rl;
 }
 
-.cash-flow-balance strong {
-  display: block;
-  margin-top: 3px;
-  font-size: 18px;
+.income-drawer:hover .income-drawer-tab,
+.income-drawer:focus-within .income-drawer-tab {
+  color: var(--ink);
 }
 
-.cash-flow-body {
-  display: grid;
-  gap: 12px;
-  align-items: stretch;
-}
-
-.cash-flow-editor {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-content: start;
-  gap: 10px;
-}
-
-.cash-flow-entry-group {
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--panel-glass);
-  padding: 10px;
-}
-
-.cash-flow-entry-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 28px;
-}
-
-.cash-flow-entry-row {
-  display: grid;
-  grid-template-columns: 18px minmax(86px, 1fr) minmax(82px, 102px) 28px;
-  gap: 6px;
-  align-items: center;
-  min-height: 36px;
-  margin-top: 7px;
-}
-
-.cash-flow-entry-row input {
-  min-height: 32px;
-}
-
-.cash-flow-entry-toggle {
-  width: 16px;
-  min-height: 16px;
-  margin: 0;
-  padding: 0;
-  accent-color: var(--accent);
-}
-
-.cash-flow-amount-input {
-  text-align: right;
-}
-
-.cash-flow-empty-row {
-  display: grid;
-  min-height: 42px;
-  place-items: center;
-  border: 1px dashed var(--line-strong);
-  border-radius: 7px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.cash-flow-empty-row {
-  margin-top: 7px;
+@media (prefers-reduced-motion: reduce) {
+  .income-drawer {
+    transition: none;
+  }
 }
 
 .mini-icon-button {
@@ -1022,235 +962,6 @@ button:focus-visible,
 
 .mini-icon-button.danger {
   color: var(--coral);
-}
-
-.flow-visual {
-  position: relative;
-  display: block;
-  min-height: 360px;
-  overflow: auto;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, var(--teal-wash), transparent 24%),
-    linear-gradient(270deg, var(--gold-wash), transparent 34%),
-    var(--panel);
-}
-
-.flow-visual::before {
-  content: none;
-}
-
-.flow-visual-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 8px;
-  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-glass) 100%);
-}
-
-.graph-type-control,
-.graph-zoom-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.graph-type-control {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  padding: 2px;
-}
-
-.graph-type-control button {
-  min-width: 52px;
-  height: 24px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  padding: 0 9px;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.graph-type-control button:hover:not(.active) {
-  background: var(--hover);
-  color: var(--ink);
-}
-
-.graph-type-control button.active {
-  background: var(--ink);
-  color: var(--on-ink);
-}
-
-.graph-zoom-controls {
-  margin-left: auto;
-}
-
-.graph-zoom-reset {
-  display: inline-flex;
-  min-width: 48px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.graph-zoom-reset:hover:not(:disabled) {
-  background: var(--hover);
-}
-
-.sankey-chart {
-  display: block;
-  min-width: 0;
-  height: auto;
-}
-
-.pie-chart {
-  display: block;
-  width: 100%;
-  min-width: 880px;
-  height: auto;
-}
-
-.sankey-stage {
-  fill: var(--paper);
-}
-
-.sankey-title,
-.pie-title,
-.pie-legend-heading {
-  fill: var(--muted);
-  font-size: 15px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.sankey-empty,
-.pie-empty {
-  fill: var(--muted);
-  font-size: 18px;
-  font-weight: 800;
-}
-
-.pie-stage {
-  fill: var(--paper);
-}
-
-.pie-slice {
-  stroke: var(--paper);
-  stroke-width: 2.5;
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease;
-  transform-origin: center;
-}
-
-.pie-slice:hover {
-  opacity: 0.86;
-}
-
-.pie-label-line {
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.72;
-}
-
-.pie-label-dot {
-  stroke: var(--paper);
-  stroke-width: 1.5;
-}
-
-.pie-slice-label {
-  fill: var(--ink);
-  font-size: 14px;
-  font-weight: 900;
-  paint-order: stroke;
-  stroke: var(--halo);
-  stroke-linejoin: round;
-  stroke-width: 4px;
-}
-
-.pie-slice-label-value {
-  fill: var(--muted);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.pie-slice-label.inside {
-  font-size: 13px;
-}
-
-.pie-slice-label-value.inside {
-  fill: var(--ink);
-  font-size: 12px;
-}
-
-.pie-legend-row {
-  color: var(--ink);
-}
-
-.pie-legend-swatch {
-  stroke: var(--panel-glass);
-  stroke-width: 1.5;
-}
-
-.pie-legend-label {
-  fill: var(--ink);
-  font-size: 18px;
-  font-weight: 900;
-}
-
-.pie-legend-value {
-  fill: var(--muted);
-  font-size: 15px;
-  font-weight: 800;
-}
-
-/* Ribbons are translucent so overlapping bands read as stacked volume rather
-   than as one opaque shape hiding the others. */
-.sankey-ribbon {
-  opacity: 0.4;
-}
-
-.sankey-income-node {
-  fill: var(--positive);
-}
-
-/* Labels sit over the flat tail of their own ribbon, so they carry a halo to
-   stay legible against whatever colour runs underneath. */
-.sankey-node-name,
-.sankey-node-value {
-  paint-order: stroke;
-  stroke: var(--paper);
-  stroke-linejoin: round;
-  stroke-width: 3px;
-}
-
-.sankey-node-name {
-  fill: var(--ink);
-  font-size: 19px;
-  font-weight: 900;
-}
-
-.sankey-node-value {
-  fill: var(--ink);
-  font-size: 17px;
-  font-weight: 800;
 }
 
 .table-actions {
@@ -1660,8 +1371,25 @@ meter {
     grid-column: 1 / -1;
   }
 
-  .cash-flow-body {
-    grid-template-columns: 1fr;
+  /* Stacked layout has no gutter to hide in, so the drawer becomes a plain
+     panel again and the tab lane is no longer needed. */
+  .workspace {
+    padding-left: 14px;
+  }
+
+  .income-drawer {
+    position: static;
+    width: auto;
+    transform: none;
+  }
+
+  .income-drawer .income-panel {
+    max-height: none;
+    border-radius: 8px;
+  }
+
+  .income-drawer-tab {
+    display: none;
   }
 }
 
@@ -1679,23 +1407,6 @@ meter {
 
   .workspace-top h2 {
     font-size: 24px;
-  }
-
-  .cash-flow-heading {
-    flex-direction: column;
-  }
-
-  .cash-flow-balance {
-    width: 100%;
-    text-align: left;
-  }
-
-  .cash-flow-editor {
-    grid-template-columns: 1fr;
-  }
-
-  .cash-flow-entry-row {
-    grid-template-columns: 18px minmax(0, 1fr) minmax(72px, 88px) 28px;
   }
 
   .field-grid {
