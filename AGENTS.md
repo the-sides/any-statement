@@ -175,6 +175,22 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   cash-flow context, but nothing in the UI writes `cashFlowEntries` any more: inputs come
   from recognized income and outputs from the month's category spend, so a stored entry stays
   at whatever the `user_settings` row already holds.
+- The header month stepper has an `All` toggle (`allView` in `StatementWorkspace`).
+  It hides the review workspace (with `hidden`, not unmounting — the drawer lane
+  measures those panels) and shows `AllMonthsView`: every filed month's cash flow
+  as its own Sankey in a horizontally scrolled row of cards, plus totals across
+  months. Clicking a card (or the stepper arrows) returns to that month. Data
+  comes from `/api/months/overview`, which folds all month documents through
+  `summarizeCashFlow` per month (`lib/allMonths.ts`); the view flushes pending
+  month writes first so the active month's debounced edits are included.
+- In every Sankey, savings and overspending are no longer plain output nodes:
+  `components/CashFlowSankey.tsx` draws the remainder as a riser ribbon attached
+  to the trunk (saved at the output end, overspent at the input end) whose top
+  edge is above the viewBox, so saving visibly climbs out of the top of the
+  frame and overspending pours in from the top. The trunk is scaled to the
+  larger of income/spend so both packed ends plus the remainder slot fill it
+  exactly. `fit` + `idPrefix` props exist because the all-months row renders
+  many of these on one page.
 - The workspace has a light/dark/system theme toggle at the top right of the header, after
   `Extract`. The preference is
   stored in `localStorage` under `statement-ledger:theme` and defaults to the system setting.
@@ -275,6 +291,14 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
 ## Important Files
 
 - `components/StatementWorkspace.tsx` - client UI state, upload, row editing, and save flow.
+- `components/CashFlowSankey.tsx` - the Sankey renderer shared by the month view and the
+  all-months row, including the saved/overspent riser shapes.
+- `components/AllMonthsView.tsx` - the All view: fetches `/api/months/overview` and lays
+  out one Sankey card per month.
+- `lib/allMonths.ts` - per-month cash flow summaries plus cross-month totals;
+  `lib/allMonths.test.ts` covers it. `app/api/months/overview/route.ts` serves it.
+- `lib/chartFormat.ts` / `lib/currency.ts` - chart colour/label helpers and the shared
+  currency formatter, extracted so both chart components use one copy.
 - `lib/theme.ts` - theme preference storage, resolution, and the pre-paint init script;
   `components/ThemeToggle.tsx` is the segmented light/dark/system control.
 - `lib/months.ts` - month determination, filing, reassignment, listing, and legacy draft

@@ -44,7 +44,14 @@ import {
   useState,
   useSyncExternalStore
 } from "react";
+import { AllMonthsView } from "@/components/AllMonthsView";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import CashFlowSankey from "@/components/CashFlowSankey";
+import {
+  allocationColor,
+  formatPercent,
+  truncateSvgText
+} from "@/lib/chartFormat";
 import {
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
   INCOME_KINDS,
@@ -63,6 +70,7 @@ import {
   summarizeCashFlow,
   type CashFlowSummary
 } from "@/lib/cashFlowPlan";
+import { formatCurrency } from "@/lib/currency";
 import { MAX_CATEGORIZATION_NOTES_LENGTH } from "@/lib/userSettings";
 import {
   readInitialUserSettingsSnapshot,
@@ -271,16 +279,6 @@ const GRAPH_ZOOM_LEVELS = [0.35, 0.5, 0.65, 0.75, 1, 1.25, 1.5, 1.75];
 const MIN_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[0];
 const MAX_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[GRAPH_ZOOM_LEVELS.length - 1];
 const DEFAULT_GRAPH_ZOOM = 1;
-// The flow chart is wide on purpose: the long horizontal runs are what let a
-// ribbon flatten out before it reaches its label.
-const SANKEY_WIDTH = 1360;
-const SANKEY_MIN_RENDER_WIDTH = 880;
-const SANKEY_TRUNK_HEIGHT = 660;
-const SANKEY_NODE_WIDTH = 14;
-const SANKEY_LABEL_GAP = 16;
-const SANKEY_NODE_GAP = 6;
-const SANKEY_LABEL_SPACING = 50;
-const SANKEY_MIN_NODE_HEIGHT = 3;
 const EXPENSE_CHAT_PROMPTS = [
   "How could I minimize food costs?",
   "Which merchants cost the most?",
@@ -431,6 +429,7 @@ export function StatementWorkspace() {
   const [notionBusy, setNotionBusy] = useState(false);
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [graphZoom, setGraphZoom] = useState(DEFAULT_GRAPH_ZOOM);
+  const [allView, setAllView] = useState(false);
   const [sort, setSort] = useState<SortState | null>(null);
   const [cashFlowGraphType, setCashFlowGraphType] =
     useState<CashFlowGraphType>("flow");
@@ -886,7 +885,9 @@ export function StatementWorkspace() {
         window.cancelAnimationFrame(frame);
       }
     };
-  }, [drawerOpenKey]);
+    // `allView` hides the workspace, so every panel measures 0 while it is up;
+    // coming back has to lay the lane out again.
+  }, [allView, drawerOpenKey]);
 
   useEffect(() => {
     let active = true;
@@ -1903,24 +1904,33 @@ export function StatementWorkspace() {
               title="Previous month"
               aria-label="Previous month"
               disabled={!previousMonth || monthsLoading}
-              onClick={() => void selectMonth(previousMonth)}
+              onClick={() => {
+                setAllView(false);
+                void selectMonth(previousMonth);
+              }}
             >
               <ChevronLeft size={16} {...hydrationSafeIconProps} />
             </button>
             <div className="month-stepper-label">
               <strong>
-                {activeMonth
-                  ? formatMonthLabel(activeMonth)
-                  : monthsLoading
-                    ? "Loading months"
-                    : "No months yet"}
+                {allView
+                  ? "All months"
+                  : activeMonth
+                    ? formatMonthLabel(activeMonth)
+                    : monthsLoading
+                      ? "Loading months"
+                      : "No months yet"}
               </strong>
               <small>
-                {activeMonth
-                  ? `${statements.length} ${
-                      statements.length === 1 ? "statement" : "statements"
-                    } / ${items.length} rows`
-                  : "Upload a statement to start one"}
+                {allView
+                  ? `${months.length} ${
+                      months.length === 1 ? "month" : "months"
+                    } combined`
+                  : activeMonth
+                    ? `${statements.length} ${
+                        statements.length === 1 ? "statement" : "statements"
+                      } / ${items.length} rows`
+                    : "Upload a statement to start one"}
               </small>
             </div>
             <button
@@ -1929,11 +1939,24 @@ export function StatementWorkspace() {
               title="Next month"
               aria-label="Next month"
               disabled={!nextMonth || monthsLoading}
-              onClick={() => void selectMonth(nextMonth)}
+              onClick={() => {
+                setAllView(false);
+                void selectMonth(nextMonth);
+              }}
             >
               <ChevronRight size={16} {...hydrationSafeIconProps} />
             </button>
           </div>
+          <button
+            className={`month-view-toggle ${allView ? "active" : ""}`}
+            type="button"
+            title={allView ? "Back to this month" : "Combine every month"}
+            aria-pressed={allView}
+            onClick={() => setAllView((current) => !current)}
+          >
+            <Layers size={14} {...hydrationSafeIconProps} />
+            All
+          </button>
         </section>
 
         <div className="header-upload">
@@ -2439,9 +2462,22 @@ export function StatementWorkspace() {
         </section>
       </aside>
 
+      {allView ? (
+        <AllMonthsView
+          onSelectMonth={(month) => {
+            setAllView(false);
+            void selectMonth(month);
+          }}
+        />
+      ) : null}
+
+      {/* Hidden rather than unmounted while the all-months view is up: the
+          drawer lane measures these panels, and remounting them would drop
+          scroll position and re-run every drawer layout write. */}
       <section
         className="workspace"
         aria-label="Expense review table"
+        hidden={allView}
         ref={workspaceRef}
       >
         {/* Off-screen by default: the drawer parks in the lane at the right of
@@ -3180,14 +3216,6 @@ export function StatementWorkspace() {
   );
 }
 
-type SankeySegment<T> = T & {
-  color: string;
-  height: number;
-  y0: number;
-  y1: number;
-  yc: number;
-};
-
 type PieSlice = {
   id: string;
   label: string;
@@ -3209,269 +3237,6 @@ type PieOutsideLabel = {
   leaderEndX: number;
   textAnchor: "start" | "end";
 };
-
-function CashFlowSankey({
-  summary,
-  currency,
-  zoom
-}: {
-  summary: CashFlowSummary;
-  currency: string;
-  zoom: number;
-}) {
-  const width = SANKEY_WIDTH;
-  const top = 84;
-  const bottom = 48;
-  const inputX = 40;
-  const incomeX = 500;
-  const outputX = 1288;
-  const positiveInputs = summary.inputs.filter((entry) => entry.amount > 0);
-  const allocations = summary.allocations.filter(
-    (allocation) => allocation.amount > 0
-  );
-  const inputTotal =
-    positiveInputs.reduce((sum, input) => sum + input.amount, 0) || 1;
-  const allocationTotal =
-    allocations.reduce((sum, allocation) => sum + allocation.amount, 0) || 1;
-  const inputNodes = layoutSankeyColumn(
-    positiveInputs.map((entry, index) => ({
-      ...entry,
-      color: inputColor(index)
-    })),
-    inputTotal,
-    top,
-    SANKEY_TRUNK_HEIGHT
-  );
-  const allocationNodes = layoutSankeyColumn(
-    allocations.map((allocation, index) => ({
-      ...allocation,
-      color: allocationColor(allocation.source, index)
-    })),
-    allocationTotal,
-    top,
-    SANKEY_TRUNK_HEIGHT
-  );
-  // Both ends of the trunk are packed solid: the income bar is exactly as tall
-  // as the flows entering it and as the flows leaving it, so the volume of one
-  // shape is visibly conserved as it breaks out into categories.
-  const trunkInflow = stackSankeyEnds(inputNodes, top);
-  const trunkOutflow = stackSankeyEnds(allocationNodes, top);
-  const height = Math.round(
-    Math.max(
-      top + SANKEY_TRUNK_HEIGHT,
-      inputNodes[inputNodes.length - 1]?.y1 ?? 0,
-      allocationNodes[allocationNodes.length - 1]?.y1 ?? 0
-    ) + bottom
-  );
-  const trunkCenterY = top + SANKEY_TRUNK_HEIGHT / 2;
-  const hasTrunk = positiveInputs.length > 0 || allocations.length > 0;
-
-  return (
-    <svg
-      className="sankey-chart"
-      style={{
-        width: `${Math.round(zoom * 100)}%`,
-        minWidth: `${Math.round(SANKEY_MIN_RENDER_WIDTH * zoom)}px`
-      }}
-      viewBox={`0 0 ${width} ${height}`}
-      role="img"
-      aria-label="Income flowing to savings, manual outputs, and statement categories"
-    >
-      <defs>
-        {inputNodes.map((node) => (
-          <linearGradient
-            key={`input-gradient-${node.id}`}
-            id={`sankey-input-${svgId(node.id)}`}
-            gradientUnits="userSpaceOnUse"
-            x1={inputX + SANKEY_NODE_WIDTH}
-            x2={incomeX}
-          >
-            <stop offset="0%" stopColor={node.color} />
-            <stop offset="100%" stopColor="var(--positive)" />
-          </linearGradient>
-        ))}
-        {allocationNodes.map((node) => (
-          <linearGradient
-            key={`allocation-gradient-${node.id}`}
-            id={`sankey-allocation-${svgId(node.id)}`}
-            gradientUnits="userSpaceOnUse"
-            x1={incomeX + SANKEY_NODE_WIDTH}
-            x2={outputX}
-          >
-            <stop offset="0%" stopColor="var(--positive)" />
-            <stop offset="100%" stopColor={node.color} />
-          </linearGradient>
-        ))}
-      </defs>
-
-      <rect className="sankey-stage" width={width} height={height} rx="8" />
-      <text className="sankey-title" x={inputX} y="34">
-        Inputs
-      </text>
-      <text className="sankey-title" x={incomeX} y="34">
-        Income
-      </text>
-      <text
-        className="sankey-title"
-        x={outputX + SANKEY_NODE_WIDTH}
-        y="34"
-        textAnchor="end"
-      >
-        Outputs & categories
-      </text>
-
-      {positiveInputs.length === 0 ? (
-        <text className="sankey-empty" x={inputX} y={top + 30}>
-          Add income
-        </text>
-      ) : null}
-      {allocations.length === 0 ? (
-        <text className="sankey-empty" x={outputX} y={top + 30} textAnchor="end">
-          Add outputs or statement rows
-        </text>
-      ) : null}
-
-      <g className="sankey-ribbons">
-        {inputNodes.map((node, index) => (
-          <path
-            className="sankey-ribbon"
-            key={`input-ribbon-${node.id}`}
-            d={sankeyRibbonPath(
-              inputX + SANKEY_NODE_WIDTH,
-              incomeX,
-              node.y0,
-              node.y1,
-              trunkInflow[index].y0,
-              trunkInflow[index].y1
-            )}
-            fill={`url(#sankey-input-${svgId(node.id)})`}
-          />
-        ))}
-        {allocationNodes.map((node, index) => (
-          <path
-            className="sankey-ribbon"
-            key={`allocation-ribbon-${node.id}`}
-            d={sankeyRibbonPath(
-              incomeX + SANKEY_NODE_WIDTH,
-              outputX,
-              trunkOutflow[index].y0,
-              trunkOutflow[index].y1,
-              node.y0,
-              node.y1
-            )}
-            fill={`url(#sankey-allocation-${svgId(node.id)})`}
-          />
-        ))}
-      </g>
-
-      <g className="sankey-nodes">
-        {inputNodes.map((node) => (
-          <SankeyNodeMark
-            key={`input-${node.id}`}
-            x={inputX}
-            node={node}
-            label={truncateSvgText(node.label, 30)}
-            value={`${formatCurrency(node.amount, currency)} (${formatPercent(
-              (node.amount / inputTotal) * 100
-            )})`}
-            side="right"
-          />
-        ))}
-
-        {hasTrunk ? (
-          <>
-            <rect
-              className="sankey-income-node"
-              x={incomeX}
-              y={top}
-              width={SANKEY_NODE_WIDTH}
-              height={SANKEY_TRUNK_HEIGHT}
-              rx="2"
-            />
-            <text
-              className="sankey-node-name"
-              x={incomeX + SANKEY_NODE_WIDTH + SANKEY_LABEL_GAP}
-              y={trunkCenterY - 4}
-            >
-              Income
-            </text>
-            <text
-              className="sankey-node-value"
-              x={incomeX + SANKEY_NODE_WIDTH + SANKEY_LABEL_GAP}
-              y={trunkCenterY + 19}
-            >
-              {formatCurrency(summary.incomeTotal, currency)} (100%)
-            </text>
-          </>
-        ) : null}
-
-        {allocationNodes.map((node) => (
-          <SankeyNodeMark
-            key={`allocation-${node.id}`}
-            x={outputX}
-            node={node}
-            label={truncateSvgText(node.label, 30)}
-            value={`${formatCurrency(node.amount, currency)} (${formatPercent(
-              node.percent
-            )})`}
-            side="left"
-          />
-        ))}
-      </g>
-    </svg>
-  );
-}
-
-function SankeyNodeMark({
-  x,
-  node,
-  label,
-  value,
-  side
-}: {
-  x: number;
-  node: { color: string; height: number; y0: number; yc: number };
-  label: string;
-  value: string;
-  side: "left" | "right";
-}) {
-  // Hairline categories still need a bar you can see and a label you can read,
-  // so the mark keeps a floor height and stays centred on its own flow.
-  const barHeight = Math.max(node.height, SANKEY_MIN_NODE_HEIGHT);
-  const textX =
-    side === "right"
-      ? x + SANKEY_NODE_WIDTH + SANKEY_LABEL_GAP
-      : x - SANKEY_LABEL_GAP;
-
-  return (
-    <g>
-      <rect
-        x={x}
-        y={node.yc - barHeight / 2}
-        width={SANKEY_NODE_WIDTH}
-        height={barHeight}
-        rx="2"
-        fill={node.color}
-      />
-      <text
-        className="sankey-node-name"
-        x={textX}
-        y={node.yc - 4}
-        textAnchor={side === "right" ? "start" : "end"}
-      >
-        {label}
-      </text>
-      <text
-        className="sankey-node-value"
-        x={textX}
-        y={node.yc + 19}
-        textAnchor={side === "right" ? "start" : "end"}
-      >
-        {value}
-      </text>
-    </g>
-  );
-}
 
 function CashFlowPie({
   summary,
@@ -3980,99 +3745,6 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function formatCurrency(value: number, currency: string) {
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency
-    }).format(value);
-  } catch {
-    return `${currency} ${value.toFixed(2)}`;
-  }
-}
-
-// A column stacks its nodes in value order, but a run of tiny categories would
-// otherwise pile their labels on top of each other. Spreading them costs
-// vertical room the chart does not have to fit on screen, so the branch simply
-// reaches further down the canvas instead of squeezing.
-function layoutSankeyColumn<T extends { amount: number; color: string }>(
-  items: readonly T[],
-  total: number,
-  top: number,
-  trunkHeight: number
-): Array<SankeySegment<T>> {
-  if (items.length === 0) {
-    return [];
-  }
-
-  const heights = items.map((item) =>
-    total > 0 ? (item.amount / total) * trunkHeight : trunkHeight / items.length
-  );
-  let cursor = top;
-
-  return items.map((item, index) => {
-    const height = heights[index];
-    const y0 = cursor;
-    const y1 = y0 + height;
-    const next = heights[index + 1];
-
-    cursor =
-      next === undefined
-        ? y1
-        : y1 +
-          Math.max(
-            SANKEY_NODE_GAP,
-            SANKEY_LABEL_SPACING - (height + next) / 2
-          );
-
-    return {
-      ...item,
-      height,
-      y0,
-      y1,
-      yc: y0 + height / 2
-    };
-  });
-}
-
-// The trunk end of every ribbon is packed edge to edge so the bar it meets is
-// exactly the sum of its flows.
-function stackSankeyEnds(
-  nodes: ReadonlyArray<{ height: number }>,
-  top: number
-) {
-  let cursor = top;
-
-  return nodes.map((node) => {
-    const y0 = cursor;
-    cursor = y0 + node.height;
-
-    return { y0, y1: cursor };
-  });
-}
-
-// A ribbon is a closed shape, not a thick line: its top and bottom edges are
-// separate curves, so the band keeps its own width at each end and the volume
-// entering equals the volume leaving.
-function sankeyRibbonPath(
-  x0: number,
-  x1: number,
-  a0: number,
-  a1: number,
-  b0: number,
-  b1: number
-) {
-  const curve = (x1 - x0) * 0.5;
-
-  return [
-    `M ${x0} ${a0}`,
-    `C ${x0 + curve} ${a0}, ${x1 - curve} ${b0}, ${x1} ${b0}`,
-    `L ${x1} ${b1}`,
-    `C ${x1 - curve} ${b1}, ${x0 + curve} ${a1}, ${x0} ${a1}`,
-    "Z"
-  ].join(" ");
-}
-
 function layoutPieSlices(
   items: ReadonlyArray<{
     id: string;
@@ -4266,69 +3938,6 @@ function nextGraphZoomLevel(
   return GRAPH_ZOOM_LEVELS[nextIndex];
 }
 
-// Chart paint goes through the theme tokens so the graphs follow light/dark.
-function inputColor(index: number) {
-  const colors = [
-    "var(--teal)",
-    "var(--positive)",
-    "var(--cobalt)",
-    "var(--gold)"
-  ];
-
-  return colors[index % colors.length];
-}
-
-function allocationColor(source: string, index: number) {
-  if (source === "saved") {
-    return "var(--positive)";
-  }
-
-  if (source === "manual-output") {
-    return "var(--gold)";
-  }
-
-  if (source === "overspent") {
-    return "var(--coral)";
-  }
-
-  const colors = [
-    "var(--magenta)",
-    "var(--teal)",
-    "var(--cobalt)",
-    "var(--coral)",
-    "var(--violet)"
-  ];
-
-  return colors[index % colors.length];
-}
-
-// Category ids carry the raw label, so they can hold spaces and punctuation
-// that a url(#...) reference cannot.
-function svgId(value: string) {
-  return value.replace(/[^a-zA-Z0-9_-]+/g, "-");
-}
-
-function truncateSvgText(value: string, maxLength: number) {
-  const trimmed = value.trim();
-
-  if (trimmed.length <= maxLength) {
-    return trimmed;
-  }
-
-  return `${trimmed.slice(0, maxLength - 3)}...`;
-}
-
-function formatPercent(value: number) {
-  if (value === 0) {
-    return "0%";
-  }
-
-  if (Math.abs(value) < 10) {
-    return `${value.toFixed(1)}%`;
-  }
-
-  return `${Math.round(value)}%`;
-}
 
 function formatBytes(value: number) {
   if (value < 1024 * 1024) {

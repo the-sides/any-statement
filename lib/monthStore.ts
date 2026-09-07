@@ -67,6 +67,17 @@ type IncomeRow = {
 export async function listStoredMonths(
   userId: string
 ): Promise<MonthSummary[]> {
+  return listMonths(await listStoredMonthDocuments(userId));
+}
+
+/**
+ * Every filed month in one round trip. The all-months view needs the rows
+ * themselves, not just the totals a summary carries, and the same four queries
+ * already back `listStoredMonths`.
+ */
+export async function listStoredMonthDocuments(
+  userId: string
+): Promise<MonthDocument[]> {
   const sql = getSql();
   const [monthRows, statementRows, expenseRows, incomeRows] = (await Promise.all([
     sql`
@@ -78,9 +89,7 @@ export async function listStoredMonths(
     sql`select * from incomes where user_id = ${userId} order by month, position, id`
   ])) as [MonthRow[], StatementRow[], ExpenseRow[], IncomeRow[]];
 
-  return listMonths(
-    assembleDocuments(monthRows, statementRows, expenseRows, incomeRows)
-  );
+  return assembleDocuments(monthRows, statementRows, expenseRows, incomeRows);
 }
 
 export async function readStoredMonth(
