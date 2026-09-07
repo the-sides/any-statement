@@ -1,4 +1,9 @@
 import type { CashFlowSummary } from "@/lib/cashFlowPlan";
+import {
+  EXPENSE_EDIT_FIELDS,
+  type ExpenseChatEdit,
+  type ExpenseEditField
+} from "@/lib/expenseEdits";
 import type {
   ExpenseItem,
   SaveStatementSource,
@@ -10,25 +15,43 @@ const DEFAULT_MODEL = "anthropic/claude-sonnet-4.6";
 const MAX_QUESTION_LENGTH = 1200;
 const MAX_HISTORY_MESSAGES = 8;
 const MAX_HISTORY_MESSAGE_LENGTH = 1600;
-const MAX_CONTEXT_ROWS = 300;
+const MAX_CONTEXT_ROWS = 400;
 const MAX_TOP_GROUPS = 20;
+/** A single answer that rewrites more rows than this is a mistake, not a plan. */
+const MAX_EDITS = 200;
 
 export type ExpenseChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
 
+/**
+ * Chat sees every filed row, not just the month on screen, so each row has to
+ * carry the month document it belongs to: that is the only way an approved
+ * edit can be written back to the right document.
+ */
+export type ExpenseChatRow = ExpenseItem & { month: string };
+
+export type ExpenseChatView = {
+  scope: "month" | "all";
+  activeMonth: string;
+};
+
 export type ExpenseChatInput = {
   question: string;
-  expenses: readonly ExpenseItem[];
+  expenses: readonly ExpenseChatRow[];
   statements?: readonly SaveStatementSource[];
   selectedExpenseIds?: readonly string[];
   cashFlowSummary?: CashFlowSummary;
   history?: readonly ExpenseChatMessage[];
+  view?: ExpenseChatView;
+  /** Names the model may put in a `category` edit; anything else is dropped. */
+  categoryNames?: readonly string[];
 };
 
 export type ExpenseChatAnswer = {
   answer: string;
+  edits: ExpenseChatEdit[];
   model: string;
   context: {
     rowCount: number;
@@ -90,15 +113,16 @@ export async function answerExpenseQuestion(
         {
           role: "system",
           content:
-            "You are an expense-analysis assistant inside Statement Ledger. Use only the supplied expense rows, statement metadata, cash-flow summary, and conversation transcript. Do not invent transactions, balances, vendors, categories, or external facts. When useful, cite exact category or merchant totals from the context. Keep advice concrete and practical, and say when the rows are insufficient."
+            "You are an expense-analysis assistant inside Statement Ledger. Use only the supplied expense rows, statement metadata, cash-flow summary, and conversation transcript. Do not invent transactions, balances, vendors, categories, or external facts. When useful, cite exact category or merchant totals from the context. Keep advice concrete and practical, and say when the rows are insufficient. You may also propose row edits, which are suggestions a human approves or rejects; never claim an edit has been applied."
         },
         {
           role: "user",
           content: prompt
         }
       ],
+      response_format: EXPENSE_CHAT_RESPONSE_FORMAT,
       temperature: 0.2,
-      max_tokens: 1200,
+      max_tokens: 2000,
       stream: false
     })
   });
@@ -112,16 +136,69 @@ export async function answerExpenseQuestion(
     );
   }
 
-  const answer = parseChatContent(
+  const parsed = parseChatReply(
     (payload as OpenRouterChatResponse).choices?.[0]?.message?.content
   );
 
   return {
-    answer,
+    answer: parsed.answer,
+    edits: resolveExpenseChatEdits({
+      rows: input.expenses,
+      edits: parsed.edits,
+      categoryNames: input.categoryNames
+    }),
     model,
     context: summarizeChatContext(input)
   };
 }
+
+export const EXPENSE_CHAT_RESPONSE_FORMAT = {
+  type: "json_schema",
+  json_schema: {
+    name: "expense_chat_reply",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["answer", "edits"],
+      properties: {
+        answer: {
+          type: "string",
+          description: "Markdown-free prose answer for the reviewer."
+        },
+        edits: {
+          type: "array",
+          description:
+            "Proposed row changes awaiting human approval. Empty when the question does not call for edits.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["expenseId", "field", "value", "reason"],
+            properties: {
+              expenseId: {
+                type: "string",
+                description: "The exact id= value of the row being changed."
+              },
+              field: {
+                type: "string",
+                enum: [...EXPENSE_EDIT_FIELDS]
+              },
+              value: {
+                type: "string",
+                description:
+                  "New value. Amounts are plain numbers such as 12.34. Categories must be one of the allowed category names."
+              },
+              reason: {
+                type: "string",
+                description: "One short sentence justifying the change."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+} as const;
 
 export function buildExpenseChatPrompt(input: ExpenseChatInput) {
   const selectedIds = new Set(input.selectedExpenseIds || []);
@@ -129,8 +206,10 @@ export function buildExpenseChatPrompt(input: ExpenseChatInput) {
   const selectedSpend = sumExpenses(
     input.expenses.filter((expense) => selectedIds.has(expense.id))
   );
-  const rows = rowsForPrompt(input.expenses);
+  const view = input.view;
+  const rows = rowsForPrompt(input.expenses, view?.activeMonth || "");
   const truncated = rows.length < input.expenses.length;
+  const currency = input.expenses[0]?.currency || "USD";
   const statementNames = new Map(
     (input.statements || []).map((statement) => [
       statement.id,
@@ -140,24 +219,27 @@ export function buildExpenseChatPrompt(input: ExpenseChatInput) {
 
   return [
     "Current review context:",
-    `- Expense rows: ${input.expenses.length}`,
+    `- Expense rows across every filed month: ${input.expenses.length}`,
     `- Selected rows: ${selectedIds.size}`,
-    `- Total reviewed spend: ${formatAmount(totalSpend, input.expenses[0]?.currency || "USD")}`,
+    `- Total reviewed spend: ${formatAmount(totalSpend, currency)}`,
     selectedIds.size > 0
-      ? `- Selected-row spend: ${formatAmount(
-          selectedSpend,
-          input.expenses[0]?.currency || "USD"
-        )}`
+      ? `- Selected-row spend: ${formatAmount(selectedSpend, currency)}`
       : "- Selected-row spend: none selected",
     truncated
-      ? `- Row detail below is limited to the ${rows.length} highest-amount rows. Category and merchant summaries include all rows.`
+      ? `- Row detail below is limited to ${rows.length} rows, prioritising the month on screen and then the largest amounts. Category, merchant, and month summaries include all rows.`
       : "- Row detail includes all rows.",
+    "",
+    "Current view:",
+    formatView(view),
+    "",
+    "Months:",
+    formatMonthTotals(input.expenses),
     "",
     "Statements:",
     formatStatements(input.statements),
     "",
     "Cash-flow summary:",
-    formatCashFlowSummary(input.cashFlowSummary, input.expenses[0]?.currency || "USD"),
+    formatCashFlowSummary(input.cashFlowSummary, currency),
     "",
     "Category totals:",
     formatGroupTotals(groupExpenses(input.expenses, (expense) => expense.category)),
@@ -168,6 +250,9 @@ export function buildExpenseChatPrompt(input: ExpenseChatInput) {
         expense.merchant.trim() || expense.description.trim() || "Unknown"
       )
     ),
+    "",
+    "Allowed category names:",
+    formatCategoryNames(input.categoryNames),
     "",
     "Expense rows:",
     rows
@@ -184,8 +269,120 @@ export function buildExpenseChatPrompt(input: ExpenseChatInput) {
     "",
     `Current question: ${normalizeQuestion(input.question)}`,
     "",
-    "Answer with the most relevant totals, vendors, categories, and next actions. For cost-reduction questions, rank the highest-leverage reductions first."
+    "Answer with the most relevant totals, vendors, categories, and next actions. For cost-reduction questions, rank the highest-leverage reductions first.",
+    "",
+    "Editing rules:",
+    `- Return edits only when the question asks for a change. Fields you may edit: ${EXPENSE_EDIT_FIELDS.join(", ")}.`,
+    "- Every edit is a suggestion the reviewer approves or rejects. Nothing is written until they do, so describe them as proposals.",
+    "- Use the exact id= value of a row. An id that is not listed above is dropped.",
+    "- category must be copied exactly from the allowed category names.",
+    "- amount and reimbursedAmount are plain non-negative numbers, no currency symbols.",
+    "- Rows outside the month on screen are editable too, but if the request could mean either the current view or every month, return no edits and ask which one they mean."
   ].join("\n");
+}
+
+/**
+ * Drops anything the model got wrong - unknown row ids, unknown categories,
+ * unparseable amounts, no-op changes - rather than handing the reviewer an
+ * approval button that would corrupt a row.
+ */
+export function resolveExpenseChatEdits(input: {
+  rows: readonly ExpenseChatRow[];
+  edits: unknown;
+  categoryNames?: readonly string[];
+}): ExpenseChatEdit[] {
+  if (!Array.isArray(input.edits)) {
+    return [];
+  }
+
+  const rowsById = new Map(input.rows.map((row) => [row.id, row]));
+  const categoryByKey = new Map(
+    (input.categoryNames || []).map((name) => [name.trim().toLowerCase(), name])
+  );
+  const seen = new Set<string>();
+  const resolved: ExpenseChatEdit[] = [];
+
+  for (const raw of input.edits) {
+    if (resolved.length >= MAX_EDITS) {
+      break;
+    }
+
+    if (!raw || typeof raw !== "object") {
+      continue;
+    }
+
+    // Model output: an object of unknown fields, each checked below.
+    const candidate = raw as Record<string, unknown>;
+    const field = EXPENSE_EDIT_FIELDS.find(
+      (name) => name === candidate.field
+    );
+    const row =
+      typeof candidate.expenseId === "string"
+        ? rowsById.get(candidate.expenseId)
+        : undefined;
+
+    if (!field || !row || typeof candidate.value !== "string") {
+      continue;
+    }
+
+    const id = `${row.id}:${field}`;
+
+    if (seen.has(id)) {
+      continue;
+    }
+
+    const after = resolveEditValue(field, candidate.value, categoryByKey);
+
+    if (after === null || after === row[field]) {
+      continue;
+    }
+
+    seen.add(id);
+    resolved.push({
+      id,
+      expenseId: row.id,
+      month: row.month,
+      field,
+      before: row[field],
+      after,
+      rowLabel:
+        sanitizeInline(row.merchant) || sanitizeInline(row.description) || "Row",
+      date: row.date || "",
+      currency: row.currency || "USD",
+      reason:
+        typeof candidate.reason === "string"
+          ? sanitizeInline(candidate.reason).slice(0, 240)
+          : ""
+    });
+  }
+
+  return resolved;
+}
+
+function resolveEditValue(
+  field: ExpenseEditField,
+  value: string,
+  categoryByKey: Map<string, string>
+): string | number | null {
+  if (field === "amount" || field === "reimbursedAmount") {
+    const parsed = Number(value.replace(/[^0-9.-]/g, ""));
+
+    return Number.isFinite(parsed) && parsed >= 0
+      ? Math.round(parsed * 100) / 100
+      : null;
+  }
+
+  const text = sanitizeInline(value);
+
+  if (field === "category") {
+    // An unknown category name would render a category the catalog cannot
+    // filter or save, so it is dropped rather than invented.
+    return categoryByKey.size === 0
+      ? text || null
+      : categoryByKey.get(text.toLowerCase()) || null;
+  }
+
+  return text;
 }
 
 function summarizeChatContext(input: ExpenseChatInput) {
@@ -205,14 +402,70 @@ function normalizeQuestion(value: unknown) {
     : "";
 }
 
-function rowsForPrompt(expenses: readonly ExpenseItem[]) {
+/**
+ * The month on screen is what a question is usually about, so its rows are
+ * kept whole before the budget is spent on the largest rows elsewhere.
+ */
+function rowsForPrompt(
+  expenses: readonly ExpenseChatRow[],
+  activeMonth: string
+) {
   if (expenses.length <= MAX_CONTEXT_ROWS) {
     return expenses;
   }
 
-  return [...expenses]
-    .sort((left, right) => right.amount - left.amount)
-    .slice(0, MAX_CONTEXT_ROWS);
+  const active = activeMonth
+    ? expenses.filter((expense) => expense.month === activeMonth)
+    : [];
+  const rest = [...expenses]
+    .filter((expense) => !activeMonth || expense.month !== activeMonth)
+    .sort((left, right) => right.amount - left.amount);
+
+  return [...active, ...rest].slice(0, MAX_CONTEXT_ROWS);
+}
+
+function formatView(view: ExpenseChatView | undefined) {
+  if (!view) {
+    return "- Unknown";
+  }
+
+  return view.scope === "all"
+    ? "- The reviewer is looking at the all-months view: every filed month at once."
+    : `- The reviewer is looking at one month: ${view.activeMonth || "none selected"}.`;
+}
+
+function formatMonthTotals(expenses: readonly ExpenseChatRow[]) {
+  const totals = new Map<string, { amount: number; count: number; currency: string }>();
+
+  for (const expense of expenses) {
+    const current = totals.get(expense.month) || {
+      amount: 0,
+      count: 0,
+      currency: expense.currency || "USD"
+    };
+
+    current.amount += expense.amount > 0 ? expense.amount : 0;
+    current.count += 1;
+    totals.set(expense.month, current);
+  }
+
+  if (totals.size === 0) {
+    return "- None";
+  }
+
+  return [...totals.entries()]
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(
+      ([month, total]) =>
+        `- ${month}: ${formatAmount(total.amount, total.currency)} across ${
+          total.count
+        } ${total.count === 1 ? "row" : "rows"}`
+    )
+    .join("\n");
+}
+
+function formatCategoryNames(names: readonly string[] | undefined) {
+  return names?.length ? names.map((name) => `- ${name}`).join("\n") : "- Any";
 }
 
 function formatStatements(statements: readonly SaveStatementSource[] | undefined) {
@@ -290,18 +543,24 @@ function formatGroupTotals(groups: ExpenseGroup[]) {
 
 function formatExpenseRow(
   index: number,
-  expense: ExpenseItem,
+  expense: ExpenseChatRow,
   options: { selected: boolean; statementName: string }
 ) {
   return [
     `${index}.`,
+    `id=${expense.id}`,
+    `month=${expense.month}`,
     options.selected ? "[selected]" : "[not selected]",
     expense.date || "no date",
     options.statementName ? `statement=${sanitizeInline(options.statementName)}` : "",
     `merchant=${sanitizeInline(expense.merchant || "Unknown")}`,
     `description=${sanitizeInline(expense.description || "")}`,
     `amount=${formatAmount(expense.amount, expense.currency)}`,
+    expense.reimbursedAmount > 0
+      ? `reimbursed=${formatAmount(expense.reimbursedAmount, expense.currency)}`
+      : "",
     `category=${sanitizeInline(expense.category || "Other")}`,
+    expense.subcategory ? `subcategory=${sanitizeInline(expense.subcategory)}` : "",
     expense.notes ? `notes=${sanitizeInline(expense.notes)}` : ""
   ]
     .filter(Boolean)
@@ -403,6 +662,46 @@ function getProviderError(payload: unknown) {
 
   const error = (payload as { error?: { message?: string } }).error;
   return error?.message || "";
+}
+
+/**
+ * The reply is asked for as JSON, but a provider that ignores the schema still
+ * has a usable answer in it, so unparseable content degrades to plain prose
+ * with no edits instead of failing the whole question.
+ */
+function parseChatReply(content: unknown): { answer: string; edits: unknown } {
+  const text = parseChatContent(content);
+  const json = parseJsonObject(text);
+
+  if (!json) {
+    return { answer: text, edits: [] };
+  }
+
+  const answer =
+    typeof json.answer === "string" && json.answer.trim()
+      ? json.answer.trim()
+      : text;
+
+  return { answer, edits: json.edits };
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = (fenced ? fenced[1] : text).trim();
+
+  if (!candidate.startsWith("{")) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(candidate) as unknown;
+
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseChatContent(content: unknown) {

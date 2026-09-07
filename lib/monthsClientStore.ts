@@ -10,6 +10,10 @@ import {
   type MonthSummary
 } from "@/lib/months";
 import {
+  applyExpenseEditsToRows,
+  type ExpenseChatEdit
+} from "@/lib/expenseEdits";
+import {
   REVIEW_DRAFT_STORAGE_KEY,
   createReviewDraft,
   parseReviewDraft,
@@ -202,6 +206,97 @@ export async function reassignStatement(input: {
   } catch (error) {
     setState({ error: errorMessage(error, "Changing the month failed.") });
   }
+}
+let editChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Applies chat edits the reviewer approved. They can land in any filed month,
+ * not just the one on screen, so the active document takes the same optimistic
+ * path as a manual row edit while other months are read, patched, and written
+ * back one at a time - a month write is whole-document, so they cannot be
+ * batched into one request.
+ */
+export async function applyExpenseEdits(
+  edits: readonly ExpenseChatEdit[]
+): Promise<number> {
+  // Two approvals in quick succession must not race each other's
+  // fetch-patch-write of the same month, so applications run one at a time.
+  const run = editChain.then(() => applyExpenseEditsOnce(edits));
+
+  editChain = run.catch(() => undefined);
+
+  return run;
+}
+
+async function applyExpenseEditsOnce(
+  edits: readonly ExpenseChatEdit[]
+): Promise<number> {
+  if (edits.length === 0) {
+    return 0;
+  }
+
+  clearMonthsNotice();
+  await flushMonths();
+
+  const editsByMonth = new Map<string, ExpenseChatEdit[]>();
+
+  for (const edit of edits) {
+    const existing = editsByMonth.get(edit.month);
+
+    if (existing) {
+      existing.push(edit);
+    } else {
+      editsByMonth.set(edit.month, [edit]);
+    }
+  }
+
+  let applied = 0;
+
+  for (const [month, monthEdits] of editsByMonth) {
+    const active = month === state.activeMonth ? state.document : null;
+
+    try {
+      const document = active || (await fetchMonthDocument(month));
+
+      if (!document) {
+        continue;
+      }
+
+      const result = applyExpenseEditsToRows(document.expenses, monthEdits);
+
+      if (result.applied === 0) {
+        continue;
+      }
+
+      const next = createMonthDocument({
+        month: document.month,
+        statements: document.statements,
+        expenses: result.expenses,
+        incomes: document.incomes,
+        selectedIds: document.selectedIds,
+        activeStatementId: document.activeStatementId
+      });
+
+      applied += result.applied;
+
+      if (active) {
+        setState({
+          document: next,
+          months: withMonthSummary(state.months, summarizeMonthDocument(next))
+        });
+        scheduleWrite(next);
+      } else {
+        await enqueueWrite(() => putMonthDocument(next));
+        setState({
+          months: withMonthSummary(state.months, summarizeMonthDocument(next))
+        });
+      }
+    } catch (error) {
+      setState({ error: errorMessage(error, "Applying the change failed.") });
+    }
+  }
+
+  return applied;
 }
 
 export async function flushMonths() {

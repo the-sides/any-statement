@@ -353,6 +353,23 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
     workspace. A `ResizeObserver` re-runs it when an open panel grows. Adding a drawer is an
     id in `DRAWER_IDS`, a wrapper spread with `drawerProps(id)`, a panel ref from
     `registerDrawerPanel(id)`, and a `.side-drawer-tab`.
+  - Expense chat can also *propose row edits*. `/api/expense-chat` loads every
+    filed month itself (`listStoredMonthDocuments`), so a question sees the
+    whole ledger, not just the rows on screen; the request carries only the
+    view pointer (`month` or `all`, plus the active month) so the model can ask
+    a follow-up when a request is ambiguous about scope. The reply comes back
+    as strict JSON (`expense_chat_reply` schema): an answer plus up to 200
+    field-level edit proposals. `resolveExpenseChatEdits` drops anything unsafe
+    - unknown row ids, category names that are not in the catalog, unparseable
+    amounts, no-op changes - before the client ever sees them. Each proposal
+    renders as an approval card (`ExpenseChatEditList`) with Approve/Dismiss
+    per card and Approve all/Dismiss all; nothing writes until a button is
+    clicked. An approval goes through `applyExpenseEdits`
+    (`lib/monthsClientStore.ts`): the active month takes the optimistic
+    path, other months are fetched, patched, and PUT back whole-document, and
+    the whole operation runs serialized so two quick approvals cannot race.
+    `lib/expenseEdits.ts` owns the editable-field list, the edit type, and the
+    row patcher; chat approvals deliberately do not write undo history.
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` parses
   Amex-style `New Charges Details` tables. PDF text now comes from `unpdf` in-process, not the
   `pdftotext` binary, so it works on hosts without Poppler. `lib/pdfText.ts` reconstructs a
@@ -442,6 +459,8 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
 - `lib/artifacts.ts` - `/tmp` artifact persistence.
 - `lib/notion.ts` - Notion data source schema and page creation.
 - `lib/extractionSchema.ts` - structured JSON schema used with OpenRouter.
+- `lib/expenseEdits.ts` - the fields expense chat may propose, the edit shape,
+  and the row patcher shared by the chat route and the client store.
 
 ## Commands
 

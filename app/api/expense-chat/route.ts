@@ -1,41 +1,58 @@
 import { commonErrorResponse } from "@/lib/apiErrors";
+import { summarizeCashFlow } from "@/lib/cashFlowPlan";
+import {
+  getEnabledCategoryNames,
+  selectActiveCategories
+} from "@/lib/categories";
+import { ensureCategoryCatalog } from "@/lib/categoryStore";
 import { requireUserId } from "@/lib/currentUser";
 import {
   answerExpenseQuestion,
   ExpenseChatError,
-  type ExpenseChatMessage
+  type ExpenseChatMessage,
+  type ExpenseChatRow,
+  type ExpenseChatView
 } from "@/lib/expenseChat";
-import type { CashFlowSummary } from "@/lib/cashFlowPlan";
-import type { ExpenseItem, SaveStatementSource } from "@/lib/types";
+import { isMonthKey } from "@/lib/months";
+import { listStoredMonthDocuments } from "@/lib/monthStore";
+import type { SaveStatementSource } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
 
 type ExpenseChatRequest = {
   question?: unknown;
-  expenses?: unknown;
-  statements?: unknown;
   selectedExpenseIds?: unknown;
-  cashFlowSummary?: unknown;
   history?: unknown;
+  view?: unknown;
+  includeAppCategories?: unknown;
 };
 
 export async function POST(request: Request) {
   try {
-    // Rows arrive in the request rather than from the ledger, but the shared
-    // OpenRouter key is still being spent, so a session is required.
-    await requireUserId();
-
+    const userId = await requireUserId();
     const payload = (await request.json()) as ExpenseChatRequest;
-    const expenses = Array.isArray(payload.expenses)
-      ? (payload.expenses as ExpenseItem[])
-      : [];
 
     if (typeof payload.question !== "string" || !payload.question.trim()) {
       return Response.json(
         { error: "Ask a question about the current expense rows." },
         { status: 400 }
       );
+    }
+
+    // Chat reads the whole ledger rather than the rows on screen: a question
+    // about "last month" or "every Chipotle charge" is unanswerable from one
+    // month document, and an approved edit has to name the month it lands in.
+    const documents = await listStoredMonthDocuments(userId);
+    const expenses: ExpenseChatRow[] = [];
+    const statements: SaveStatementSource[] = [];
+
+    for (const document of documents) {
+      for (const expense of document.expenses) {
+        expenses.push({ ...expense, month: document.month });
+      }
+
+      statements.push(...document.statements);
     }
 
     if (expenses.length === 0) {
@@ -45,19 +62,39 @@ export async function POST(request: Request) {
       );
     }
 
+    const view = parseView(payload.view);
+    const activeDocument = documents.find(
+      (document) => document.month === view.activeMonth
+    );
+    const { catalog } = await ensureCategoryCatalog(userId);
+    const categoryNames = getEnabledCategoryNames(
+      selectActiveCategories(
+        catalog.categories,
+        typeof payload.includeAppCategories === "boolean"
+          ? payload.includeAppCategories
+          : null
+      )
+    );
+
     const result = await answerExpenseQuestion({
       question: payload.question,
       expenses,
-      statements: Array.isArray(payload.statements)
-        ? (payload.statements as SaveStatementSource[])
-        : [],
+      statements,
+      view,
+      categoryNames,
       selectedExpenseIds: Array.isArray(payload.selectedExpenseIds)
         ? payload.selectedExpenseIds.filter(
             (id): id is string => typeof id === "string"
           )
         : [],
-      cashFlowSummary: isRecord(payload.cashFlowSummary)
-        ? (payload.cashFlowSummary as CashFlowSummary)
+      // Manual plan entries are not in scope here, so the summary is the one
+      // the month on screen draws: recognized income against category spend.
+      cashFlowSummary: activeDocument
+        ? summarizeCashFlow(
+            [],
+            activeDocument.expenses,
+            activeDocument.incomes
+          )
         : undefined,
       history: Array.isArray(payload.history)
         ? (payload.history as ExpenseChatMessage[])
@@ -77,6 +114,15 @@ export async function POST(request: Request) {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+function parseView(value: unknown): ExpenseChatView {
+  if (!value || typeof value !== "object") {
+    return { scope: "month", activeMonth: "" };
+  }
+
+  const view = value as Record<string, unknown>;
+
+  return {
+    scope: view.scope === "all" ? "all" : "month",
+    activeMonth: isMonthKey(view.activeMonth) ? view.activeMonth : ""
+  };
 }

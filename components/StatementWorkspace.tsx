@@ -93,6 +93,8 @@ import {
 import {
   clearMonthsNotice,
   fileStatement,
+  flushMonths,
+  applyExpenseEdits,
   readInitialMonthsSnapshot,
   readMonthsSnapshot,
   reassignStatement,
@@ -117,6 +119,7 @@ import {
   type ReviewHistoryEvent
 } from "@/lib/reviewHistory";
 import type { ExpenseChatMessage } from "@/lib/expenseChat";
+import type { ExpenseChatEdit, ExpenseEditField } from "@/lib/expenseEdits";
 import type {
   ExpenseItem,
   IncomeItem,
@@ -167,12 +170,20 @@ const EMPTY_NOTION_CONNECTION: NotionConnectionStatus = {
   ready: false
 };
 
+type ExpenseChatEditState = "pending" | "applied" | "dismissed";
+
+type ExpenseChatUiEdit = ExpenseChatEdit & {
+  state: ExpenseChatEditState;
+};
+
 type ExpenseChatUiMessage = ExpenseChatMessage & {
   id: string;
+  edits?: ExpenseChatUiEdit[];
 };
 
 type ExpenseChatResponse = {
   answer: string;
+  edits?: ExpenseChatEdit[];
   context?: {
     rowCount: number;
     selectedRowCount: number;
@@ -392,6 +403,143 @@ function compareBySortKey(
   }
 
   return String(aValue).localeCompare(String(bValue)) * direction;
+}
+
+const EDIT_FIELD_LABELS: Record<ExpenseEditField, string> = {
+  category: "Category",
+  merchant: "Merchant",
+  description: "Description",
+  subcategory: "Subcategory",
+  notes: "Notes",
+  amount: "Amount",
+  reimbursedAmount: "Reimbursed"
+};
+
+function formatEditValue(
+  field: ExpenseEditField,
+  value: string | number,
+  currency: string
+) {
+  if (field === "amount" || field === "reimbursedAmount") {
+    return typeof value === "number"
+      ? formatCurrency(value, currency)
+      : String(value);
+  }
+
+  return String(value).trim() || "(empty)";
+}
+
+/**
+ * The approval card under an assistant answer. Chat only ever proposes
+ * changes; nothing reaches the month documents until one of these buttons is
+ * clicked, and a pending card can always be dismissed instead.
+ */
+function ExpenseChatEditList(props: {
+  message: ExpenseChatUiMessage;
+  busy: boolean;
+  onApprove: (
+    messageId: string,
+    edits: readonly ExpenseChatUiEdit[]
+  ) => void | Promise<void>;
+  onDismiss: (messageId: string, edits: readonly ExpenseChatUiEdit[]) => void;
+}) {
+  const { message, busy, onApprove, onDismiss } = props;
+  const edits = message.edits || [];
+  const pending = edits.filter((edit) => edit.state === "pending");
+
+  if (edits.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="expense-chat-edits">
+      <div className="expense-chat-edits-heading">
+        <span>
+          {edits.length === 1
+            ? "1 suggested change"
+            : `${edits.length} suggested changes`}
+        </span>
+        {pending.length > 1 ? (
+          <span className="expense-chat-edits-bulk">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void onApprove(message.id, pending)}
+            >
+              <Check size={14} {...hydrationSafeIconProps} />
+              Approve all
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onDismiss(message.id, pending)}
+            >
+              <X size={14} {...hydrationSafeIconProps} />
+              Dismiss all
+            </button>
+          </span>
+        ) : null}
+      </div>
+      {edits.map((edit) => (
+        <div
+          className={`expense-chat-edit is-${edit.state}`}
+          key={edit.id}
+        >
+          <div className="expense-chat-edit-row">
+            <span className="expense-chat-edit-target">
+              {edit.rowLabel}
+              {edit.date ? ` · ${edit.date}` : ""}
+              {edit.month ? ` · ${edit.month}` : ""}
+            </span>
+            {edit.state === "pending" ? (
+              <span className="expense-chat-edit-actions">
+                <button
+                  type="button"
+                  className="expense-chat-edit-approve"
+                  disabled={busy}
+                  title="Apply this change"
+                  onClick={() => void onApprove(message.id, [edit])}
+                >
+                  <Check size={14} {...hydrationSafeIconProps} />
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  className="expense-chat-edit-dismiss"
+                  disabled={busy}
+                  title="Discard this suggestion"
+                  onClick={() => onDismiss(message.id, [edit])}
+                >
+                  <X size={14} {...hydrationSafeIconProps} />
+                  Dismiss
+                </button>
+              </span>
+            ) : (
+              <span className="expense-chat-edit-state">
+                {edit.state === "applied" ? "Applied" : "Dismissed"}
+              </span>
+            )}
+          </div>
+          <div className="expense-chat-edit-change">
+            <span className="expense-chat-edit-field">
+              {EDIT_FIELD_LABELS[edit.field]}
+            </span>
+            <span className="expense-chat-edit-diff">
+              <del>
+                {formatEditValue(edit.field, edit.before, edit.currency)}
+              </del>
+              <ins>
+                {formatEditValue(edit.field, edit.after, edit.currency)}
+              </ins>
+            </span>
+          </div>
+          {edit.reason ? (
+            <p className="expense-chat-edit-reason">{edit.reason}</p>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function StatementWorkspace() {
@@ -1236,7 +1384,7 @@ export function StatementWorkspace() {
       return;
     }
 
-    if (items.length === 0) {
+    if (months.length === 0) {
       showNotice({
         tone: "error",
         message: "Add expense rows before using expense chat."
@@ -1258,6 +1406,10 @@ export function StatementWorkspace() {
     setChatBusy(true);
 
     try {
+      // The server reads every filed month itself, so only the pointers it
+      // cannot derive are sent. Pending edits flush first or the ledger it
+      // reads is one behind what the reviewer is looking at.
+      await flushMonths();
       const response = await fetch("/api/expense-chat", {
         method: "POST",
         headers: {
@@ -1265,11 +1417,13 @@ export function StatementWorkspace() {
         },
         body: JSON.stringify({
           question,
-          expenses: items,
-          statements: statements.map(statementSourceForSave),
           selectedExpenseIds: [...selectedIds],
-          cashFlowSummary,
-          history
+          history,
+          view: {
+            scope: allView ? "all" : "month",
+            activeMonth
+          },
+          includeAppCategories
         })
       });
       const result = (await response.json()) as ExpenseChatResponse;
@@ -1283,7 +1437,11 @@ export function StatementWorkspace() {
         {
           id: createClientId("chat-assistant"),
           role: "assistant",
-          content: result.answer
+          content: result.answer,
+          edits: (result.edits || []).map((edit) => ({
+            ...edit,
+            state: "pending" as const
+          }))
         }
       ]);
     } catch (error) {
@@ -1302,6 +1460,52 @@ export function StatementWorkspace() {
     } finally {
       setChatBusy(false);
     }
+  }
+
+  function resolveChatEdits(
+    messageId: string,
+    edits: readonly ExpenseChatUiEdit[],
+    state: ExpenseChatEditState
+  ) {
+    setChatMessages((current) =>
+      current.map((message) =>
+        message.id === messageId
+          ? {
+              ...message,
+              edits: message.edits?.map((edit) =>
+                edits.some((resolved) => resolved.id === edit.id)
+                  ? { ...edit, state }
+                  : edit
+              )
+            }
+          : message
+      )
+    );
+  }
+
+  async function approveChatEdits(messageId: string, edits: readonly ExpenseChatUiEdit[]) {
+    resolveChatEdits(messageId, edits, "applied");
+    const applied = await applyExpenseEdits(edits);
+
+    showNotice(
+      applied === edits.length
+        ? {
+            tone: "success",
+            message: `Applied ${applied} ${
+              applied === 1 ? "change" : "changes"
+            } from the chat.`
+          }
+        : {
+            tone: "error",
+            message: `Applied ${applied} of ${edits.length} ${
+              edits.length === 1 ? "change" : "changes"
+            }; check the months they landed in.`
+          }
+    );
+  }
+
+  function dismissChatEdits(messageId: string, edits: readonly ExpenseChatUiEdit[]) {
+    resolveChatEdits(messageId, edits, "dismissed");
   }
 
   async function importCategories() {
@@ -2729,7 +2933,7 @@ export function StatementWorkspace() {
                       className="expense-chat-suggestion"
                       type="button"
                       key={prompt}
-                      disabled={chatBusy || items.length === 0}
+                      disabled={chatBusy || months.length === 0}
                       onClick={() => void askExpenseChat(prompt)}
                     >
                       {prompt}
@@ -2751,6 +2955,14 @@ export function StatementWorkspace() {
                     )}
                   </span>
                   <p>{message.content}</p>
+                  {message.edits && message.edits.length > 0 ? (
+                    <ExpenseChatEditList
+                      message={message}
+                      busy={chatBusy}
+                      onApprove={approveChatEdits}
+                      onDismiss={dismissChatEdits}
+                    />
+                  ) : null}
                 </div>
               ))}
 
@@ -2773,7 +2985,7 @@ export function StatementWorkspace() {
             >
               <input
                 value={chatInput}
-                disabled={chatBusy || items.length === 0}
+                disabled={chatBusy || months.length === 0}
                 onChange={(event) => setChatInput(event.target.value)}
                 placeholder="How could I minimize food costs?"
                 aria-label="Expense question"
@@ -2782,7 +2994,7 @@ export function StatementWorkspace() {
                 className="icon-button expense-chat-send"
                 type="submit"
                 title="Send question"
-                disabled={chatBusy || items.length === 0 || !chatInput.trim()}
+                disabled={chatBusy || months.length === 0 || !chatInput.trim()}
               >
                 {chatBusy ? (
                   <LoaderCircle

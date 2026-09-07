@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   answerExpenseQuestion,
-  buildExpenseChatPrompt
+  buildExpenseChatPrompt,
+  resolveExpenseChatEdits
 } from "@/lib/expenseChat";
+import { applyExpenseEditsToRows } from "@/lib/expenseEdits";
+import type { ExpenseChatRow } from "@/lib/expenseChat";
 import type { ExpenseItem } from "@/lib/types";
-
-const expenses: ExpenseItem[] = [
+const expensesWithoutMonth: ExpenseItem[] = [
   {
     id: "tx-food-1",
     statementId: "statement-1",
@@ -58,6 +60,11 @@ const expenses: ExpenseItem[] = [
     notes: ""
   }
 ];
+
+const expenses: ExpenseChatRow[] = expensesWithoutMonth.map((expense) => ({
+  ...expense,
+  month: "2026-06"
+}));
 
 describe("expense chat", () => {
   test("builds prompt context from category, merchant, and selected rows", () => {
@@ -149,4 +156,117 @@ describe("expense chat", () => {
       }
     }
   });
+  test("keeps valid chat edits and drops unknown rows and values", () => {
+    const resolved = resolveExpenseChatEdits({
+      rows: expenses,
+      edits: [
+        {
+          expenseId: "tx-food-1",
+          field: "category",
+          value: "Groceries",
+          reason: "Food City is a grocer."
+        },
+        {
+          expenseId: "tx-missing",
+          field: "category",
+          value: "Groceries",
+          reason: "Unknown row is dropped."
+        },
+        {
+          expenseId: "tx-food-2",
+          field: "category",
+          value: "Not A Category",
+          reason: "Unknown category is dropped."
+        },
+        {
+          expenseId: "tx-software",
+          field: "amount",
+          value: "$18.999",
+          reason: "Amount parses to cents."
+        },
+        {
+          expenseId: "tx-software",
+          field: "amount",
+          value: "abc",
+          reason: "Unparseable amount is dropped."
+        },
+        {
+          expenseId: "tx-software",
+          field: "notes",
+          value: "Seats for the design team",
+          reason: ""
+        },
+        {
+          expenseId: "tx-food-1",
+          field: "category",
+          value: "Meals",
+          reason: "No-op change is dropped."
+        }
+      ],
+      categoryNames: ["Meals", "Groceries", "Software"]
+    });
+
+    expect(resolved.map((edit) => `${edit.expenseId}:${edit.field}`)).toEqual([
+      "tx-food-1:category",
+      "tx-software:amount",
+      "tx-software:notes"
+    ]);
+    expect(resolved[0] && {
+      month: resolved[0].month,
+      before: resolved[0].before,
+      after: resolved[0].after,
+      rowLabel: resolved[0].rowLabel,
+      date: resolved[0].date,
+      reason: resolved[0].reason
+    }).toEqual({
+      month: "2026-06",
+      before: "Meals",
+      after: "Groceries",
+      rowLabel: "Food City",
+      date: "2026-06-01",
+      reason: "Food City is a grocer."
+    });
+    expect(resolved[1]?.after).toBe(19);
+  });
+
+  test("applies approved edits to the right rows and skips stale ones", () => {
+    const resolved = resolveExpenseChatEdits({
+      rows: expenses,
+      edits: [
+        {
+          expenseId: "tx-food-1",
+          field: "category",
+          value: "Groceries",
+          reason: ""
+        },
+        {
+          expenseId: "tx-software",
+          field: "category",
+          value: "Groceries",
+          reason: ""
+        }
+      ],
+      categoryNames: ["Meals", "Groceries", "Software"]
+    });
+
+    if (resolved.length !== 2) {
+      throw new Error("expected both edits to resolve");
+    }
+
+    const first = applyExpenseEditsToRows(expenses, resolved);
+
+    expect(first.applied).toBe(2);
+    expect(
+      first.expenses.find((row) => row.id === "tx-food-1")?.category
+    ).toBe("Groceries");
+    expect(
+      first.expenses.find((row) => row.id === "tx-food-2")?.category
+    ).toBe("Meals");
+
+    const second = applyExpenseEditsToRows(first.expenses, [resolved[0]]);
+
+    expect(second.applied).toBe(0);
+    expect(second.expenses).toBe(first.expenses);
+  });
 });
+
