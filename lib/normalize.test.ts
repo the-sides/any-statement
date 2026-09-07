@@ -81,6 +81,37 @@ describe("normalizeExtraction section filtering", () => {
   });
 });
 
+describe("normalizeExtraction amount floor", () => {
+  test("drops rows under $0.50 and keeps the boundary", () => {
+    const { expenses } = normalizeExtraction(
+      seedExtraction("credit_card", [
+        { section: "purchase", merchant: "Penny Auth", amount: 0.01 },
+        { section: "purchase", merchant: "Rounding Fee", amount: 0.49 },
+        { section: "purchase", merchant: "Half Dollar", amount: 0.5 },
+        { section: "purchase", merchant: "Coffee", amount: 4.25 }
+      ])
+    );
+
+    expect(expenses.map((expense) => expense.merchant)).toEqual([
+      "Half Dollar",
+      "Coffee"
+    ]);
+  });
+
+  test("drops sub-$0.50 income such as fractional interest", () => {
+    const { incomes } = normalizeExtraction({
+      statement: { institution: "USAA", statementType: "bank" },
+      expenses: [],
+      incomes: [
+        { id: "in-1", date: "2026-08-01", source: "Interest Paid", amount: 0.07, kind: "interest" },
+        { id: "in-2", date: "2026-08-15", source: "Payroll", amount: 2100, kind: "payroll" }
+      ]
+    });
+
+    expect(incomes.map((income) => income.source)).toEqual(["Payroll"]);
+  });
+});
+
 describe("normalizeExtraction internal transfer filtering", () => {
   const bankStatement = {
     institution: "USAA",

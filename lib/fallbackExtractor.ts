@@ -3,6 +3,7 @@ import {
   getDefaultCategoryName,
   getEnabledCategoryNames,
 } from "@/lib/categories";
+import { isLedgerableAmount } from "@/lib/normalize";
 import { extractPdfText } from "@/lib/pdfText";
 import type { ExpenseItem, StatementSummary } from "@/lib/types";
 
@@ -35,7 +36,14 @@ export async function extractFallbackExpensesFromPdf(
     options.categorizationNotes || "",
     categoryNames
   );
-  const expenses = extractNewCharges(text, statement, categoryNames, noteRules);
+  // The fallback bypasses normalizeExtraction, so it applies the same
+  // sub-$0.50 floor itself.
+  const expenses = extractNewCharges(
+    text,
+    statement,
+    categoryNames,
+    noteRules
+  ).filter((expense) => isLedgerableAmount(expense.amount));
 
   return {
     source: "pdftotext-new-charges",

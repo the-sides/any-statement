@@ -55,6 +55,15 @@ function asConfidence(value: unknown) {
   return Math.max(0, Math.min(1, number));
 }
 
+// Rows under half a dollar are noise (fractional interest, $0.01 auth probes,
+// rounding fees): they never change a month's picture and only cost review
+// time. Applied to both sides, so a $0.02 interest credit is dropped too.
+export const MIN_LEDGER_AMOUNT = 0.5;
+
+export function isLedgerableAmount(amount: number) {
+  return Math.abs(amount) >= MIN_LEDGER_AMOUNT;
+}
+
 export function normalizeExtraction(
   input: unknown,
   options: { categoryNames?: readonly string[] } = {}
@@ -144,11 +153,13 @@ export function normalizeExtraction(
         : new Set();
   const filteredExpenses = expenses.filter(
     (expense) =>
+      isLedgerableAmount(expense.amount) &&
       !excludedSections.has(expense.statementSection) &&
       !isInternalTransferRow(expense.merchant, expense.description)
   );
   const filteredIncomes = incomes.filter(
-    (income) => !isInternalTransferRow(income.source)
+    (income) =>
+      isLedgerableAmount(income.amount) && !isInternalTransferRow(income.source)
   );
 
   return { statement, expenses: filteredExpenses, incomes: filteredIncomes };
