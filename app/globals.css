@@ -994,40 +994,76 @@ button:focus-visible,
   background: var(--surface-sunken);
 }
 
-/* The income table parks off the right edge of the review table, showing only
-   the tab that sits in the lane at the right of the transactions, and slides
-   over the transactions on hover or keyboard focus. It is right-parked because
-   the left edge belongs to the proximity-revealed controls rail. */
-.income-drawer {
+/* The income table and the expense chat park off the right edge of the review
+   table, showing only the tab that sits in the lane at the right of the
+   transactions, and slide over the transactions when open. They are
+   right-parked because the left edge belongs to the proximity-revealed
+   controls rail, which would slide over a left tab before it could be reached.
+
+   StatementWorkspace writes both attributes. `data-open` covers hover, focus
+   and either hold, and is also what the lane layout reads: `top` is set per
+   drawer so an open panel pushes the tabs below it down instead of covering
+   them, and both `top` and `transform` animate. `data-hold` distinguishes
+   `temporary` (a click inside; survives mouse-leave, dropped by the next
+   outside click) from `pinned` (survives outside clicks too).
+
+   An open drawer stacks above the parked ones so a tab sliding out of its way
+   passes behind the panel rather than across it. */
+.side-drawer {
   position: absolute;
   top: 0;
   right: 0;
   z-index: 6;
   display: flex;
-  width: min(760px, 100%);
   align-items: flex-start;
   /* DOM order is panel then tab; reversing puts the tab on the inward edge. */
   flex-direction: row-reverse;
+  /* A parked drawer's wrapper is as tall as its panel, so its empty column at
+     the right edge would steal hover from a neighbouring open drawer. A parked
+     drawer is therefore a hit target only through its tab; hovering that tab
+     opens the drawer, which hands pointer events back to the whole thing. */
+  pointer-events: none;
   transform: translateX(calc(100% - 32px));
-  transition: transform 0.24s ease;
+  transition:
+    top 0.24s ease,
+    transform 0.24s ease;
 }
 
-.income-drawer:hover,
-.income-drawer:focus-within {
+.side-drawer-tab,
+.side-drawer[data-open="true"] {
+  pointer-events: auto;
+}
+
+.income-drawer {
+  width: min(760px, 100%);
+}
+
+.chat-drawer {
+  /* Server-rendered fallback for the lane layout: one tab down. */
+  top: 148px;
+  width: min(560px, 100%);
+}
+
+.side-drawer[data-open="true"] {
+  z-index: 7;
   transform: translateX(0);
 }
 
-.income-drawer .income-panel {
+.side-drawer > .income-panel,
+.side-drawer > .expense-chat-panel {
   min-width: 0;
   max-height: min(68vh, 620px);
   flex: 1;
   overflow: auto;
   border-radius: 8px 0 0 8px;
-  background: var(--panel);
   box-shadow: var(--shadow);
 }
 
-.income-drawer-tab {
+.side-drawer > .income-panel {
+  background: var(--panel);
+}
+
+.side-drawer-tab {
   display: flex;
   width: 32px;
   min-height: 132px;
@@ -1048,13 +1084,28 @@ button:focus-visible,
   writing-mode: vertical-rl;
 }
 
-.income-drawer:hover .income-drawer-tab,
-.income-drawer:focus-within .income-drawer-tab {
+.side-drawer[data-open="true"] .side-drawer-tab {
   color: var(--ink);
 }
 
+.side-drawer[data-hold="pinned"] .side-drawer-tab {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.drawer-pin[aria-pressed="true"] {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.panel-heading-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .income-drawer {
+  .side-drawer {
     transition: none;
   }
 }
@@ -1769,25 +1820,27 @@ meter {
     padding-left: 18px;
   }
 
-  /* Stacked layout has no gutter to hide in, so the drawer becomes a plain
-     panel again and the tab lane is no longer needed. */
+  /* Stacked layout has no gutter to hide in, so the drawers become plain
+     panels again and the tab lane is no longer needed. */
   .workspace {
     padding-right: 14px;
   }
 
-  .income-drawer {
+  .side-drawer {
     position: static;
     width: auto;
     flex-direction: row;
+    pointer-events: auto;
     transform: none;
   }
 
-  .income-drawer .income-panel {
+  .side-drawer > .income-panel,
+  .side-drawer > .expense-chat-panel {
     max-height: none;
     border-radius: 8px;
   }
 
-  .income-drawer-tab {
+  .side-drawer-tab {
     display: none;
   }
 }

@@ -218,14 +218,35 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   (payroll, interest, other deposits; never own-account transfers) alongside
   expenses, stored in the `incomes` table (`lib/migrations/005_income_rows.sql`)
   and reviewed in the Income drawer. Notion save still covers expenses only.
-  The drawer is absolutely positioned inside `.workspace`, parked off its *right* edge with
-  only a 32px vertical `Income` tab showing in the reserved `padding-right` lane, and slides
-  over the transaction table on hover or `:focus-within`. It moved to the right when the
-  controls rail took over the left edge: the rail slid over the tab before the cursor could
-  reach it. `flex-direction: row-reverse` is what keeps the tab on the inward side, and
-  `overflow: hidden` on `.workspace` is what hides the parked panel: remove it and the income
-  table bleeds outside the workspace. Below 980px the drawer reverts to a plain stacked panel
-  and the tab is hidden.
+- Income and Expense chat are both *side drawers*: `.side-drawer` elements absolutely
+  positioned inside `.workspace`, parked off its *right* edge with only a 32px vertical tab
+  showing in the reserved `padding-right` lane, sliding over the transaction table when open.
+  They are on the right because the controls rail owns the left edge: it slid over a left tab
+  before the cursor could reach it. `flex-direction: row-reverse` keeps the tab on the inward
+  side, and `overflow: hidden` on `.workspace` is what hides a parked panel: remove it and the
+  income table bleeds outside the workspace. Below 980px both revert to plain stacked panels
+  and the tabs are hidden.
+  - `StatementWorkspace` writes `data-open` (hover, focus, or a hold) and `data-hold`
+    (`none` / `temporary` / `pinned`). A click inside a drawer takes the `temporary` hold: it
+    survives mouse-leave but the next click outside drops it. The pin button takes `pinned`,
+    which survives outside clicks until it is clicked again. One document `mousedown` listener
+    owns both transitions, so a single click can never be inside one drawer and outside
+    another inconsistently.
+  - Hover and focus are React state, not just CSS, because the tab lane layout needs to know
+    which drawers are open. A parked drawer's wrapper is as tall as its panel, so it is
+    `pointer-events: none` except for its tab; otherwise its empty column stole hover from the
+    neighbouring drawer's pin.
+  - `DRAWER_IDS` is the lane order. An effect lays the lane out top to bottom - a parked
+    drawer occupies one tab, an open one occupies its whole measured panel - and writes each
+    drawer's `top`, so opening Income slides the Chat tab down instead of covering it
+    (`transition: top` animates it, and an open drawer's `z-index` is higher so the tab passes
+    *behind* the panel). The same effect adds a scroll offset through `margin-top`, which is
+    deliberately *not* transitioned so the lane tracks the scroll frame for frame, keeping the
+    tabs on screen in a workspace taller than the viewport. Both are DOM writes for the same
+    reason as the rail: a scroll- or resize-per-frame `setState` re-renders the whole
+    workspace. A `ResizeObserver` re-runs it when an open panel grows. Adding a drawer is an
+    id in `DRAWER_IDS`, a wrapper spread with `drawerProps(id)`, a panel ref from
+    `registerDrawerPanel(id)`, and a `.side-drawer-tab`.
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` parses
   Amex-style `New Charges Details` tables. PDF text now comes from `unpdf` in-process, not the
   `pdftotext` binary, so it works on hosts without Poppler. `lib/pdfText.ts` reconstructs a

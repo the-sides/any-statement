@@ -309,6 +309,24 @@ const hydrationSafeIconProps = {
   suppressHydrationWarning: true
 } as const;
 
+// The right-edge drawers share one vertical lane, in this order. Tabs stack
+// from the top; an open drawer takes its panel's height out of the lane and
+// every tab below it slides down (animated by the `top` transition), so a
+// panel never covers a tab. Adding a drawer is: an id here, a wrapper with
+// `registerDrawer`, and a tab.
+type DrawerId = "income" | "chat";
+type DrawerHold = "none" | "temporary" | "pinned";
+const DRAWER_IDS: readonly DrawerId[] = ["income", "chat"];
+const DRAWER_TAB_HEIGHT_PX = 132;
+const DRAWER_STACK_GAP_PX = 16;
+// Gap kept between the viewport top and the lane once the page has scrolled
+// past the top of the workspace.
+const DRAWER_LANE_MARGIN_PX = 16;
+const CLOSED_DRAWER_HOLDS: Record<DrawerId, DrawerHold> = {
+  income: "none",
+  chat: "none"
+};
+
 type SortKey =
   | "statement"
   | "amount"
@@ -379,6 +397,25 @@ function compareBySortKey(
 export function StatementWorkspace() {
   const [files, setFiles] = useState<File[]>([]);
   const railRef = useRef<HTMLElement | null>(null);
+  // Both right-edge drawers (Income, Expense chat) reveal on hover. A click
+  // inside one takes a `temporary` hold: it survives mouse-leave but an
+  // outside click drops it. The pin button takes a `pinned` hold, which
+  // survives outside clicks too and is only released by clicking it again.
+  // Hover and focus are React state rather than CSS because the tab lane
+  // layout below has to know which drawers are open, not just paint them.
+  const [drawerHolds, setDrawerHolds] =
+    useState<Record<DrawerId, DrawerHold>>(CLOSED_DRAWER_HOLDS);
+  const [hoveredDrawer, setHoveredDrawer] = useState<DrawerId | null>(null);
+  const [focusedDrawer, setFocusedDrawer] = useState<DrawerId | null>(null);
+  const drawerRefs = useRef<Record<DrawerId, HTMLDivElement | null>>({
+    income: null,
+    chat: null
+  });
+  const drawerPanelRefs = useRef<Record<DrawerId, HTMLElement | null>>({
+    income: null,
+    chat: null
+  });
+  const workspaceRef = useRef<HTMLElement | null>(null);
   const railPinned = useSyncExternalStore(
     subscribeToRailPinPreference,
     readRailPinPreference,
@@ -684,6 +721,173 @@ export function StatementWorkspace() {
     };
   }, [railPinned]);
 
+  // One document listener owns both hold transitions, so a click can never
+  // land inside one drawer and outside another without both seeing it.
+  // `mousedown` rather than `click`: a drag that starts inside the drawer and
+  // ends on the table would otherwise read as an outside click.
+  useEffect(() => {
+    function onPointerDown(event: MouseEvent) {
+      const target = event.target as Node | null;
+
+      setDrawerHolds((current) => {
+        let next: Record<DrawerId, DrawerHold> | null = null;
+
+        for (const id of DRAWER_IDS) {
+          const element = drawerRefs.current[id];
+          const inside = Boolean(
+            element && target && element.contains(target)
+          );
+          const hold =
+            inside && current[id] === "none"
+              ? "temporary"
+              : !inside && current[id] === "temporary"
+                ? "none"
+                : current[id];
+
+          if (hold !== current[id]) {
+            next = next || { ...current };
+            next[id] = hold;
+          }
+        }
+
+        return next || current;
+      });
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, []);
+
+  const drawerOpenState = {
+    income:
+      drawerHolds.income !== "none" ||
+      hoveredDrawer === "income" ||
+      focusedDrawer === "income",
+    chat:
+      drawerHolds.chat !== "none" ||
+      hoveredDrawer === "chat" ||
+      focusedDrawer === "chat"
+  } satisfies Record<DrawerId, boolean>;
+  const drawerOpenRef = useRef(drawerOpenState);
+  drawerOpenRef.current = drawerOpenState;
+  // Primitive dep: the object above is a new identity every render.
+  const drawerOpenKey = DRAWER_IDS.map((id) =>
+    drawerOpenState[id] ? "1" : "0"
+  ).join("");
+
+  // Lays the tab lane out top to bottom: a parked drawer occupies one tab, an
+  // open one occupies its whole panel, and everything below it starts after
+  // that. The whole lane is then offset so it stays inside the viewport while
+  // the page scrolls - the workspace is taller than the screen, so a lane
+  // pinned to its top would scroll away and leave no way to reach a drawer.
+  // `top` is written to the DOM rather than held in state because the heights
+  // come from measurement, a scroll-per-frame re-render of this component
+  // would be visible jank, and the CSS transition on `top` is what makes a tab
+  // slide instead of jump. A ResizeObserver covers a panel that grows while it
+  // is open, e.g. an income row being added.
+  useEffect(() => {
+    const open = drawerOpenRef.current;
+    let frame = 0;
+
+    function layout() {
+      // Below the breakpoint the drawers are ordinary stacked panels, and an
+      // inline `top`/`margin-top` would offset them inside the flow.
+      const stacked = window.matchMedia("(max-width: 980px)").matches;
+
+      if (stacked) {
+        for (const id of DRAWER_IDS) {
+          const element = drawerRefs.current[id];
+
+          if (element) {
+            element.style.removeProperty("top");
+            element.style.removeProperty("margin-top");
+          }
+        }
+
+        return;
+      }
+
+      const occupied = DRAWER_IDS.map((id) => {
+        const panel = drawerPanelRefs.current[id];
+
+        return open[id] && panel ? panel.offsetHeight : DRAWER_TAB_HEIGHT_PX;
+      });
+      const laneHeight =
+        occupied.reduce((total, height) => total + height, 0) +
+        (occupied.length - 1) * DRAWER_STACK_GAP_PX;
+      const workspace = workspaceRef.current;
+      let offset = 0;
+
+      if (workspace) {
+        // How far the workspace top has scrolled past the viewport top, capped
+        // so the lane never runs out of the workspace's clipped box.
+        offset = Math.min(
+          Math.max(0, DRAWER_LANE_MARGIN_PX - workspace.getBoundingClientRect().top),
+          Math.max(0, workspace.clientHeight - laneHeight - DRAWER_LANE_MARGIN_PX)
+        );
+      }
+
+      let cursor = 0;
+
+      DRAWER_IDS.forEach((id, index) => {
+        const element = drawerRefs.current[id];
+
+        if (!element) {
+          return;
+        }
+
+        const lane = index * (DRAWER_TAB_HEIGHT_PX + DRAWER_STACK_GAP_PX);
+        const top = Math.max(lane, cursor);
+
+        // `top` carries the stack position and is transitioned; the scroll
+        // offset rides on `margin-top`, which is not, so the lane tracks the
+        // scroll frame for frame instead of easing along behind it.
+        element.style.top = `${top}px`;
+        element.style.marginTop = `${offset}px`;
+        cursor = top + occupied[index] + DRAWER_STACK_GAP_PX;
+      });
+    }
+
+    function onScroll() {
+      if (frame) {
+        return;
+      }
+
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        layout();
+      });
+    }
+
+    layout();
+
+    const observer = new ResizeObserver(layout);
+
+    for (const id of DRAWER_IDS) {
+      const panel = drawerPanelRefs.current[id];
+
+      if (panel) {
+        observer.observe(panel);
+      }
+    }
+
+    window.addEventListener("resize", layout);
+    window.addEventListener("scroll", onScroll, { passive: true });
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", layout);
+      window.removeEventListener("scroll", onScroll);
+
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, [drawerOpenKey]);
+
   useEffect(() => {
     let active = true;
 
@@ -829,6 +1033,41 @@ export function StatementWorkspace() {
     } finally {
       setNotionBusy(false);
     }
+  }
+
+  // Every drawer wrapper gets the same wiring: identity for the outside-click
+  // handler and the lane layout, plus the hover/focus tracking that decides
+  // whether it counts as open.
+  function drawerProps(id: DrawerId) {
+    return {
+      className: `side-drawer ${id}-drawer`,
+      "data-hold": drawerHolds[id],
+      "data-open": drawerOpenState[id] ? "true" : "false",
+      ref: (element: HTMLDivElement | null) => {
+        drawerRefs.current[id] = element;
+      },
+      onMouseEnter: () => setHoveredDrawer(id),
+      onMouseLeave: () =>
+        setHoveredDrawer((current) => (current === id ? null : current)),
+      onFocus: () => setFocusedDrawer(id),
+      onBlur: () =>
+        setFocusedDrawer((current) => (current === id ? null : current))
+    };
+  }
+
+  function registerDrawerPanel(id: DrawerId) {
+    return (element: HTMLElement | null) => {
+      drawerPanelRefs.current[id] = element;
+    };
+  }
+
+  function toggleDrawerPin(id: DrawerId) {
+    setDrawerHolds((current) => ({
+      ...current,
+      // Unpinning drops the hold outright rather than falling back to
+      // `temporary`, so the drawer collapses as soon as the cursor leaves.
+      [id]: current[id] === "pinned" ? "none" : "pinned"
+    }));
   }
 
   async function extractStatement() {
@@ -2200,24 +2439,52 @@ export function StatementWorkspace() {
         </section>
       </aside>
 
-      <section className="workspace" aria-label="Expense review table">
-        {/* Off-screen by default: the drawer parks in the gutter between the
-            side panel and the table, and slides over the table on hover. */}
-        <div className="income-drawer">
-          <section className="panel income-panel" aria-label="Income">
+      <section
+        className="workspace"
+        aria-label="Expense review table"
+        ref={workspaceRef}
+      >
+        {/* Off-screen by default: the drawer parks in the lane at the right of
+            the table and slides over it on hover, on a click-taken temporary
+            hold, or while pinned. */}
+        <div {...drawerProps("income")}>
+          <section
+            className="panel income-panel"
+            aria-label="Income"
+            ref={registerDrawerPanel("income")}
+          >
             <div className="panel-heading panel-heading-split">
               <div className="panel-heading-title">
                 <Wallet size={18} {...hydrationSafeIconProps} />
                 <h2>Income</h2>
               </div>
-              <button
-                className="icon-button"
-                type="button"
-                title="Add income row"
-                onClick={addIncome}
-              >
-                <Plus size={18} {...hydrationSafeIconProps} />
-              </button>
+              <div className="panel-heading-actions">
+                <button
+                  className="icon-button"
+                  type="button"
+                  title="Add income row"
+                  onClick={addIncome}
+                >
+                  <Plus size={18} {...hydrationSafeIconProps} />
+                </button>
+                <button
+                  className="icon-button drawer-pin"
+                  type="button"
+                  title={
+                    drawerHolds.income === "pinned"
+                      ? "Unpin income"
+                      : "Pin income open"
+                  }
+                  aria-pressed={drawerHolds.income === "pinned"}
+                  onClick={() => toggleDrawerPin("income")}
+                >
+                  {drawerHolds.income === "pinned" ? (
+                    <Pin size={16} {...hydrationSafeIconProps} />
+                  ) : (
+                    <PinOff size={16} {...hydrationSafeIconProps} />
+                  )}
+                </button>
+              </div>
             </div>
             <div className="table-frame income-frame">
               <table>
@@ -2322,7 +2589,7 @@ export function StatementWorkspace() {
               </table>
             </div>
           </section>
-          <span className="income-drawer-tab">
+          <span className="side-drawer-tab">
             <Wallet size={14} {...hydrationSafeIconProps} />
             Income
           </span>
@@ -2378,94 +2645,124 @@ export function StatementWorkspace() {
           ) : null}
         </div>
 
-        <section className="expense-chat-panel" aria-label="Expense chat">
-          <div className="expense-chat-heading">
-            <div className="panel-heading-title">
-              <MessageCircle size={18} {...hydrationSafeIconProps} />
-              <h3>Expense chat</h3>
-            </div>
-            <span className="panel-count">
-              {selectedItems.length > 0
-                ? `${selectedItems.length} selected`
-                : `${items.length} rows`}
-            </span>
-          </div>
-
-          <div className="expense-chat-log" aria-live="polite">
-            {chatMessages.length === 0 ? (
-              <div className="expense-chat-suggestions">
-                {EXPENSE_CHAT_PROMPTS.map((prompt) => (
-                  <button
-                    className="expense-chat-suggestion"
-                    type="button"
-                    key={prompt}
-                    disabled={chatBusy || items.length === 0}
-                    onClick={() => void askExpenseChat(prompt)}
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-
-            {chatMessages.map((message) => (
-              <div
-                className={`expense-chat-message ${message.role}`}
-                key={message.id}
-              >
-                <span className="expense-chat-avatar">
-                  {message.role === "assistant" ? (
-                    <Bot size={16} {...hydrationSafeIconProps} />
-                  ) : (
-                    <UserRound size={16} {...hydrationSafeIconProps} />
-                  )}
-                </span>
-                <p>{message.content}</p>
-              </div>
-            ))}
-
-            {chatBusy ? (
-              <div className="expense-chat-message assistant">
-                <span className="expense-chat-avatar">
-                  <Bot size={16} {...hydrationSafeIconProps} />
-                </span>
-                <p>Thinking...</p>
-              </div>
-            ) : null}
-          </div>
-
-          <form
-            className="expense-chat-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void askExpenseChat();
-            }}
+        {/* Same parked-drawer treatment as Income, one tab lower. */}
+        <div {...drawerProps("chat")}>
+          <section
+            className="expense-chat-panel"
+            aria-label="Expense chat"
+            ref={registerDrawerPanel("chat")}
           >
-            <input
-              value={chatInput}
-              disabled={chatBusy || items.length === 0}
-              onChange={(event) => setChatInput(event.target.value)}
-              placeholder="How could I minimize food costs?"
-              aria-label="Expense question"
-            />
-            <button
-              className="icon-button expense-chat-send"
-              type="submit"
-              title="Send question"
-              disabled={chatBusy || items.length === 0 || !chatInput.trim()}
-            >
+            <div className="expense-chat-heading">
+              <div className="panel-heading-title">
+                <MessageCircle size={18} {...hydrationSafeIconProps} />
+                <h3>Expense chat</h3>
+              </div>
+              <div className="panel-heading-actions">
+                <span className="panel-count">
+                  {selectedItems.length > 0
+                    ? `${selectedItems.length} selected`
+                    : `${items.length} rows`}
+                </span>
+                <button
+                  className="icon-button drawer-pin"
+                  type="button"
+                  title={
+                    drawerHolds.chat === "pinned"
+                      ? "Unpin expense chat"
+                      : "Pin expense chat open"
+                  }
+                  aria-pressed={drawerHolds.chat === "pinned"}
+                  onClick={() => toggleDrawerPin("chat")}
+                >
+                  {drawerHolds.chat === "pinned" ? (
+                    <Pin size={16} {...hydrationSafeIconProps} />
+                  ) : (
+                    <PinOff size={16} {...hydrationSafeIconProps} />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="expense-chat-log" aria-live="polite">
+              {chatMessages.length === 0 ? (
+                <div className="expense-chat-suggestions">
+                  {EXPENSE_CHAT_PROMPTS.map((prompt) => (
+                    <button
+                      className="expense-chat-suggestion"
+                      type="button"
+                      key={prompt}
+                      disabled={chatBusy || items.length === 0}
+                      onClick={() => void askExpenseChat(prompt)}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {chatMessages.map((message) => (
+                <div
+                  className={`expense-chat-message ${message.role}`}
+                  key={message.id}
+                >
+                  <span className="expense-chat-avatar">
+                    {message.role === "assistant" ? (
+                      <Bot size={16} {...hydrationSafeIconProps} />
+                    ) : (
+                      <UserRound size={16} {...hydrationSafeIconProps} />
+                    )}
+                  </span>
+                  <p>{message.content}</p>
+                </div>
+              ))}
+
               {chatBusy ? (
-                <LoaderCircle
-                  className="spin"
-                  size={16}
-                  {...hydrationSafeIconProps}
-                />
-              ) : (
-                <Send size={16} {...hydrationSafeIconProps} />
-              )}
-            </button>
-          </form>
-        </section>
+                <div className="expense-chat-message assistant">
+                  <span className="expense-chat-avatar">
+                    <Bot size={16} {...hydrationSafeIconProps} />
+                  </span>
+                  <p>Thinking...</p>
+                </div>
+              ) : null}
+            </div>
+
+            <form
+              className="expense-chat-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void askExpenseChat();
+              }}
+            >
+              <input
+                value={chatInput}
+                disabled={chatBusy || items.length === 0}
+                onChange={(event) => setChatInput(event.target.value)}
+                placeholder="How could I minimize food costs?"
+                aria-label="Expense question"
+              />
+              <button
+                className="icon-button expense-chat-send"
+                type="submit"
+                title="Send question"
+                disabled={chatBusy || items.length === 0 || !chatInput.trim()}
+              >
+                {chatBusy ? (
+                  <LoaderCircle
+                    className="spin"
+                    size={16}
+                    {...hydrationSafeIconProps}
+                  />
+                ) : (
+                  <Send size={16} {...hydrationSafeIconProps} />
+                )}
+              </button>
+            </form>
+          </section>
+          <span className="side-drawer-tab">
+            <MessageCircle size={14} {...hydrationSafeIconProps} />
+            Chat
+          </span>
+        </div>
 
         <section className="cash-flow-panel" aria-label="Cash flow">
           <div className="cash-flow-heading">
