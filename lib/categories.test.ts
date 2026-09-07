@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  coerceCategorySource,
   hasActiveNotionCategories,
+  normalizeCategoryDefinitions,
   resolveIncludeAppCategories,
   selectActiveCategories,
   type ExpenseCategoryDefinition
@@ -69,5 +71,40 @@ describe("selectActiveCategories", () => {
     expect(
       selectActiveCategories(withDisabledNotion, null).map((item) => item.name)
     ).toEqual(["Groceries", "Hardware"]);
+  });
+});
+
+describe("custom categories", () => {
+  test("stay visible while Notion categories hide the built-ins", () => {
+    const catalog = [
+      ...mixed,
+      category("Coffee Gear", "custom"),
+      category("Film", "custom", false)
+    ];
+
+    expect(selectActiveCategories(catalog, null).map((item) => item.name)).toEqual([
+      "Groceries",
+      "Coffee Gear",
+      "Film"
+    ]);
+  });
+
+  test("normalize keeps custom sources and coerces unknown ones", () => {
+    const normalized = normalizeCategoryDefinitions([
+      { name: "Coffee Gear", source: "custom" },
+      { name: "Odd", source: "spreadsheet" as never },
+      { name: "Imported", source: "notion", enabled: false }
+    ]);
+
+    expect(normalized.map((item) => [item.name, item.source, item.enabled])).toEqual([
+      ["Coffee Gear", "custom", true],
+      ["Odd", "app", true],
+      ["Imported", "notion", false]
+    ]);
+  });
+
+  test("coerceCategorySource falls back to app", () => {
+    expect(coerceCategorySource("custom")).toBe("custom");
+    expect(coerceCategorySource(undefined)).toBe("app");
   });
 });

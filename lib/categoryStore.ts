@@ -4,6 +4,9 @@ import {
   type ExpenseCategoryDefinition,
   type ExpenseCategoryDefinitionInput,
   getEnabledCategoryDefinitions,
+  isEditableCategory,
+  MAX_CATEGORY_DESCRIPTION_LENGTH,
+  MAX_CATEGORY_NAME_LENGTH,
   mergeCategoryDefinitions,
   normalizeCategoryDefinitions,
   normalizeCategoryName
@@ -29,11 +32,23 @@ export type EnsuredCategoryCatalog = {
 };
 
 type StoredCategoryCatalog = {
+  found: boolean;
   categories?: ExpenseCategoryDefinitionInput[];
   sourceDataSourceId?: string;
   importedAt?: string;
   updatedAt?: string;
 };
+
+/** Rejected requests the route turns into a 4xx instead of a 500. */
+export class CategoryRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status = 400) {
+    super(message);
+    this.name = "CategoryRequestError";
+    this.status = status;
+  }
+}
 
 /**
  * Keyed by user: the catalog is per-user now, so one user's first page load
@@ -41,14 +56,18 @@ type StoredCategoryCatalog = {
  */
 const pendingAutoImports = new Map<string, Promise<EnsuredCategoryCatalog>>();
 
+/**
+ * The built-in defaults seed a user's first catalog and nothing more. Merging
+ * them into a stored catalog on every read would resurrect any default the
+ * reviewer deleted, which is exactly what deleting one has to mean.
+ */
 export async function loadCategoryCatalog(
   userId: string
 ): Promise<ExpenseCategoryCatalog> {
   const stored = await readStoredCategoryCatalog(userId);
-  const categories = mergeCategoryDefinitions(
-    DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
-    stored.categories || []
-  );
+  const categories = stored.found
+    ? normalizeCategoryDefinitions(stored.categories || [])
+    : normalizeCategoryDefinitions(DEFAULT_EXPENSE_CATEGORY_DEFINITIONS);
 
   return toCatalog(
     categories,
@@ -103,19 +122,114 @@ export async function importCategoryCatalog(
   );
 }
 
-export async function setCategoryEnabled(
+export async function createCustomCategory(
   userId: string,
-  name: string,
-  enabled: boolean
+  input: { name: string; description?: string; enabled?: boolean }
 ) {
   const current = await loadCategoryCatalog(userId);
-  const normalizedName = normalizeCategoryName(name);
+  const name = requireCategoryName(input.name);
+
+  if (findCategory(current.categories, name)) {
+    throw new CategoryRequestError(`${name} already exists.`, 409);
+  }
+
+  const maxSortOrder = current.categories.reduce(
+    (max, category) => Math.max(max, category.sortOrder ?? 0),
+    0
+  );
+  const categories = normalizeCategoryDefinitions([
+    ...current.categories,
+    {
+      name,
+      enabled: input.enabled !== false,
+      description: requireCategoryDescription(input.description),
+      source: "custom",
+      sortOrder: maxSortOrder + 10
+    }
+  ]);
+
+  return saveCategoryCatalog(
+    userId,
+    categories,
+    current.sourceDataSourceId,
+    current.importedAt
+  );
+}
+
+/**
+ * Notion owns its own names, so an imported category only accepts `enabled`.
+ * Built-in and custom categories accept everything, and a rename reports the
+ * old name so the caller can carry existing expense rows over to it.
+ */
+export async function updateCategoryDefinition(
+  userId: string,
+  name: string,
+  patch: { name?: string; description?: string; enabled?: boolean }
+) {
+  const current = await loadCategoryCatalog(userId);
+  const target = findCategory(current.categories, name);
+
+  if (!target) {
+    throw new CategoryRequestError(`${normalizeCategoryName(name)} is not a category.`, 404);
+  }
+
+  const renamesOrDescribes =
+    patch.name !== undefined || patch.description !== undefined;
+
+  if (renamesOrDescribes && !isEditableCategory(target)) {
+    throw new CategoryRequestError(
+      `${target.name} comes from Notion, so it can only be turned off or removed.`
+    );
+  }
+
+  const nextName =
+    patch.name === undefined ? target.name : requireCategoryName(patch.name);
+  const renamedFrom =
+    nextName.toLowerCase() === target.name.toLowerCase() ? undefined : target.name;
+
+  if (renamedFrom && findCategory(current.categories, nextName)) {
+    throw new CategoryRequestError(`${nextName} already exists.`, 409);
+  }
+
+  const next: ExpenseCategoryDefinition = {
+    ...target,
+    name: nextName,
+    description:
+      patch.description === undefined
+        ? target.description
+        : requireCategoryDescription(patch.description),
+    enabled: patch.enabled === undefined ? target.enabled : patch.enabled
+  };
   const categories = normalizeCategoryDefinitions(
     current.categories.map((category) =>
-      category.name.toLowerCase() === normalizedName.toLowerCase()
-        ? { ...category, enabled }
-        : category
+      category.name.toLowerCase() === target.name.toLowerCase() ? next : category
     )
+  );
+  const catalog = await saveCategoryCatalog(
+    userId,
+    categories,
+    current.sourceDataSourceId,
+    current.importedAt
+  );
+
+  return { catalog, renamedFrom, renamedTo: renamedFrom ? nextName : undefined };
+}
+
+/**
+ * Removal is allowed for every source. A deleted Notion category comes back on
+ * the next `Import`; a deleted built-in stays gone, because the catalog is the
+ * stored list rather than the defaults plus edits.
+ */
+export async function deleteCategoryDefinition(userId: string, name: string) {
+  const current = await loadCategoryCatalog(userId);
+  const target = findCategory(current.categories, name);
+
+  if (!target) {
+    throw new CategoryRequestError(`${normalizeCategoryName(name)} is not a category.`, 404);
+  }
+
+  const categories = current.categories.filter(
+    (category) => category.name.toLowerCase() !== target.name.toLowerCase()
   );
 
   return saveCategoryCatalog(
@@ -124,6 +238,43 @@ export async function setCategoryEnabled(
     current.sourceDataSourceId,
     current.importedAt
   );
+}
+
+function findCategory(
+  categories: readonly ExpenseCategoryDefinition[],
+  name: string
+) {
+  const key = normalizeCategoryName(name).toLowerCase();
+
+  return categories.find((category) => category.name.toLowerCase() === key);
+}
+
+function requireCategoryName(value: string) {
+  const name = normalizeCategoryName(value || "");
+
+  if (!name) {
+    throw new CategoryRequestError("A category needs a name.");
+  }
+
+  if (name.length > MAX_CATEGORY_NAME_LENGTH) {
+    throw new CategoryRequestError(
+      `A category name is limited to ${MAX_CATEGORY_NAME_LENGTH} characters.`
+    );
+  }
+
+  return name;
+}
+
+function requireCategoryDescription(value: string | undefined) {
+  const description = normalizeCategoryName(value || "");
+
+  if (description.length > MAX_CATEGORY_DESCRIPTION_LENGTH) {
+    throw new CategoryRequestError(
+      `A category description is limited to ${MAX_CATEGORY_DESCRIPTION_LENGTH} characters.`
+    );
+  }
+
+  return description;
 }
 
 async function autoImportCategoryCatalog(
@@ -219,14 +370,15 @@ async function readStoredCategoryCatalog(
 
     row = rows[0];
   } catch {
-    return {};
+    return { found: false };
   }
 
   if (!row) {
-    return {};
+    return { found: false };
   }
 
   return {
+    found: true,
     categories: Array.isArray(row.categories)
       ? (row.categories as ExpenseCategoryDefinitionInput[])
       : [],

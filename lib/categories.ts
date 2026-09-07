@@ -1,4 +1,20 @@
-export type ExpenseCategorySource = "app" | "notion";
+/**
+ * `app` is a built-in default, `custom` is one the reviewer created, `notion`
+ * is imported. The distinction matters twice: built-ins hide behind the APP
+ * categories toggle while Notion categories are active (a reviewer's own
+ * category must never disappear that way), and Notion names are owned by
+ * Notion, so they can be turned off or removed but not renamed.
+ */
+export type ExpenseCategorySource = "app" | "custom" | "notion";
+
+export const EXPENSE_CATEGORY_SOURCES: readonly ExpenseCategorySource[] = [
+  "app",
+  "custom",
+  "notion"
+];
+
+export const MAX_CATEGORY_NAME_LENGTH = 60;
+export const MAX_CATEGORY_DESCRIPTION_LENGTH = 240;
 
 export type ExpenseCategoryDefinition = {
   name: string;
@@ -19,6 +35,18 @@ export type ExpenseCategoryDefinitionInput = {
 };
 
 export const FALLBACK_CATEGORY_NAME = "Other";
+
+export function coerceCategorySource(value: unknown): ExpenseCategorySource {
+  return EXPENSE_CATEGORY_SOURCES.includes(value as ExpenseCategorySource)
+    ? (value as ExpenseCategorySource)
+    : "app";
+}
+
+export function isEditableCategory(category: {
+  source: ExpenseCategorySource;
+}) {
+  return category.source !== "notion";
+}
 
 export const DEFAULT_EXPENSE_CATEGORY_DEFINITIONS: ExpenseCategoryDefinition[] = [
   {
@@ -185,7 +213,7 @@ export function normalizeCategoryDefinitions(
       name,
       enabled: category.enabled !== false,
       description: normalizeDescription(category.description),
-      source: category.source || "app",
+      source: coerceCategorySource(category.source),
       sourceId: category.sourceId,
       sortOrder: category.sortOrder ?? existing?.sortOrder ?? (index + 1) * 10
     };
@@ -221,7 +249,7 @@ export function mergeCategoryDefinitions(
       enabled: category.enabled ?? current?.enabled ?? true,
       description:
         normalizeDescription(category.description) || current?.description || "",
-      source: category.source || current?.source || "app",
+      source: coerceCategorySource(category.source || current?.source),
       sourceId: category.sourceId || current?.sourceId,
       sortOrder: category.sortOrder ?? current?.sortOrder
     };

@@ -215,14 +215,32 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   and disabled categories remain in the catalog. Catalog *reads* fall back to the built-in defaults
   if the database is unreachable, so a database outage cannot break extraction or the Notion save
   that only resolves category names; writes still surface their errors.
+- The built-in defaults **seed** a user's first catalog and nothing more. A stored catalog is
+  read back as-is, never re-merged with the defaults, because merging would resurrect every
+  default the reviewer deleted. Adding a default in code therefore reaches existing users only
+  through a manual add.
 - When the user's connection has a category data source ID, the first catalog load imports the
   Notion categories and stores `importedAt`. Later loads reuse the stored catalog, so categories
   turned off by the reviewer are never resurrected; `Import` re-runs it on demand. If the
   import fails, the catalog falls back to built-ins and retries on the next load.
-- Built-in (`app`) categories are hidden while at least one enabled `notion` category
+- A category's `source` is `app` (built-in default), `custom` (the reviewer created it), or
+  `notion` (imported). Every source can be turned off or removed. `app` and `custom` can also
+  be renamed and re-described (`isEditableCategory`); `notion` cannot, because Notion owns
+  those names and the next `Import` would overwrite the edit. A removed Notion category comes
+  back on the next `Import`; a removed built-in stays gone.
+- Renaming carries the expense rows with it. `/api/categories` PATCH calls
+  `renameStoredExpenseCategory` (every stored month, one `update`) and the workspace flushes
+  pending month writes *first*, then renames the in-memory active month, so a debounced flush
+  cannot write the old name back. Deleting does not touch rows: they keep the old name, which
+  `categoryOptionsForItem` still offers so the select is not silently rewritten.
+- Only built-in (`app`) categories are hidden while at least one enabled `notion` category
   exists. Turning off every Notion category, or ticking the `APP categories` checkbox,
-  brings the built-ins back. `lib/categories.ts` owns that rule and both the workspace and
-  `/api/extract` use it.
+  brings the built-ins back. Custom categories are never hidden that way - a reviewer's own
+  category disappearing because Notion is connected would be a bug. `lib/categories.ts` owns
+  that rule and both the workspace and `/api/extract` use it.
+- Custom category names have no Notion counterpart, so the Notion save leaves their rows'
+  `Category` relation empty and reports the name in `unmatchedCategories`, the same as any
+  other unmatched name.
 - Reviewer categorization notes are stored per user in `user_settings`, submitted with
   `/api/extract`, and included in OpenRouter prompt/debug artifacts.
 - CSV uploads are extracted through OpenRouter from uploaded CSV text.
@@ -337,11 +355,13 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   `STATEMENT_LEDGER_ALLOWED_EMAILS` denies everyone rather than falling open.
 - `app/api/months/route.ts` and `app/api/months/[month]/route.ts` - month list and
   read/write/delete of one month document.
-- `app/api/categories/route.ts` - category catalog read and enabled/disabled updates.
+- `app/api/categories/route.ts` - category catalog: GET read, POST create a custom category,
+  PATCH enable/rename/re-describe (renames also cascade to stored expense rows), DELETE remove.
 - `app/api/categories/import/route.ts` - Notion category import route.
 - `app/api/extract/route.ts` - upload validation, artifact persistence, OpenRouter extraction, fallback application.
 - `app/api/notion/save/route.ts` - Notion save route.
-- `lib/categoryStore.ts` - category catalog persistence in Postgres.
+- `lib/categoryStore.ts` - category catalog persistence in Postgres, plus the create/update/
+  delete rules and `CategoryRequestError`, whose `status` the route returns verbatim.
 - `app/api/settings/route.ts` - per-user settings read/write (cash flow entries, AI notes).
 - `lib/userSettings.ts` - shared settings shape, defaults, and notes length limit;
   `lib/userSettingsStore.ts` is the Postgres side and `lib/userSettingsClientStore.ts` the

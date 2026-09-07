@@ -226,6 +226,31 @@ export async function writeStoredMonth(
   return document;
 }
 
+/**
+ * Renaming a category has to carry the rows that already use it, otherwise
+ * every historical expense silently points at a name the catalog no longer
+ * has. Callers flush pending client writes first, so this covers every month.
+ */
+export async function renameStoredExpenseCategory(
+  userId: string,
+  from: string,
+  to: string
+): Promise<number> {
+  if (!userId || !from || !to || from.toLowerCase() === to.toLowerCase()) {
+    return 0;
+  }
+
+  const rows = (await getSql()`
+    update expenses
+      set category = ${to}
+    where user_id = ${userId}
+      and lower(category) = lower(${from})
+    returning id
+  `) as Array<{ id: unknown }>;
+
+  return rows.length;
+}
+
 async function deleteStoredMonth(userId: string, month: string) {
   if (!isMonthKey(month)) {
     return;
