@@ -104,11 +104,14 @@ app, no second pool, and nothing to keep in sync.
 
 Two things must be true for local sign-in to work, and neither is inferred:
 
-- `.env.local` sets `NEXT_PUBLIC_WORKOS_REDIRECT_URI=http://localhost:3000/callback`. Without
-  it AuthKit sends an empty `redirect_uri` and WorkOS answers with its
-  `redirect-uri-invalid` error page.
-- `http://localhost:3000/callback` is registered as a redirect URI on the WorkOS environment.
-  It matches exactly - no trailing slash.
+- `.env.local` sets `NEXT_PUBLIC_WORKOS_REDIRECT_URI` to the port the server actually listens
+  on, `http://localhost:3000/callback` in the primary checkout. Without it AuthKit sends an
+  empty `redirect_uri` and WorkOS answers with its `redirect-uri-invalid` error page.
+- That exact URI is registered on the WorkOS environment. `http://localhost:3000/callback`
+  through `http://localhost:3005/callback` are registered (added 2026-09-07), so a worktree on
+  3001-3005 signs in on its own port; `bun run wt` writes the matching value into the
+  worktree's copied `.env.local`. Matches are exact - no trailing slash. A worktree above 3005
+  has no registered callback and must borrow the primary checkout's.
 
 The `workos` CLI (`bun add -g workos`) reads that config but **cannot write it**:
 `workos authkit redirect-uris set` validates under `--dry-run` and then fails with
@@ -351,8 +354,9 @@ collides on port 3000.
 
 ```bash
 bun run wt new frontend-a          # worktree + branch + env copy + install + port
-bun run wt list                    # name, branch, port, dev running, ahead/dirty
-bun run wt dev frontend-a          # next dev on that worktree's own port
+bun run wt list                    # name, branch, kind, port, dev running, ahead/dirty
+bun run wt adopt . --name harness  # make an externally created worktree runnable
+bun run wt dev frontend-a          # next dev on that worktree's own port ("." or no arg = cwd)
 bun run wt rm frontend-a [--force] [--delete-branch]
 ```
 
@@ -372,19 +376,35 @@ What `new` does, and why each step exists:
   primary checkout. `.worktree.json` is in `.gitignore` and also in `.git/info/exclude`, which
   the script writes once because `info/exclude` lives in the common git dir and therefore covers
   branches predating the `.gitignore` entry.
+- Points the copied `.env.local` at `http://localhost:<port>/callback` when that port is
+  registered with WorkOS (3001-3005). See `Sign-in` below.
 
-`wt dev` heals a worktree created before this script existed: it claims a port, copies
-`.env.local`, and installs dependencies if any are missing.
+### Worktrees created elsewhere
+
+`new` is the only command tied to `.claude/worktrees`. Everything else operates on *any* worktree
+of this repo, because the `omp` harness creates its own — `~/.omp/wt/<id>` on branch
+`wt/<stamp>`, outside the checkout — and a bare `git worktree add` is still possible. `list`
+shows those with `KIND external`, and they are addressed by directory name, by an alias recorded
+with `adopt --name`, by path, or as `.`/no argument for the worktree the caller is standing in.
+
+`adopt` and `dev` heal whatever is missing, idempotently: port claim, `.env.local` copy,
+dependency install, redirect URI. The harness already copies `.env.local` and installs, so in
+practice adopting one only claims a port (its absence means two instances can pick the same
+port) and rewrites the redirect URI.
+
+`rm` refuses an external worktree without `--force`: the directory belongs to whatever created
+it, and deleting it out from under the harness is not this script's call.
 
 Things that are shared and will bite:
 
-- **Sign-in.** WorkOS only has `http://localhost:3000/callback` registered, and that list cannot
-  be written by CLI (see `Local Sign-In (WorkOS)`). Every worktree therefore sends users to the
-  primary checkout's callback. This works because cookies are *not* port-scoped (RFC 6265 §8.5):
-  a session minted on `localhost:3000` is sent to `localhost:3001` and up, and every worktree
-  seals it with the same `WORKOS_COOKIE_PASSWORD`. Practical rule: keep a dev server on 3000
-  while signing in; after that, the worktrees are authenticated too. Verified locally by setting
-  a cookie on one localhost port and reading it back on another.
+- **Sign-in.** Registered callbacks cover `localhost:3000`-`3005` only, and that list cannot be
+  written by CLI (see `Local Sign-In (WorkOS)`). `wt` rewrites `NEXT_PUBLIC_WORKOS_REDIRECT_URI`
+  in the worktree's `.env.local` to its own port when the port is registered, so the first five
+  worktrees sign in standalone. Ports 3006-3019 fall back to the primary checkout's callback,
+  which still works because cookies are *not* port-scoped (RFC 6265 §8.5): a session minted on
+  `localhost:3000` is sent to `localhost:3001` and up, and every worktree seals it with the same
+  `WORKOS_COOKIE_PASSWORD`. Practical rule for those: keep a dev server on 3000 while signing
+  in. Verified locally by setting a cookie on one localhost port and reading it back on another.
 - **The database.** Every worktree copies one `DATABASE_URL`, so all instances read and write the
   same Neon rows as the same user. Month writes are whole-document and transactional, so two
   instances editing the same month is last-write-wins, not a merge: the second flush overwrites
@@ -394,9 +414,10 @@ Things that are shared and will bite:
 - **Upload artifacts.** `/tmp/statement-ledger/uploads/` is shared, but ids are unique per
   upload, so instances interleave without colliding.
 
-`next.config.ts` pins `turbopack.root` to the checkout's own directory. Worktrees live *inside*
-the primary checkout, so Turbopack's default upward lockfile search rooted a worktree's dev
-server at the parent repo (it logged `Detected additional lockfiles`). Do not remove that pin.
+`next.config.ts` pins `turbopack.root` to the checkout's own directory. Worktrees made by `new`
+live *inside* the primary checkout, so Turbopack's default upward lockfile search rooted a
+worktree's dev server at the parent repo (it logged `Detected additional lockfiles`). Do not
+remove that pin; external worktrees do not need it but are not harmed by it.
 
 ## Known Proven Case
 
