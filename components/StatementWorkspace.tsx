@@ -17,6 +17,9 @@ import {
   LoaderCircle,
   MessageCircle,
   NotebookPen,
+  PanelLeft,
+  Pin,
+  PinOff,
   Plug,
   Plus,
   RefreshCw,
@@ -37,6 +40,7 @@ import {
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore
 } from "react";
@@ -169,6 +173,77 @@ type PendingUpload = {
   expenses: ExpenseItem[];
   incomes: IncomeItem[];
 };
+
+/**
+ * The controls rail is hidden until the pointer reaches the left edge: it fades
+ * in from `RAIL_FADE_DISTANCE_PX` and is fully out when the cursor hits the
+ * edge itself, which a mouse lands on by running out of screen. Pinning
+ * bypasses the whole ramp.
+ */
+const RAIL_FADE_DISTANCE_PX = 20;
+const RAIL_OPEN_DISTANCE_PX = 0;
+const RAIL_PIN_STORAGE_KEY = "statement-ledger:rail-pinned";
+const RAIL_PIN_STORAGE_EVENT = "statement-ledger:rail-pinned-change";
+
+/**
+ * Cached so `getSnapshot` is cheap and stable, and so a browser that refuses
+ * localStorage still honours the pin for the session.
+ */
+let railPinnedCache: boolean | null = null;
+
+function subscribeToRailPinPreference(onStoreChange: () => void) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === RAIL_PIN_STORAGE_KEY) {
+      railPinnedCache = null;
+      onStoreChange();
+    }
+  };
+
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(RAIL_PIN_STORAGE_EVENT, onStoreChange);
+
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(RAIL_PIN_STORAGE_EVENT, onStoreChange);
+  };
+}
+
+function readRailPinPreference() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  if (railPinnedCache === null) {
+    try {
+      railPinnedCache =
+        window.localStorage.getItem(RAIL_PIN_STORAGE_KEY) === "1";
+    } catch {
+      railPinnedCache = false;
+    }
+  }
+
+  return railPinnedCache;
+}
+
+function writeRailPinPreference(value: boolean) {
+  railPinnedCache = value;
+
+  try {
+    if (value) {
+      window.localStorage.setItem(RAIL_PIN_STORAGE_KEY, "1");
+    } else {
+      window.localStorage.removeItem(RAIL_PIN_STORAGE_KEY);
+    }
+  } catch {
+    // Non-fatal: the pin just does not survive a reload.
+  }
+
+  window.dispatchEvent(new Event(RAIL_PIN_STORAGE_EVENT));
+}
 
 type ExtractionOutcome = {
   name: string;
@@ -304,6 +379,12 @@ function compareBySortKey(
 
 export function StatementWorkspace() {
   const [files, setFiles] = useState<File[]>([]);
+  const railRef = useRef<HTMLElement | null>(null);
+  const railPinned = useSyncExternalStore(
+    subscribeToRailPinPreference,
+    readRailPinPreference,
+    () => false
+  );
   // The connection lives on the server, per user. The token is never sent back
   // to the browser, so `apiKeyDraft` is only ever a new value being typed.
   const [notionConnection, setNotionConnection] =
@@ -506,6 +587,107 @@ export function StatementWorkspace() {
     monthsNotice(monthsState) ||
     (settingsError ? { tone: "error" as const, message: settingsError } : null) ||
     notice;
+
+  // Pointer proximity drives the rail directly through a CSS variable instead
+  // of React state: a mousemove-per-frame re-render of this component would be
+  // visible jank, and nothing else needs to know where the cursor is.
+  useEffect(() => {
+    const rail = railRef.current;
+
+    if (!rail || railPinned) {
+      return;
+    }
+
+    let frame = 0;
+    let pointerX = Number.POSITIVE_INFINITY;
+    // Once the rail is fully out it takes pointer events, so hover and focus
+    // hold it open even where the cursor sits past the fade distance.
+    let hovering = false;
+    let focused = false;
+
+    function apply() {
+      frame = 0;
+
+      const reveal =
+        hovering || focused
+          ? 1
+          : pointerX <= RAIL_OPEN_DISTANCE_PX
+            ? 1
+            : pointerX >= RAIL_FADE_DISTANCE_PX
+              ? 0
+              : (RAIL_FADE_DISTANCE_PX - pointerX) /
+                (RAIL_FADE_DISTANCE_PX - RAIL_OPEN_DISTANCE_PX);
+
+      const target = railRef.current;
+
+      if (!target) {
+        return;
+      }
+
+      target.style.setProperty("--rail-reveal", reveal.toFixed(3));
+      target.dataset.railOpen = reveal >= 1 ? "true" : "false";
+    }
+
+    function schedule() {
+      if (!frame) {
+        frame = window.requestAnimationFrame(apply);
+      }
+    }
+
+    function onPointerMove(event: MouseEvent) {
+      pointerX = event.clientX;
+      schedule();
+    }
+
+    function onPointerLeaveWindow() {
+      pointerX = Number.POSITIVE_INFINITY;
+      schedule();
+    }
+
+    function onRailEnter() {
+      hovering = true;
+      schedule();
+    }
+
+    function onRailLeave() {
+      hovering = false;
+      schedule();
+    }
+
+    function onRailFocusIn() {
+      focused = true;
+      schedule();
+    }
+
+    function onRailFocusOut() {
+      focused = false;
+      schedule();
+    }
+
+    window.addEventListener("mousemove", onPointerMove);
+    document.addEventListener("mouseleave", onPointerLeaveWindow);
+    rail.addEventListener("mouseenter", onRailEnter);
+    rail.addEventListener("mouseleave", onRailLeave);
+    rail.addEventListener("focusin", onRailFocusIn);
+    rail.addEventListener("focusout", onRailFocusOut);
+    apply();
+
+    return () => {
+      window.removeEventListener("mousemove", onPointerMove);
+      document.removeEventListener("mouseleave", onPointerLeaveWindow);
+      rail.removeEventListener("mouseenter", onRailEnter);
+      rail.removeEventListener("mouseleave", onRailLeave);
+      rail.removeEventListener("focusin", onRailFocusIn);
+      rail.removeEventListener("focusout", onRailFocusOut);
+
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+
+      rail.style.removeProperty("--rail-reveal");
+      delete rail.dataset.railOpen;
+    };
+  }, [railPinned]);
 
   useEffect(() => {
     let active = true;
@@ -1456,9 +1638,19 @@ export function StatementWorkspace() {
   }
 
   return (
-    <main className="app-shell">
-      <aside className="side-panel" aria-label="Statement controls">
+    <main className="app-shell" data-rail-pinned={railPinned ? "true" : "false"}>
+      <header className="app-header">
         <div className="brand-lockup">
+          <button
+            className="mini-icon-button rail-handle"
+            type="button"
+            aria-pressed={railPinned}
+            title={railPinned ? "Unpin controls" : "Pin controls open"}
+            aria-label={railPinned ? "Unpin controls" : "Pin controls open"}
+            onClick={() => writeRailPinPreference(!railPinned)}
+          >
+            <PanelLeft size={16} {...hydrationSafeIconProps} />
+          </button>
           <div className="brand-mark">SL</div>
           <div>
             <p className="eyebrow">Statement Ledger</p>
@@ -1467,14 +1659,9 @@ export function StatementWorkspace() {
           <ThemeToggle />
         </div>
 
-        <section className="panel upload-panel">
-          <div className="panel-heading">
-            <FileText size={18} {...hydrationSafeIconProps} />
-            <h2>Statement</h2>
-          </div>
-
-          <label className="file-drop" htmlFor="statement-upload">
-            <Upload size={22} {...hydrationSafeIconProps} />
+        <div className="header-upload">
+          <label className="header-file" htmlFor="statement-upload">
+            <Upload size={16} {...hydrationSafeIconProps} />
             <span>{uploadLabel}</span>
             <small>{uploadSizeLabel}</small>
           </label>
@@ -1490,9 +1677,8 @@ export function StatementWorkspace() {
               event.target.value = "";
             }}
           />
-
           <button
-            className="primary-button"
+            className="primary-button header-extract"
             type="button"
             title="Extract expenses"
             disabled={controlsDisabled}
@@ -1509,7 +1695,34 @@ export function StatementWorkspace() {
             )}
             Extract
           </button>
-        </section>
+        </div>
+      </header>
+
+      {/* Hidden by default: pointer proximity (see the rail effect above) or
+          the pin slides it over the workspace. */}
+      <aside
+        className="side-rail"
+        ref={railRef}
+        aria-label="Statement controls"
+        data-rail-pinned={railPinned ? "true" : "false"}
+      >
+        <div className="rail-top">
+          <p className="eyebrow">Controls</p>
+          <button
+            className="mini-icon-button"
+            type="button"
+            aria-pressed={railPinned}
+            title={railPinned ? "Unpin controls" : "Pin controls open"}
+            aria-label={railPinned ? "Unpin controls" : "Pin controls open"}
+            onClick={() => writeRailPinPreference(!railPinned)}
+          >
+            {railPinned ? (
+              <Pin size={16} {...hydrationSafeIconProps} />
+            ) : (
+              <PinOff size={16} {...hydrationSafeIconProps} />
+            )}
+          </button>
+        </div>
 
         <section className="panel">
           <div className="panel-heading panel-heading-split">

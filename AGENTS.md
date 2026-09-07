@@ -139,6 +139,20 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
 ## Current Behavior
 
 - `/` renders the upload/review/save workspace, scoped to one month at a time.
+- The brand lockup, theme toggle, and a simplified upload (file picker + `Extract`, top right)
+  sit in `.app-header` across the top. Every other control lives in `.side-rail`, a fixed
+  full-height overlay that is hidden by default: `StatementWorkspace` tracks the pointer and
+  writes `--rail-reveal` (0..1) plus `data-rail-open` straight onto the element, fading and
+  creeping the rail out from 20px of the left edge and landing it flush when the cursor hits
+  the edge itself (`RAIL_FADE_DISTANCE_PX` 20 / `RAIL_OPEN_DISTANCE_PX` 0 - a mouse gets there
+  by running out of screen). It is driven by DOM writes on purpose:
+  a mousemove-per-frame `setState` re-renders the whole workspace. Below full reveal the rail
+  has `pointer-events: none` so a half-faded panel never eats clicks meant for the table;
+  once open, hover and `focusin` hold it out regardless of cursor distance. The pin button at
+  the top of the rail (mirrored by the header handle, which is the only way in on touch)
+  stores `statement-ledger:rail-pinned` and switches the rail to a reserved layout lane
+  (`.app-shell[data-rail-pinned="true"]` pads left by the rail width) instead of an overlay,
+  above 980px.
 - An uploaded statement is filed into the calendar month covering most of its period,
   falling back to its row dates, and the workspace switches to that month. There is no
   save-month action; months are derived. See `specs/month-scoped-statements.md`.
@@ -202,11 +216,14 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   (payroll, interest, other deposits; never own-account transfers) alongside
   expenses, stored in the `incomes` table (`lib/migrations/005_income_rows.sql`)
   and reviewed in the Income drawer. Notion save still covers expenses only.
-  The drawer is absolutely positioned inside `.workspace`, parked off its left edge with only
-  a 32px vertical `Income` tab showing in the reserved `padding-left` lane, and slides over
-  the transaction table on hover or `:focus-within`. `overflow: hidden` on `.workspace` is
-  what hides the parked panel: remove it and the income table bleeds over the side panel.
-  Below 980px the drawer reverts to a plain stacked panel and the tab is hidden.
+  The drawer is absolutely positioned inside `.workspace`, parked off its *right* edge with
+  only a 32px vertical `Income` tab showing in the reserved `padding-right` lane, and slides
+  over the transaction table on hover or `:focus-within`. It moved to the right when the
+  controls rail took over the left edge: the rail slid over the tab before the cursor could
+  reach it. `flex-direction: row-reverse` is what keeps the tab on the inward side, and
+  `overflow: hidden` on `.workspace` is what hides the parked panel: remove it and the income
+  table bleeds outside the workspace. Below 980px the drawer reverts to a plain stacked panel
+  and the tab is hidden.
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` parses
   Amex-style `New Charges Details` tables. PDF text now comes from `unpdf` in-process, not the
   `pdftotext` binary, so it works on hosts without Poppler. `lib/pdfText.ts` reconstructs a

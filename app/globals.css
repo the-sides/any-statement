@@ -189,17 +189,95 @@ a {
 }
 
 .app-shell {
+  --rail-width: 340px;
+
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
   min-height: 100vh;
   padding: 18px;
+  transition: padding-left 0.18s ease;
 }
 
-.side-panel {
+/* Pinned, the rail is part of the layout again, so the shell yields the lane
+   it occupies instead of letting it cover the workspace. */
+.app-shell[data-rail-pinned="true"] {
+  padding-left: calc(var(--rail-width) + 18px);
+}
+
+.app-header {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 0 2px;
+}
+
+/* The rail overlays the workspace: it is fixed, full height, and driven by
+   `--rail-reveal` (0 = hidden, 1 = fully out) which the workspace component
+   sets from pointer distance to the left edge. */
+.side-rail {
+  --rail-reveal: 0;
+
+  display: flex;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 40;
+  width: min(var(--rail-width), 92vw);
+  height: 100vh;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 14px;
+  opacity: var(--rail-reveal);
+  /* Fades and creeps out together, then lands flush once reveal hits 1. */
+  transform: translateX(calc((var(--rail-reveal) - 1) * 88%));
+  transition:
+    transform 0.14s ease-out,
+    opacity 0.14s ease-out;
+  /* Untouchable until fully out, so a half-faded rail never eats clicks meant
+     for the table underneath. */
+  pointer-events: none;
+}
+
+.side-rail[data-rail-open="true"],
+.side-rail[data-rail-pinned="true"] {
+  pointer-events: auto;
+}
+
+.side-rail[data-rail-pinned="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+.rail-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rail-top .eyebrow {
+  margin: 0;
+}
+
+.side-rail[data-rail-pinned="true"] .rail-top .mini-icon-button,
+.app-shell[data-rail-pinned="true"] .rail-handle {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell,
+  .side-rail {
+    transition: none;
+  }
 }
 
 .brand-lockup {
@@ -318,38 +396,57 @@ a {
   font-size: 15px;
 }
 
-.file-drop {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 3px 10px;
+/* Simplified upload: one compact picker plus Extract, top right. */
+.header-upload {
+  display: flex;
+  min-width: 0;
   align-items: center;
-  min-height: 72px;
-  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.header-file {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 320px;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 40px;
   border: 1px dashed var(--line-strong);
-  border-radius: 8px;
+  border-radius: 6px;
   background:
     linear-gradient(90deg, var(--accent-wash), transparent),
     var(--surface);
-  padding: 14px;
+  padding: 0 12px;
   cursor: pointer;
 }
 
-.file-drop span,
-.file-drop small {
+.header-file:hover {
+  border-color: var(--accent-line);
+}
+
+.header-file svg {
+  align-self: center;
+  flex: 0 0 auto;
+}
+
+.header-file span,
+.header-file small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.file-drop span {
+.header-file span {
   font-size: 14px;
   font-weight: 800;
 }
 
-.file-drop small {
-  grid-column: 2;
+.header-file small {
+  flex: 0 0 auto;
   color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .primary-button,
@@ -372,6 +469,12 @@ a {
 
 .primary-button:hover:not(:disabled) {
   background: var(--accent-dark);
+}
+
+.header-extract {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0 16px;
 }
 
 .secondary-button {
@@ -551,7 +654,7 @@ input:focus,
 select:focus,
 textarea:focus,
 button:focus-visible,
-.file-drop:focus-within {
+.header-file:focus-within {
   outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -579,14 +682,16 @@ button:focus-visible,
   min-width: 0;
   flex-direction: column;
   gap: 12px;
-  /* The parked income drawer hangs off the left edge; clipping here is what
-     keeps it hidden, and the wide left padding is the lane its tab sits in. */
+  /* The parked income drawer hangs off the right edge; clipping here is what
+     keeps it hidden, and the wide right padding is the lane its tab sits in.
+     It lives on the right because the left edge now belongs to the controls
+     rail, which would slide over the tab before it could be reached. */
   overflow: hidden;
   border: 1px solid var(--line-mild);
   border-radius: 8px;
   background: var(--panel-glass);
   box-shadow: var(--shadow);
-  padding: 14px 14px 14px 46px;
+  padding: 14px 46px 14px 14px;
 }
 
 .workspace-top {
@@ -882,18 +987,21 @@ button:focus-visible,
   background: var(--surface-sunken);
 }
 
-/* The income table parks off the left edge of the review table, showing only
-   the tab that sits in the lane between the side panel and the transactions,
-   and slides over the transactions on hover or keyboard focus. */
+/* The income table parks off the right edge of the review table, showing only
+   the tab that sits in the lane at the right of the transactions, and slides
+   over the transactions on hover or keyboard focus. It is right-parked because
+   the left edge belongs to the proximity-revealed controls rail. */
 .income-drawer {
   position: absolute;
   top: 0;
-  left: 0;
+  right: 0;
   z-index: 6;
   display: flex;
   width: min(760px, 100%);
   align-items: flex-start;
-  transform: translateX(calc(-100% + 32px));
+  /* DOM order is panel then tab; reversing puts the tab on the inward edge. */
+  flex-direction: row-reverse;
+  transform: translateX(calc(100% - 32px));
   transition: transform 0.24s ease;
 }
 
@@ -907,7 +1015,7 @@ button:focus-visible,
   max-height: min(68vh, 620px);
   flex: 1;
   overflow: auto;
-  border-radius: 0 8px 8px 0;
+  border-radius: 8px 0 0 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
 }
@@ -920,8 +1028,8 @@ button:focus-visible,
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--line);
-  border-left: 0;
-  border-radius: 0 8px 8px 0;
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
   color: var(--muted);
@@ -1649,29 +1757,21 @@ meter {
 }
 
 @media (max-width: 980px) {
-  .app-shell {
-    grid-template-columns: 1fr;
-  }
-
-  .side-panel {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .brand-lockup,
-  .statement-card {
-    grid-column: 1 / -1;
+  /* Too narrow to give up a lane, so a pinned rail keeps overlaying. */
+  .app-shell[data-rail-pinned="true"] {
+    padding-left: 18px;
   }
 
   /* Stacked layout has no gutter to hide in, so the drawer becomes a plain
      panel again and the tab lane is no longer needed. */
   .workspace {
-    padding-left: 14px;
+    padding-right: 14px;
   }
 
   .income-drawer {
     position: static;
     width: auto;
+    flex-direction: row;
     transform: none;
   }
 
@@ -1690,7 +1790,20 @@ meter {
     padding: 10px;
   }
 
-  .side-panel,
+  .app-shell[data-rail-pinned="true"] {
+    padding-left: 10px;
+  }
+
+  .app-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .header-file {
+    max-width: none;
+    flex: 1;
+  }
+
   .workspace-top,
   .stats-strip {
     display: flex;
