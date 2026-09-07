@@ -109,5 +109,19 @@ export function normalizeExtraction(
     };
   });
 
-  return { statement, expenses };
+  // Balance movements are not spending. Card payments settle charges that are
+  // already itemized on the card statement, and bank transfers only move money
+  // between the user's own accounts. The prompts ask the model to skip these
+  // rows; this filter is the backstop when it returns them anyway.
+  const excludedSections: ReadonlySet<ExpenseItem["statementSection"]> =
+    statement.statementType === "bank"
+      ? new Set(["payment", "transfer", "deposit"])
+      : statement.statementType === "credit_card"
+        ? new Set(["payment"])
+        : new Set();
+  const filteredExpenses = expenses.filter(
+    (expense) => !excludedSections.has(expense.statementSection)
+  );
+
+  return { statement, expenses: filteredExpenses };
 }
