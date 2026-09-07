@@ -40,6 +40,8 @@ OpenRouter is the only shared credential; Notion is per-user.
 - When verifying the UI locally on this machine, Playwright Chrome may be missing. System Chromium is available at `/usr/bin/chromium`.
 - Localhost and browser commands may need escalation because the sandbox can block server binds and host networking.
 - Vercel commands here run against the personal account, which is now the CLI default. See `Vercel Account`.
+- To work on several branches at once, use `bun run wt` (`scripts/worktree.ts`), not a bare
+  `git worktree add`. See `Parallel Worktrees` for what is isolated and what is shared.
 
 ## Vercel Account
 
@@ -323,6 +325,62 @@ Summarize replay output:
 ```bash
 jq '{rows: (.extraction.expenses | length), total: (.extraction.expenses | map(.amount) | add), artifact: .artifact.dir}' /tmp/statement-ledger-route-replay.json
 ```
+
+## Parallel Worktrees
+
+Three or more instances of this app can run at once, one per git worktree. `scripts/worktree.ts`
+(`bun run wt`) owns the paradigm; do not hand-roll `git worktree add`, because a bare worktree
+cannot run the app: `.env.local` and `node_modules` are untracked, and a second `next dev` just
+collides on port 3000.
+
+```bash
+bun run wt new frontend-a          # worktree + branch + env copy + install + port
+bun run wt list                    # name, branch, port, dev running, ahead/dirty
+bun run wt dev frontend-a          # next dev on that worktree's own port
+bun run wt rm frontend-a [--force] [--delete-branch]
+```
+
+What `new` does, and why each step exists:
+
+- Creates `.claude/worktrees/<name>` on branch `worktree-<name>` (the layout the first two
+  worktrees already used). `.claude/**` is ignored by git, by `eslint.config.mjs`, by tsconfig
+  globs (which skip dot directories), and by `bun test` (same reason), so nested checkouts never
+  double-count tests or lint errors in the primary checkout.
+- **Copies** `.env.local` rather than symlinking it. A symlink would let `vercel env pull` inside
+  a worktree rewrite the primary checkout's secrets — see `Vercel Env Pull Hazard`. The copy is a
+  snapshot: add a variable to the primary `.env.local` and existing worktrees keep the old file.
+- Runs `bun install` (~2s; Bun hardlinks from its global cache, so per-worktree `node_modules` is
+  cheap and correct — do not share one across checkouts).
+- Claims the first free port in 3001-3019 and records it in `.worktree.json`, so `list`/`dev` are
+  deterministic and two worktrees never pick the same port. Port 3000 stays reserved for the
+  primary checkout. `.worktree.json` is in `.gitignore` and also in `.git/info/exclude`, which
+  the script writes once because `info/exclude` lives in the common git dir and therefore covers
+  branches predating the `.gitignore` entry.
+
+`wt dev` heals a worktree created before this script existed: it claims a port, copies
+`.env.local`, and installs dependencies if any are missing.
+
+Things that are shared and will bite:
+
+- **Sign-in.** WorkOS only has `http://localhost:3000/callback` registered, and that list cannot
+  be written by CLI (see `Local Sign-In (WorkOS)`). Every worktree therefore sends users to the
+  primary checkout's callback. This works because cookies are *not* port-scoped (RFC 6265 §8.5):
+  a session minted on `localhost:3000` is sent to `localhost:3001` and up, and every worktree
+  seals it with the same `WORKOS_COOKIE_PASSWORD`. Practical rule: keep a dev server on 3000
+  while signing in; after that, the worktrees are authenticated too. Verified locally by setting
+  a cookie on one localhost port and reading it back on another.
+- **The database.** Every worktree copies one `DATABASE_URL`, so all instances read and write the
+  same Neon rows as the same user. Month writes are whole-document and transactional, so two
+  instances editing the same month is last-write-wins, not a merge: the second flush overwrites
+  the first instance's rows. Frontend-only work in parallel is safe; put schema or store changes
+  in one worktree at a time, and remember `bun run scripts/migrate.ts` migrates the shared
+  database for all of them at once.
+- **Upload artifacts.** `/tmp/statement-ledger/uploads/` is shared, but ids are unique per
+  upload, so instances interleave without colliding.
+
+`next.config.ts` pins `turbopack.root` to the checkout's own directory. Worktrees live *inside*
+the primary checkout, so Turbopack's default upward lockfile search rooted a worktree's dev
+server at the parent repo (it logged `Detected additional lockfiles`). Do not remove that pin.
 
 ## Known Proven Case
 

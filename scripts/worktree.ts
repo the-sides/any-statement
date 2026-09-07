@@ -16,7 +16,14 @@
  * `.claude/worktrees/<name>` on branch `worktree-<name>`. `.claude/**` is
  * ignored by git, eslint, and tsconfig globs, and `bun test` skips dot
  * directories, so nested checkouts never leak into the main repo's tooling.
+ *
+ * Node APIs only, deliberately: the repo has `@types/node` but no `@types/bun`
+ * (see `types/bun-test.d.ts`), so `Bun.*` here would fail `bun run typecheck`.
  */
+
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:net";
+import { access, copyFile, readFile, writeFile } from "node:fs/promises";
 
 const WORKTREE_SUBDIR = ".claude/worktrees";
 const BRANCH_PREFIX = "worktree-";
@@ -36,12 +43,18 @@ type Meta = {
 type Run = { code: number; stdout: string; stderr: string };
 
 function run(cmd: string[], cwd?: string): Run {
-  const result = Bun.spawnSync(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
+  const [command, ...args] = cmd;
+  const result = spawnSync(command, args, { cwd, encoding: "utf8" });
   return {
-    code: result.exitCode ?? 1,
-    stdout: result.stdout.toString().trim(),
-    stderr: result.stderr.toString().trim()
+    code: result.status ?? 1,
+    stdout: (result.stdout ?? "").trim(),
+    stderr: (result.stderr ?? "").trim()
   };
+}
+
+function fail(message: string): never {
+  console.error(`worktree: ${message}`);
+  process.exit(1);
 }
 
 function git(args: string[], cwd?: string): string {
@@ -52,9 +65,13 @@ function git(args: string[], cwd?: string): string {
   return result.stdout;
 }
 
-function fail(message: string): never {
-  console.error(`worktree: ${message}`);
-  process.exit(1);
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -75,21 +92,19 @@ function assertName(name: string | undefined): string {
   return name;
 }
 
-function isPortFree(port: number): boolean {
-  try {
-    const server = Bun.serve({ port, hostname: "127.0.0.1", fetch: () => new Response("") });
-    server.stop(true);
-    return true;
-  } catch {
-    return false;
-  }
+/** A bind probe, not a connect probe: it also rejects ports held by a listener that never answers. */
+function isPortFree(port: number): Promise<boolean> {
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  const server = createServer();
+  server.once("error", () => resolve(false));
+  server.once("listening", () => server.close(() => resolve(true)));
+  server.listen(port, "127.0.0.1");
+  return promise;
 }
 
 async function readMeta(dir: string): Promise<Meta | null> {
-  const file = Bun.file(`${dir}/${META_FILE}`);
-  if (!(await file.exists())) return null;
   try {
-    return (await file.json()) as Meta;
+    return JSON.parse(await readFile(`${dir}/${META_FILE}`, "utf8")) as Meta;
   } catch {
     return null;
   }
@@ -98,26 +113,25 @@ async function readMeta(dir: string): Promise<Meta | null> {
 type Entry = { name: string; dir: string; branch: string; meta: Meta | null };
 
 async function listWorktrees(root: string): Promise<Entry[]> {
-  const porcelain = git(["worktree", "list", "--porcelain"], root);
+  const prefix = `${root}/${WORKTREE_SUBDIR}/`;
   const entries: Entry[] = [];
   let dir = "";
   let branch = "";
 
   const flush = async () => {
-    if (!dir) return;
-    if (dir.startsWith(`${root}/${WORKTREE_SUBDIR}/`)) {
-      const name = dir.slice(`${root}/${WORKTREE_SUBDIR}/`.length);
+    if (dir.startsWith(prefix)) {
+      const name = dir.slice(prefix.length);
       entries.push({ name, dir, branch, meta: await readMeta(dir) });
     }
     dir = "";
     branch = "";
   };
 
-  for (const line of porcelain.split("\n")) {
+  for (const line of git(["worktree", "list", "--porcelain"], root).split("\n")) {
     if (line.startsWith("worktree ")) {
       await flush();
       dir = line.slice("worktree ".length);
-    } else if (line.startsWith("branch ")) {
+    } else if (line.startsWith("branch refs/heads/")) {
       branch = line.slice("branch refs/heads/".length);
     } else if (line === "detached") {
       branch = "(detached)";
@@ -128,67 +142,90 @@ async function listWorktrees(root: string): Promise<Entry[]> {
 }
 
 async function pickPort(root: string, requested?: number): Promise<number> {
-  const claimed = new Set<number>(
-    (await listWorktrees(root)).map((entry) => entry.meta?.port).filter((port): port is number => !!port)
+  const claimed = new Set(
+    (await listWorktrees(root)).map((entry) => entry.meta?.port).filter((port) => port !== undefined)
   );
 
-  if (requested) {
+  if (requested !== undefined) {
+    if (!Number.isInteger(requested)) fail(`--port ${requested} is not a port number`);
     if (claimed.has(requested)) fail(`port ${requested} is already claimed by another worktree`);
-    if (!isPortFree(requested)) fail(`port ${requested} is already in use`);
+    if (!(await isPortFree(requested))) fail(`port ${requested} is already in use`);
     return requested;
   }
 
   for (let port = PORT_MIN; port <= PORT_MAX; port += 1) {
-    if (!claimed.has(port) && isPortFree(port)) return port;
+    if (!claimed.has(port) && (await isPortFree(port))) return port;
   }
   return fail(`no free port in ${PORT_MIN}-${PORT_MAX}; remove a stale worktree first`);
+}
+
+function flagValue(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) fail(`${flag} needs a value`);
+  return value;
+}
+
+async function install(dir: string): Promise<void> {
+  const installed = run(["bun", "install"], dir);
+  if (installed.code !== 0) fail(`bun install failed in ${dir}:\n${installed.stderr}`);
+}
+
+/**
+ * `.gitignore` only covers branches that contain the entry, so on an older
+ * branch the generated `.worktree.json` reads as an uncommitted change and
+ * blocks `wt rm`. `info/exclude` lives in the common git dir and therefore
+ * applies to every worktree regardless of which commit it has checked out.
+ */
+async function ensureExcluded(root: string): Promise<void> {
+  const path = `${git(["rev-parse", "--path-format=absolute", "--git-common-dir"], root)}/info/exclude`;
+  let current = "";
+  try {
+    current = await readFile(path, "utf8");
+  } catch {
+    // No exclude file yet; write one.
+  }
+  if (current.split("\n").includes(META_FILE)) return;
+  await writeFile(path, `${current}${current.endsWith("\n") || !current ? "" : "\n"}${META_FILE}\n`);
 }
 
 async function cmdNew(args: string[]): Promise<void> {
   const name = assertName(args[0]);
   const base = flagValue(args, "--base") ?? "main";
   const portFlag = flagValue(args, "--port");
-  const install = !args.includes("--no-install");
   const root = mainCheckout();
   const dir = `${root}/${WORKTREE_SUBDIR}/${name}`;
   const branch = `${BRANCH_PREFIX}${name}`;
 
-  if (await Bun.file(`${dir}/package.json`).exists()) {
+  if (await exists(`${dir}/package.json`)) {
     fail(`${dir} already exists; use \`bun run wt rm ${name}\` first`);
   }
-
-  const env = Bun.file(`${root}/${ENV_FILE}`);
-  if (!(await env.exists())) {
+  if (!(await exists(`${root}/${ENV_FILE}`))) {
     fail(`${root}/${ENV_FILE} is missing; a worktree cannot run without it`);
   }
 
-  const port = await pickPort(root, portFlag ? Number(portFlag) : undefined);
+  const port = await pickPort(root, portFlag === undefined ? undefined : Number(portFlag));
   const branchExists = run(["git", "show-ref", "--verify", "--quiet", `refs/heads/${branch}`], root).code === 0;
 
-  git(
-    branchExists
-      ? ["worktree", "add", dir, branch]
-      : ["worktree", "add", "-b", branch, dir, base],
-    root
-  );
+  git(branchExists ? ["worktree", "add", dir, branch] : ["worktree", "add", "-b", branch, dir, base], root);
 
   // Copy rather than symlink: `vercel env pull` inside a worktree would
   // otherwise rewrite the primary checkout's secrets through the link.
-  await Bun.write(`${dir}/${ENV_FILE}`, env);
+  await copyFile(`${root}/${ENV_FILE}`, `${dir}/${ENV_FILE}`);
 
   const meta: Meta = { name, branch, port, base, createdAt: new Date().toISOString() };
-  await Bun.write(`${dir}/${META_FILE}`, `${JSON.stringify(meta, null, 2)}\n`);
+  await writeFile(`${dir}/${META_FILE}`, `${JSON.stringify(meta, null, 2)}\n`);
+  await ensureExcluded(root);
 
-  if (install) {
-    const installed = run(["bun", "install"], dir);
-    if (installed.code !== 0) fail(`bun install failed in ${dir}:\n${installed.stderr}`);
-  }
+  const skipInstall = args.includes("--no-install");
+  if (!skipInstall) await install(dir);
 
   console.log(`worktree ${name}`);
   console.log(`  dir     ${dir}`);
   console.log(`  branch  ${branch}${branchExists ? " (existing)" : ` (new, from ${base})`}`);
   console.log(`  port    ${port}`);
-  console.log(`  deps    ${install ? "installed" : "skipped (--no-install)"}`);
+  console.log(`  deps    ${skipInstall ? "skipped (--no-install)" : "installed"}`);
   console.log("");
   console.log(`  bun run wt dev ${name}      # http://localhost:${port}`);
   console.log("");
@@ -208,53 +245,84 @@ async function cmdList(): Promise<void> {
     return;
   }
 
-  const rows = entries.map((entry) => {
-    const dirty = git(["status", "--porcelain"], entry.dir).length > 0;
-    const ahead = git(["rev-list", "--count", `main..${entry.branch}`], root);
-    const port = entry.meta?.port;
-    const serving = port ? !isPortFree(port) : false;
-    return {
-      name: entry.name,
-      branch: entry.branch,
-      port: port ? String(port) : "-",
-      dev: serving ? "running" : "stopped",
-      state: `${ahead === "0" ? "0 ahead" : `${ahead} ahead`}${dirty ? ", dirty" : ""}`
-    };
-  });
-
-  const width = (key: keyof (typeof rows)[number], header: string) =>
-    Math.max(header.length, ...rows.map((row) => row[key].length));
-  const widths = {
-    name: width("name", "NAME"),
-    branch: width("branch", "BRANCH"),
-    port: width("port", "PORT"),
-    dev: width("dev", "DEV")
-  };
-
-  console.log(
-    `${"NAME".padEnd(widths.name)}  ${"BRANCH".padEnd(widths.branch)}  ${"PORT".padEnd(widths.port)}  ${"DEV".padEnd(widths.dev)}  STATE`
+  const rows = await Promise.all(
+    entries.map(async (entry) => {
+      const ahead = git(["rev-list", "--count", `main..${entry.branch}`], root);
+      const dirty = git(["status", "--porcelain"], entry.dir).length > 0;
+      const port = entry.meta?.port;
+      return {
+        name: entry.name,
+        branch: entry.branch,
+        port: port === undefined ? "-" : String(port),
+        dev: port !== undefined && !(await isPortFree(port)) ? "running" : "stopped",
+        state: `${ahead} ahead${dirty ? ", dirty" : ""}`
+      };
+    })
   );
-  for (const row of rows) {
-    console.log(
-      `${row.name.padEnd(widths.name)}  ${row.branch.padEnd(widths.branch)}  ${row.port.padEnd(widths.port)}  ${row.dev.padEnd(widths.dev)}  ${row.state}`
-    );
-  }
+
+  const columns: { key: keyof (typeof rows)[number]; header: string }[] = [
+    { key: "name", header: "NAME" },
+    { key: "branch", header: "BRANCH" },
+    { key: "port", header: "PORT" },
+    { key: "dev", header: "DEV" },
+    { key: "state", header: "STATE" }
+  ];
+  const widths = columns.map(({ key, header }) =>
+    Math.max(header.length, ...rows.map((row) => row[key].length))
+  );
+  const line = (cells: string[]) =>
+    cells.map((cell, index) => cell.padEnd(widths[index])).join("  ").trimEnd();
+
+  console.log(line(columns.map(({ header }) => header)));
+  for (const row of rows) console.log(line(columns.map(({ key }) => row[key])));
 }
 
 async function cmdDev(args: string[]): Promise<void> {
   const name = assertName(args[0]);
   const root = mainCheckout();
   const dir = `${root}/${WORKTREE_SUBDIR}/${name}`;
-  const meta = await readMeta(dir);
-  if (!meta) fail(`no worktree "${name}" (or it has no ${META_FILE}); run \`bun run wt list\``);
-  if (!isPortFree(meta.port)) fail(`port ${meta.port} is already in use; ${name} may already be running`);
+  if (!(await exists(`${dir}/package.json`))) fail(`no worktree "${name}"; run \`bun run wt list\``);
+
+  // Worktrees created by hand (before this script existed) carry no port, no
+  // env file, and no dependencies. Heal them in place rather than making the
+  // user delete and recreate the checkout they are working in.
+  let meta = await readMeta(dir);
+  if (!meta) {
+    meta = {
+      name,
+      branch: git(["rev-parse", "--abbrev-ref", "HEAD"], dir),
+      port: await pickPort(root),
+      base: "unknown",
+      createdAt: new Date().toISOString()
+    };
+    await writeFile(`${dir}/${META_FILE}`, `${JSON.stringify(meta, null, 2)}\n`);
+    await ensureExcluded(root);
+    console.log(`claimed port ${meta.port} for pre-existing worktree ${name}`);
+  }
+
+  if (!(await exists(`${dir}/${ENV_FILE}`))) {
+    if (!(await exists(`${root}/${ENV_FILE}`))) {
+      fail(`${root}/${ENV_FILE} is missing; cannot run a worktree without it`);
+    }
+    await copyFile(`${root}/${ENV_FILE}`, `${dir}/${ENV_FILE}`);
+    console.log(`copied ${ENV_FILE} into ${name}`);
+  }
+
+  if (!(await exists(`${dir}/node_modules/next/package.json`))) {
+    console.log(`installing dependencies in ${name}`);
+    await install(dir);
+  }
+
+  if (!(await isPortFree(meta.port))) {
+    fail(`port ${meta.port} is already in use; ${name} may already be running`);
+  }
 
   console.log(`${name} -> http://localhost:${meta.port}`);
-  const child = Bun.spawn(
-    ["bun", "run", "dev", "--hostname", "127.0.0.1", "--port", String(meta.port)],
-    { cwd: dir, stdio: ["inherit", "inherit", "inherit"] }
-  );
-  process.exit(await child.exited);
+  const child = spawn("bun", ["run", "dev", "--hostname", "127.0.0.1", "--port", String(meta.port)], {
+    cwd: dir,
+    stdio: "inherit"
+  });
+  child.on("exit", (code) => process.exit(code ?? 0));
 }
 
 async function cmdRm(args: string[]): Promise<void> {
@@ -262,31 +330,23 @@ async function cmdRm(args: string[]): Promise<void> {
   const force = args.includes("--force");
   const deleteBranch = args.includes("--delete-branch");
   const root = mainCheckout();
-  const dir = `${root}/${WORKTREE_SUBDIR}/${name}`;
   const entry = (await listWorktrees(root)).find((candidate) => candidate.name === name);
   if (!entry) fail(`no worktree "${name}"; run \`bun run wt list\``);
 
   if (!force) {
-    const dirty = git(["status", "--porcelain"], dir);
-    if (dirty) fail(`${name} has uncommitted changes; commit them or pass --force`);
+    if (git(["status", "--porcelain"], entry.dir)) {
+      fail(`${name} has uncommitted changes; commit them or pass --force`);
+    }
     const unmerged = git(["rev-list", "--count", `main..${entry.branch}`], root);
     if (unmerged !== "0") {
       fail(`${entry.branch} has ${unmerged} commit(s) not in main; merge them or pass --force`);
     }
   }
 
-  git(["worktree", "remove", ...(force ? ["--force"] : []), dir], root);
+  git(["worktree", "remove", ...(force ? ["--force"] : []), entry.dir], root);
   git(["worktree", "prune"], root);
   if (deleteBranch) git(["branch", force ? "-D" : "-d", entry.branch], root);
   console.log(`removed ${name}${deleteBranch ? ` and branch ${entry.branch}` : ""}`);
-}
-
-function flagValue(args: string[], flag: string): string | undefined {
-  const index = args.indexOf(flag);
-  if (index === -1) return undefined;
-  const value = args[index + 1];
-  if (!value || value.startsWith("--")) fail(`${flag} needs a value`);
-  return value;
 }
 
 const [command, ...rest] = process.argv.slice(2);

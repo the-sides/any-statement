@@ -192,6 +192,32 @@ Files may include:
 
 For the reproduced American Express statement bug, the fallback parser found 41 rows totaling `$2,614.97`, matching the statement's `Total New Charges`.
 
+## Parallel Instances (Worktrees)
+
+Several copies of the app can run side by side, one per git worktree — useful when three
+frontend changes are in flight at once.
+
+```bash
+bun run wt new frontend-a     # create worktree + branch, copy .env.local, install, claim a port
+bun run wt dev frontend-a     # next dev on that worktree's own port (3001+)
+bun run wt list               # NAME BRANCH PORT DEV STATE
+bun run wt rm frontend-a --delete-branch
+```
+
+Each worktree lives at `.claude/worktrees/<name>` on branch `worktree-<name>`, with its own
+`node_modules`, its own `.next`, and its own port recorded in `.worktree.json`. Port 3000 is
+reserved for this checkout. `rm` refuses to discard uncommitted changes or commits that are not
+in `main` unless you pass `--force`.
+
+Two things are shared on purpose:
+
+- **Sign-in** always calls back to `http://localhost:3000/callback`, the only redirect URI
+  registered with WorkOS. Cookies are not port-scoped, so signing in against the primary
+  checkout on 3000 authenticates every worktree too. Keep 3000 running while you sign in.
+- **The database.** All instances share `DATABASE_URL` and the same user's rows. Month saves
+  write the whole month, so two instances editing the same month is last-write-wins. Keep
+  schema and store changes to one worktree at a time.
+
 ## Verification
 
 Run before committing:
