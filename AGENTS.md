@@ -171,6 +171,14 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
 - Reviewer categorization notes are stored per user in `user_settings`, submitted with
   `/api/extract`, and included in OpenRouter prompt/debug artifacts.
 - CSV uploads are extracted through OpenRouter from uploaded CSV text.
+- Payment rows and `AUTO PAYMENT REVERSAL` rows are excluded by the extraction
+  prompts. A reversal is not new spending: its charges were already ledgered as
+  expenses in the month they posted, so counting it again would double-count.
+- Expenses carry `reimbursedAmount` (default 0; net = amount − reimbursedAmount,
+  derived, never stored — partial reimbursements are just a smaller value). The
+  review table edits it per row, shows `net $X` under the gross amount plus a
+  Net stat, and the Notion save writes a `Reimbursed` number property
+  (`lib/migrations/004_expense_reimbursements.sql`).
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` parses
   Amex-style `New Charges Details` tables. PDF text now comes from `unpdf` in-process, not the
   `pdftotext` binary, so it works on hosts without Poppler. `lib/pdfText.ts` reconstructs a

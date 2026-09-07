@@ -94,6 +94,7 @@ export function normalizeExtraction(
       description: asString(item.description),
       merchant: asString(item.merchant),
       amount: Math.abs(asNumber(item.amount, 0)),
+      reimbursedAmount: asNumber(item.reimbursedAmount, 0),
       currency: asString(item.currency, statement.currency).toUpperCase(),
       category: coerceCategoryName(item.category, categoryNames),
       subcategory: asString(item.subcategory),

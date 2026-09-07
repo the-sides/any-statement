@@ -19,7 +19,7 @@ const extractionPromptBase = `Extract business expenses from the provided credit
 
 Do not stop after statement metadata. Read every page and identify the transaction detail tables.
 
-For credit card statements, return every purchase, fee, interest charge, cash advance, and balance transfer as an expense row, regardless of whether the statement prints charges as positive or negative values. Exclude card payments, credits, refunds, rewards, and balance summary lines.
+For credit card statements, return every purchase, fee, interest charge, cash advance, and balance transfer as an expense row, regardless of whether the statement prints charges as positive or negative values. Exclude card payments, payment reversals, credits, refunds, rewards, and balance summary lines.
 
 For bank statements, return withdrawals, debit-card purchases, checks, outgoing ACH, outgoing wires, fees, interest charges, and other outflows as expense rows. Exclude deposits, incoming transfers, credits, rewards, and balance summary lines.
 
@@ -324,7 +324,7 @@ function buildCsvExtractionPrompt(
 
 The statement content below is CSV text from ${options.fileName}. Treat this CSV as the source of truth for transaction rows.
 
-CSV exports vary by institution. Use columns named like Date, Posted Date, Description, Merchant, Amount, Debit, Credit, Type, Category, Account, Card, Currency, or Balance when present. For credit-card CSVs, purchases and fees may appear as positive or negative values; return expenses as positive amounts. For bank CSVs, return outgoing debits, withdrawals, fees, checks, wires, ACH, and card purchases. Exclude payments, credits, deposits, refunds, rewards, and balance-only rows.
+CSV exports vary by institution. Use columns named like Date, Posted Date, Description, Merchant, Amount, Debit, Credit, Type, Category, Account, Card, Currency, or Balance when present. For credit-card CSVs, purchases and fees may appear as positive or negative values; return expenses as positive amounts. For bank CSVs, return outgoing debits, withdrawals, fees, checks, wires, ACH, and card purchases. Exclude payments, payment reversals, credits, deposits, refunds, rewards, and balance-only rows.
 
 If statement metadata is not explicit in the CSV, infer what you can from headers, file name, and account columns. Use empty strings or null values for metadata that is not present.
 

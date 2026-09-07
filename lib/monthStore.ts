@@ -41,6 +41,7 @@ type ExpenseRow = {
   description: unknown;
   merchant: unknown;
   amount: unknown;
+  reimbursed_amount: unknown;
   currency: unknown;
   category: unknown;
   subcategory: unknown;
@@ -163,14 +164,14 @@ export async function writeStoredMonth(
       sql`
         insert into expenses (
           user_id, month, id, position, statement_id, selected, date, posted_date,
-          description, merchant, amount, currency, category, subcategory,
-          payment_method, statement_section, confidence, notes
+          description, merchant, amount, reimbursed_amount, currency, category,
+          subcategory, payment_method, statement_section, confidence, notes
         ) values (
           ${userId}, ${month}, ${expense.id}, ${position}, ${expense.statementId || ""},
           ${selected.has(expense.id)}, ${expense.date}, ${expense.postedDate},
           ${expense.description}, ${expense.merchant}, ${expense.amount},
-          ${expense.currency}, ${expense.category}, ${expense.subcategory},
-          ${expense.paymentMethod}, ${expense.statementSection},
+          ${expense.reimbursedAmount}, ${expense.currency}, ${expense.category},
+          ${expense.subcategory}, ${expense.paymentMethod}, ${expense.statementSection},
           ${expense.confidence}, ${expense.notes}
         )
       `
@@ -254,6 +255,7 @@ function toExpenseItem(row: ExpenseRow) {
     description: toText(row.description),
     merchant: toText(row.merchant),
     amount: toNumber(row.amount),
+    reimbursedAmount: toNumber(row.reimbursed_amount),
     currency: toText(row.currency),
     category: toText(row.category),
     subcategory: toText(row.subcategory),

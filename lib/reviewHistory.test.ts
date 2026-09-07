@@ -15,6 +15,7 @@ const expense: ExpenseItem = {
   description: "ADOBE CREATIVE CLOUD",
   merchant: "Adobe",
   amount: 32.5,
+  reimbursedAmount: 0,
   currency: "USD",
   category: "Other",
   subcategory: "",

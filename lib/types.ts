@@ -25,6 +25,7 @@ export type ExpenseItem = {
   description: string;
   merchant: string;
   amount: number;
+  reimbursedAmount: number;
   currency: string;
   category: ExpenseCategory;
   subcategory: string;

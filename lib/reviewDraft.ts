@@ -359,6 +359,7 @@ function parseExpense(
       description: asString(record.description),
       merchant: asString(record.merchant),
       amount: parseNumber(record.amount) ?? Number.NaN,
+      reimbursedAmount: parseNumber(record.reimbursedAmount) ?? 0,
       currency: asString(record.currency, "USD"),
       category: asString(record.category),
       subcategory: asString(record.subcategory),

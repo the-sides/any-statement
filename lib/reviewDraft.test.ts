@@ -27,6 +27,7 @@ const extraction: StatementExtraction = {
       description: "FOOD CITY #711 CHATTANOOGA TN",
       merchant: "Food City #711",
       amount: 10,
+      reimbursedAmount: 0,
       currency: "USD",
       category: "Food",
       subcategory: "Grocery",
@@ -86,5 +87,23 @@ describe("review draft persistence", () => {
     expect(parsed?.expenses.length).toBe(0);
     expect(parsed?.selectedIds.length).toBe(0);
     expect(parsed?.activeStatementId).toBe("");
+  });
+
+  test("defaults reimbursed amounts on drafts saved before the field existed", () => {
+    const legacyExpense = {
+      ...extraction.expenses[0]
+    } as Record<string, unknown>;
+
+    delete legacyExpense.reimbursedAmount;
+
+    const parsed = parseReviewDraft({
+      version: 2,
+      statements: [],
+      expenses: [legacyExpense],
+      selectedIds: [],
+      activeStatementId: ""
+    });
+
+    expect(parsed?.expenses[0].reimbursedAmount).toBe(0);
   });
 });

@@ -20,6 +20,7 @@ const EXPENSE_SCHEMA = {
   Name: { id: "title", name: "Name", type: "title" },
   Date: { id: "date", name: "Date", type: "date" },
   Amount: { id: "amount", name: "Amount", type: "number" },
+  Reimbursed: { id: "reimbursed", name: "Reimbursed", type: "number" },
   Merchant: { id: "merchant", name: "Merchant", type: "rich_text" },
   Description: { id: "desc", name: "Description", type: "rich_text" },
   Subcategory: { id: "subcat", name: "Subcategory", type: "rich_text" },
@@ -216,6 +217,15 @@ describe("saveExpensesToNotion", () => {
       )
     ).toBe(true);
   });
+
+  test("writes reimbursed amounts when the property exists", async () => {
+    await save({
+      statement: STATEMENT,
+      expenses: [expenseItem({ reimbursedAmount: 25 })]
+    });
+
+    expect(createdPages[0].properties.Reimbursed).toEqual({ number: 25 });
+  });
 });
 
 function expenseItem(overrides: Partial<ExpenseItem> = {}): ExpenseItem {
@@ -226,6 +236,7 @@ function expenseItem(overrides: Partial<ExpenseItem> = {}): ExpenseItem {
     description: "Hulu Plus streaming subscription",
     merchant: "Hulu",
     amount: 51.44,
+    reimbursedAmount: 0,
     currency: "USD",
     category: "Subscription",
     subcategory: "",

@@ -227,6 +227,7 @@ const hydrationSafeIconProps = {
 type SortKey =
   | "statement"
   | "amount"
+  | "reimbursed"
   | "merchant"
   | "description"
   | "category"
@@ -238,6 +239,7 @@ type SortState = { key: SortKey; dir: "asc" | "desc" };
 const TABLE_SORT_COLUMNS: { key: SortKey; label: string }[] = [
   { key: "statement", label: "Statement" },
   { key: "amount", label: "Amount" },
+  { key: "reimbursed", label: "Reimbursed" },
   { key: "merchant", label: "Merchant" },
   { key: "description", label: "Description" },
   { key: "category", label: "Category" },
@@ -257,6 +259,8 @@ function sortKeyValue(
       );
     case "amount":
       return item.amount;
+    case "reimbursed":
+      return item.reimbursedAmount;
     case "merchant":
       return item.merchant;
     case "description":
@@ -432,6 +436,10 @@ export function StatementWorkspace() {
     (entry) => entry.kind === "output"
   );
   const totalAmount = selectedItems.reduce((sum, item) => sum + item.amount, 0);
+  const totalNetAmount = selectedItems.reduce(
+    (sum, item) => sum + item.amount - item.reimbursedAmount,
+    0
+  );
   const currency =
     activeStatementSummary.currency || items[0]?.currency || "USD";
   const allVisibleSelected =
@@ -1332,6 +1340,7 @@ export function StatementWorkspace() {
       description: "",
       merchant: "",
       amount: 0,
+      reimbursedAmount: 0,
       currency,
       category: getDefaultCategoryName(enabledCategoryNames),
       subcategory: "",
@@ -1960,6 +1969,10 @@ export function StatementWorkspace() {
             <Stat label="Statements" value={String(statements.length)} />
             <Stat label="Selected" value={String(selectedItems.length)} />
             <Stat label="Amount" value={formatCurrency(totalAmount, currency)} />
+            <Stat
+              label="Net"
+              value={formatCurrency(totalNetAmount, currency)}
+            />
           </div>
         </div>
 
@@ -2459,7 +2472,7 @@ export function StatementWorkspace() {
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={10}>
                     <div className="empty-state">
                       {monthsLoading
                         ? "Loading this month..."
@@ -2472,7 +2485,7 @@ export function StatementWorkspace() {
               ) : null}
               {items.length > 0 && visibleItems.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={10}>
                     <div className="empty-state">
                       No rows match the active category filter.
                     </div>
@@ -2510,6 +2523,29 @@ export function StatementWorkspace() {
                       onChange={(event) =>
                         updateItem(item.id, {
                           amount: Number(event.target.value)
+                        })
+                      }
+                    />
+                    {item.reimbursedAmount > 0 ? (
+                      <span className="net-amount">
+                        net{" "}
+                        {formatCurrency(
+                          item.amount - item.reimbursedAmount,
+                          currency
+                        )}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td>
+                    <input
+                      className="amount-input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.reimbursedAmount}
+                      onChange={(event) =>
+                        updateItem(item.id, {
+                          reimbursedAmount: Number(event.target.value)
                         })
                       }
                     />

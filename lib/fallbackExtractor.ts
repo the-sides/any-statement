@@ -105,6 +105,7 @@ function parseChargeLine(
     description: rawDescription.trim(),
     merchant,
     amount,
+    reimbursedAmount: 0,
     currency: statement.currency || "USD",
     category: category.category,
     subcategory: "",

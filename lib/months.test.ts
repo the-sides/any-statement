@@ -44,6 +44,7 @@ function expense(id: string, date: string, amount = 10): ExpenseItem {
     description: `Charge ${id}`,
     merchant: "Food City",
     amount,
+    reimbursedAmount: 0,
     currency: "USD",
     category: "Food",
     subcategory: "Grocery",

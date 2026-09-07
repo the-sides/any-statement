@@ -318,6 +318,9 @@ function buildSchemaPatch(schema: NotionPropertyMap) {
   addMissingProperty(schema, patch, "Confidence", "number", {
     number: { format: "number" }
   });
+  addMissingProperty(schema, patch, "Reimbursed", "number", {
+    number: { format: "number" }
+  });
   addMissingProperty(schema, patch, "Notes", "rich_text", { rich_text: {} });
 
   return patch;
@@ -620,6 +623,7 @@ function buildProperties(
   setRichText(properties, schema, "Description", expense.description);
   setRichText(properties, schema, "Subcategory", expense.subcategory);
   setNumber(properties, schema, "Amount", expense.amount);
+  setNumber(properties, schema, "Reimbursed", expense.reimbursedAmount);
   setRelation(properties, schema, "Category", categoryPageId);
   setRichText(properties, schema, "Account", statement.accountMask);
   setRichText(properties, schema, "Institution", statement.institution);
