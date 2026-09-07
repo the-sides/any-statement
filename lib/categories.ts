@@ -154,6 +154,10 @@ export const STATEMENT_SECTIONS = [
 
 export const STATEMENT_TYPES = ["credit_card", "bank", "other"] as const;
 
+export const INCOME_KINDS = ["paycheck", "interest", "other"] as const;
+
+export type IncomeKind = (typeof INCOME_KINDS)[number];
+
 export type ExpenseCategory = string;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type StatementSection = (typeof STATEMENT_SECTIONS)[number];

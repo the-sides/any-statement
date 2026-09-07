@@ -179,6 +179,11 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   review table edits it per row, shows `net $X` under the gross amount plus a
   Net stat, and the Notion save writes a `Reimbursed` number property
   (`lib/migrations/004_expense_reimbursements.sql`).
+- Bank statements also carry income: extraction returns an `incomes` array
+  (payroll, interest, other deposits; never own-account transfers) alongside
+  expenses, stored in the `incomes` table (`lib/migrations/005_income_rows.sql`)
+  and reviewed in the workspace Income panel. Notion save still covers expenses
+  only.
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` parses
   Amex-style `New Charges Details` tables. PDF text now comes from `unpdf` in-process, not the
   `pdftotext` binary, so it works on hosts without Poppler. `lib/pdfText.ts` reconstructs a

@@ -2,12 +2,14 @@ import {
   coerceCategoryName,
   getEnabledCategoryNames,
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
+  INCOME_KINDS,
   PAYMENT_METHODS,
   STATEMENT_SECTIONS,
   STATEMENT_TYPES
 } from "@/lib/categories";
 import type {
   ExpenseItem,
+  IncomeItem,
   StatementExtraction,
   StatementSummary
 } from "@/lib/types";
@@ -81,6 +83,7 @@ export function normalizeExtraction(
   };
 
   const rawExpenses = Array.isArray(record.expenses) ? record.expenses : [];
+  const rawIncomes = Array.isArray(record.incomes) ? record.incomes : [];
   const expenses: ExpenseItem[] = rawExpenses.map((rawExpense, index) => {
     const item =
       rawExpense && typeof rawExpense === "object"
@@ -108,6 +111,23 @@ export function normalizeExtraction(
       notes: asString(item.notes)
     };
   });
+  const incomes: IncomeItem[] = rawIncomes.map((rawIncome, index) => {
+    const item =
+      rawIncome && typeof rawIncome === "object"
+        ? (rawIncome as Record<string, unknown>)
+        : {};
+
+    return {
+      id: asString(item.id, `income-${index + 1}`),
+      date: asString(item.date),
+      source: asString(item.source),
+      amount: Math.abs(asNumber(item.amount, 0)),
+      currency: asString(item.currency, statement.currency).toUpperCase(),
+      kind: asEnum(item.kind, INCOME_KINDS, "other"),
+      confidence: asConfidence(item.confidence),
+      notes: asString(item.notes)
+    };
+  });
 
   // Balance movements are not spending. Card payments settle charges that are
   // already itemized on the card statement, and bank transfers only move money
@@ -123,5 +143,5 @@ export function normalizeExtraction(
     (expense) => !excludedSections.has(expense.statementSection)
   );
 
-  return { statement, expenses: filteredExpenses };
+  return { statement, expenses: filteredExpenses, incomes };
 }

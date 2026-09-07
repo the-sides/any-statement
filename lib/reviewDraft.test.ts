@@ -36,7 +36,8 @@ const extraction: StatementExtraction = {
       confidence: 0.95,
       notes: ""
     }
-  ]
+  ],
+  incomes: []
 };
 
 describe("review draft persistence", () => {

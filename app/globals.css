@@ -1495,6 +1495,31 @@ td select:focus {
   font-weight: 700;
 }
 
+.income-frame th:nth-child(1),
+.income-frame td:nth-child(1) {
+  width: 110px;
+}
+
+.income-frame th:nth-child(2),
+.income-frame td:nth-child(2) {
+  width: auto;
+}
+
+.income-frame th:nth-child(3),
+.income-frame td:nth-child(3) {
+  width: 100px;
+}
+
+.income-frame th:nth-child(4),
+.income-frame td:nth-child(4) {
+  width: 100px;
+}
+
+.income-frame th:nth-child(5),
+.income-frame td:nth-child(5) {
+  width: auto;
+}
+
 .statement-chip {
   display: inline-flex;
   max-width: 150px;

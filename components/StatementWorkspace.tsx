@@ -29,6 +29,7 @@ import {
   Unplug,
   Upload,
   UserRound,
+  Wallet,
   X,
   ZoomIn,
   ZoomOut
@@ -42,6 +43,7 @@ import {
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
+  INCOME_KINDS,
   STATEMENT_TYPES,
   FALLBACK_CATEGORY_NAME,
   getDefaultCategoryName,
@@ -102,6 +104,7 @@ import {
 import type { ExpenseChatMessage } from "@/lib/expenseChat";
 import type {
   ExpenseItem,
+  IncomeItem,
   SaveExpensesResult,
   StatementExtraction,
   StatementSummary
@@ -167,6 +170,7 @@ type ExpenseChatResponse = {
 type PendingUpload = {
   statement: ReviewStatement;
   expenses: ExpenseItem[];
+  incomes: IncomeItem[];
 };
 
 const CASH_FLOW_GRAPH_TYPES = [
@@ -215,6 +219,7 @@ const EMPTY_STATEMENT: StatementSummary = {
 };
 const EMPTY_STATEMENTS: ReviewStatement[] = [];
 const EMPTY_EXPENSES: ExpenseItem[] = [];
+const EMPTY_INCOMES: IncomeItem[] = [];
 const EMPTY_SELECTED_IDS: string[] = [];
 const EMPTY_REVIEW_HISTORY: ReviewHistoryEvent[] = [];
 let cachedReviewHistoryRaw: string | null | undefined;
@@ -352,6 +357,7 @@ export function StatementWorkspace() {
   const monthsLoading = monthsState.status === "loading";
   const statements = monthDocument?.statements || EMPTY_STATEMENTS;
   const items = monthDocument?.expenses || EMPTY_EXPENSES;
+  const incomes = monthDocument?.incomes || EMPTY_INCOMES;
   const monthSelectedIds = monthDocument?.selectedIds || EMPTY_SELECTED_IDS;
   const lastReviewHistoryEvent =
     reviewHistory[reviewHistory.length - 1] || null;
@@ -440,6 +446,7 @@ export function StatementWorkspace() {
     (sum, item) => sum + item.amount - item.reimbursedAmount,
     0
   );
+  const incomeTotal = incomes.reduce((sum, income) => sum + income.amount, 0);
   const currency =
     activeStatementSummary.currency || items[0]?.currency || "USD";
   const allVisibleSelected =
@@ -975,6 +982,11 @@ export function StatementWorkspace() {
       statementId,
       nextExtraction.expenses
     );
+    const statementIncomes = nextExtraction.incomes.map((income, index) => ({
+      ...income,
+      id: `${statementId}-income-${index + 1}-${income.id}`,
+      statementId
+    }));
     const determined = determineStatementMonth({
       statement: nextExtraction.statement,
       expenses: statementItems
@@ -989,7 +1001,11 @@ export function StatementWorkspace() {
     });
 
     if (!determined.month) {
-      setPendingUpload({ statement, expenses: statementItems });
+      setPendingUpload({
+        statement,
+        expenses: statementItems,
+        incomes: statementIncomes
+      });
       setPendingUploadMonth(activeMonth);
       return null;
     }
@@ -997,7 +1013,8 @@ export function StatementWorkspace() {
     await fileStatement({
       month: determined.month,
       statement,
-      expenses: statementItems
+      expenses: statementItems,
+      incomes: statementIncomes
     });
 
     return determined;
@@ -1016,7 +1033,8 @@ export function StatementWorkspace() {
     await fileStatement({
       month: pendingUploadMonth,
       statement: pendingUpload.statement,
-      expenses: pendingUpload.expenses
+      expenses: pendingUpload.expenses,
+      incomes: pendingUpload.incomes
     });
     setPendingUpload(null);
     showNotice({
@@ -1320,6 +1338,34 @@ export function StatementWorkspace() {
         statement
       )}.`
     });
+  }
+
+  function addIncome() {
+    const income: IncomeItem = {
+      id: crypto.randomUUID(),
+      statementId: activeStatementId,
+      date: new Date().toISOString().slice(0, 10),
+      source: "",
+      amount: 0,
+      currency,
+      kind: "other",
+      confidence: 0.7,
+      notes: ""
+    };
+
+    writeMonthState({ incomes: [income, ...incomes] });
+  }
+
+  function updateIncome(id: string, patch: Partial<IncomeItem>) {
+    writeMonthState({
+      incomes: incomes.map((income) =>
+        income.id === id ? { ...income, ...patch } : income
+      )
+    });
+  }
+
+  function removeIncome(id: string) {
+    writeMonthState({ incomes: incomes.filter((income) => income.id !== id) });
   }
 
   function addRow() {
@@ -1973,6 +2019,10 @@ export function StatementWorkspace() {
               label="Net"
               value={formatCurrency(totalNetAmount, currency)}
             />
+            <Stat
+              label="Income"
+              value={formatCurrency(incomeTotal, currency)}
+            />
           </div>
         </div>
 
@@ -2609,6 +2659,118 @@ export function StatementWorkspace() {
                       type="button"
                       title="Remove row"
                       onClick={() => removeRow(item.id)}
+                    >
+                      <Trash2 size={16} {...hydrationSafeIconProps} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel income-panel">
+        <div className="panel-heading panel-heading-split">
+          <div className="panel-heading-title">
+            <Wallet size={18} {...hydrationSafeIconProps} />
+            <h2>Income</h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            title="Add income row"
+            onClick={addIncome}
+          >
+            <Plus size={18} {...hydrationSafeIconProps} />
+          </button>
+        </div>
+        <div className="table-frame income-frame">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Source</th>
+                <th>Amount</th>
+                <th>Kind</th>
+                <th>Notes</th>
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {incomes.length === 0 ? (
+                <tr>
+                  <td colSpan={6}>
+                    <div className="empty-state">
+                      No income recognized this month. Bank statement deposits
+                      such as payroll land here; add rows for anything missing.
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+              {incomes.map((income) => (
+                <tr key={income.id}>
+                  <td>
+                    <input
+                      type="date"
+                      value={income.date}
+                      onChange={(event) =>
+                        updateIncome(income.id, { date: event.target.value })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={income.source}
+                      onChange={(event) =>
+                        updateIncome(income.id, { source: event.target.value })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="amount-input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={income.amount}
+                      onChange={(event) =>
+                        updateIncome(income.id, {
+                          amount: Number(event.target.value)
+                        })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <select
+                      value={income.kind}
+                      onChange={(event) =>
+                        updateIncome(income.id, {
+                          kind: event.target.value as IncomeItem["kind"]
+                        })
+                      }
+                    >
+                      {INCOME_KINDS.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {kind}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      value={income.notes}
+                      onChange={(event) =>
+                        updateIncome(income.id, { notes: event.target.value })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <button
+                      className="icon-button danger"
+                      type="button"
+                      title="Remove income row"
+                      onClick={() => removeIncome(income.id)}
                     >
                       <Trash2 size={16} {...hydrationSafeIconProps} />
                     </button>

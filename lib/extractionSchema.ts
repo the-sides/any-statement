@@ -1,5 +1,6 @@
 import {
   EXPENSE_CATEGORIES,
+  INCOME_KINDS,
   PAYMENT_METHODS,
   STATEMENT_SECTIONS,
   STATEMENT_TYPES
@@ -16,7 +17,7 @@ export function createStatementExtractionSchema(
   return {
     type: "object",
     additionalProperties: false,
-    required: ["statement", "expenses"],
+    required: ["statement", "expenses", "incomes"],
     properties: {
       statement: {
         type: "object",
@@ -76,6 +77,33 @@ export function createStatementExtractionSchema(
             subcategory: { type: "string" },
             paymentMethod: { type: "string", enum: PAYMENT_METHODS },
             statementSection: { type: "string", enum: STATEMENT_SECTIONS },
+            confidence: confidenceSchema,
+            notes: { type: "string" }
+          }
+        }
+      },
+      incomes: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "id",
+            "date",
+            "source",
+            "amount",
+            "currency",
+            "kind",
+            "confidence",
+            "notes"
+          ],
+          properties: {
+            id: { type: "string" },
+            date: { type: "string" },
+            source: { type: "string" },
+            amount: { type: "number" },
+            currency: { type: "string" },
+            kind: { type: "string", enum: INCOME_KINDS },
             confidence: confidenceSchema,
             notes: { type: "string" }
           }

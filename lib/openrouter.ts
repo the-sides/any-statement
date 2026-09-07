@@ -23,6 +23,8 @@ For credit card statements, return every purchase, fee, interest charge, cash ad
 
 For bank statements, return withdrawals, debit-card purchases, checks, outgoing ACH, outgoing wires, fees, interest charges, and other outflows as expense rows. Exclude deposits, incoming transfers, credits, rewards, and balance summary lines. A debit that only moves money between the user's own accounts, or pays a credit card balance, is not an expense: internal transfers and card-account payments duplicate charges that are already itemized on the card statement, so exclude them even though they appear as debits.
 
+Bank statements also carry income. Return every payroll deposit, employer ACH credit, deposited check, interest payment, and peer-to-peer or third-party money received in the incomes array, using the kind field: paycheck for wages, interest for interest paid, other for everything else. Exclude incoming transfers from the user's own other accounts; they are balance movements, not income. Credit card statements have no income, so return an empty incomes array for them.
+
 If a transaction looks like an outflow but you are not fully certain, include it with a lower confidence score instead of omitting it. The expenses array should be empty only when the statement file contains no transaction detail rows.
 
 Use positive numbers for expense amounts. Preserve transaction dates as ISO-like YYYY-MM-DD strings when possible. If a field is not visible, use an empty string or null according to the schema. Categorize each expense using only the allowed category enum. Use confidence scores to show uncertainty.`;
@@ -325,6 +327,8 @@ function buildCsvExtractionPrompt(
 The statement content below is CSV text from ${options.fileName}. Treat this CSV as the source of truth for transaction rows.
 
 CSV exports vary by institution. Use columns named like Date, Posted Date, Description, Merchant, Amount, Debit, Credit, Type, Category, Account, Card, Currency, or Balance when present. For credit-card CSVs, purchases and fees may appear as positive or negative values; return expenses as positive amounts. For bank CSVs, return outgoing debits, withdrawals, fees, checks, wires, ACH, and card purchases. Exclude payments, payment reversals, credits, deposits, refunds, rewards, and balance-only rows. Debits that move money between the user's own accounts or pay a credit card balance are not expenses either: the card statement already itemizes those charges.
+
+Bank CSVs also carry income: return payroll deposits, deposited checks, interest payments, and peer-to-peer or third-party money received in the incomes array (kind: paycheck, interest, or other). Exclude incoming transfers from the user's own other accounts. Credit card CSVs have no income, so return an empty incomes array.
 
 If statement metadata is not explicit in the CSV, infer what you can from headers, file name, and account columns. Use empty strings or null values for metadata that is not present.
 

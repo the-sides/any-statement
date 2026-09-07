@@ -17,7 +17,7 @@ import {
   type ReviewDraft,
   type ReviewStatement
 } from "@/lib/reviewDraft";
-import type { ExpenseItem } from "@/lib/types";
+import type { ExpenseItem, IncomeItem } from "@/lib/types";
 
 const WRITE_DEBOUNCE_MS = 500;
 
@@ -81,6 +81,7 @@ export function clearMonthsNotice() {
 export function updateActiveMonth(input: {
   statements?: readonly ReviewStatement[];
   expenses?: readonly ExpenseItem[];
+  incomes?: readonly IncomeItem[];
   selectedIds?: Iterable<string>;
   activeStatementId?: string;
 }) {
@@ -96,6 +97,7 @@ export function updateActiveMonth(input: {
     month: current.month,
     statements: input.statements ?? current.statements,
     expenses: input.expenses ?? current.expenses,
+    incomes: input.incomes ?? current.incomes,
     selectedIds: input.selectedIds ?? current.selectedIds,
     activeStatementId: input.activeStatementId ?? current.activeStatementId
   });
@@ -139,6 +141,7 @@ export async function fileStatement(input: {
   month: string;
   statement: ReviewStatement;
   expenses: readonly ExpenseItem[];
+  incomes?: readonly IncomeItem[];
 }) {
   clearMonthsNotice();
   await flushMonths();

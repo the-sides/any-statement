@@ -1,5 +1,6 @@
 import type {
   ExpenseCategory,
+  IncomeKind,
   PaymentMethod,
   StatementSection,
   StatementType
@@ -38,6 +39,20 @@ export type ExpenseItem = {
 export type StatementExtraction = {
   statement: StatementSummary;
   expenses: ExpenseItem[];
+  incomes: IncomeItem[];
+};
+
+
+export type IncomeItem = {
+  id: string;
+  statementId?: string;
+  date: string;
+  source: string;
+  amount: number;
+  currency: string;
+  kind: IncomeKind;
+  confidence: number;
+  notes: string;
 };
 
 export type SaveExpensesPayload = {

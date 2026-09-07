@@ -51,21 +51,35 @@ type ExpenseRow = {
   notes: unknown;
 };
 
+type IncomeRow = {
+  month: string;
+  id: string;
+  statement_id: unknown;
+  date: unknown;
+  source: unknown;
+  amount: unknown;
+  currency: unknown;
+  kind: unknown;
+  confidence: unknown;
+  notes: unknown;
+};
+
 export async function listStoredMonths(
   userId: string
 ): Promise<MonthSummary[]> {
   const sql = getSql();
-  const [monthRows, statementRows, expenseRows] = (await Promise.all([
+  const [monthRows, statementRows, expenseRows, incomeRows] = (await Promise.all([
     sql`
       select month, active_statement_id, saved_at from months
       where user_id = ${userId} order by month
     `,
     sql`select * from statements where user_id = ${userId} order by month, position, id`,
-    sql`select * from expenses where user_id = ${userId} order by month, position, id`
-  ])) as [MonthRow[], StatementRow[], ExpenseRow[]];
+    sql`select * from expenses where user_id = ${userId} order by month, position, id`,
+    sql`select * from incomes where user_id = ${userId} order by month, position, id`
+  ])) as [MonthRow[], StatementRow[], ExpenseRow[], IncomeRow[]];
 
   return listMonths(
-    assembleDocuments(monthRows, statementRows, expenseRows)
+    assembleDocuments(monthRows, statementRows, expenseRows, incomeRows)
   );
 }
 
@@ -79,7 +93,7 @@ export async function readStoredMonth(
 
   try {
     const sql = getSql();
-    const [monthRows, statementRows, expenseRows] = (await Promise.all([
+    const [monthRows, statementRows, expenseRows, incomeRows] = (await Promise.all([
       sql`
         select month, active_statement_id, saved_at from months
         where user_id = ${userId} and month = ${month}
@@ -91,14 +105,23 @@ export async function readStoredMonth(
       sql`
         select * from expenses
         where user_id = ${userId} and month = ${month} order by position, id
+      `,
+      sql`
+        select * from incomes
+        where user_id = ${userId} and month = ${month} order by position, id
       `
-    ])) as [MonthRow[], StatementRow[], ExpenseRow[]];
+    ])) as [MonthRow[], StatementRow[], ExpenseRow[], IncomeRow[]];
 
     if (monthRows.length === 0) {
       return null;
     }
 
-    return assembleDocuments(monthRows, statementRows, expenseRows)[0] ?? null;
+    return assembleDocuments(
+      monthRows,
+      statementRows,
+      expenseRows,
+      incomeRows
+    )[0] ?? null;
   } catch {
     return null;
   }
@@ -143,6 +166,7 @@ export async function writeStoredMonth(
     `,
     sql`delete from statements where user_id = ${userId} and month = ${month}`,
     sql`delete from expenses where user_id = ${userId} and month = ${month}`,
+    sql`delete from incomes where user_id = ${userId} and month = ${month}`,
     ...document.statements.map((statement, position) =>
       sql`
         insert into statements (
@@ -175,6 +199,18 @@ export async function writeStoredMonth(
           ${expense.confidence}, ${expense.notes}
         )
       `
+    ),
+    ...document.incomes.map((income, position) =>
+      sql`
+        insert into incomes (
+          user_id, month, id, position, statement_id, date, source, amount,
+          currency, kind, confidence, notes
+        ) values (
+          ${userId}, ${month}, ${income.id}, ${position}, ${income.statementId || ""},
+          ${income.date}, ${income.source}, ${income.amount},
+          ${income.currency}, ${income.kind}, ${income.confidence}, ${income.notes}
+        )
+      `
     )
   ]);
 
@@ -193,10 +229,12 @@ async function deleteStoredMonth(userId: string, month: string) {
 function assembleDocuments(
   monthRows: readonly MonthRow[],
   statementRows: readonly StatementRow[],
-  expenseRows: readonly ExpenseRow[]
+  expenseRows: readonly ExpenseRow[],
+  incomeRows: readonly IncomeRow[]
 ): MonthDocument[] {
   const statementsByMonth = groupBy(statementRows, (row) => row.month);
   const expensesByMonth = groupBy(expenseRows, (row) => row.month);
+  const incomesByMonth = groupBy(incomeRows, (row) => row.month);
 
   return monthRows.flatMap((monthRow) => {
     const month = monthRow.month;
@@ -212,6 +250,7 @@ function assembleDocuments(
       statements: (statementsByMonth.get(month) || []).map(toReviewStatement),
       expenses: expenses.map(toExpenseItem),
       selectedIds: expenses.filter((row) => row.selected === true).map((row) => row.id),
+      incomes: (incomesByMonth.get(month) || []).map(toIncomeItem),
       activeStatementId: toText(monthRow.active_statement_id)
     });
 
@@ -243,6 +282,20 @@ function toReviewStatement(row: StatementRow) {
       closingBalance: toNullableNumber(row.closing_balance),
       confidence: toNumber(row.confidence)
     }
+  };
+}
+
+function toIncomeItem(row: IncomeRow) {
+  return {
+    id: row.id,
+    statementId: toText(row.statement_id),
+    date: toText(row.date),
+    source: toText(row.source),
+    amount: toNumber(row.amount),
+    currency: toText(row.currency),
+    kind: toText(row.kind),
+    confidence: toNumber(row.confidence),
+    notes: toText(row.notes)
   };
 }
 

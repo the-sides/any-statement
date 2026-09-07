@@ -1,10 +1,12 @@
 import {
   PAYMENT_METHODS,
+  INCOME_KINDS,
   STATEMENT_SECTIONS,
   STATEMENT_TYPES
 } from "@/lib/categories";
 import type {
   ExpenseItem,
+  IncomeItem,
   SaveStatementSource,
   StatementExtraction,
   StatementSummary
@@ -30,6 +32,7 @@ export type ReviewStatement = SaveStatementSource & {
 export type ReviewContents = {
   statements: ReviewStatement[];
   expenses: ExpenseItem[];
+  incomes: IncomeItem[];
   selectedIds: string[];
   activeStatementId: string;
 };
@@ -42,6 +45,7 @@ export type ReviewDraft = ReviewContents & {
 export function createReviewDraft(input: {
   statements: readonly ReviewStatement[];
   expenses: readonly ExpenseItem[];
+  incomes?: readonly IncomeItem[];
   selectedIds: Iterable<string>;
   activeStatementId?: string;
 }): ReviewDraft {
@@ -55,6 +59,7 @@ export function createReviewDraft(input: {
 export function normalizeReviewContents(input: {
   statements: readonly ReviewStatement[];
   expenses: readonly ExpenseItem[];
+  incomes?: readonly IncomeItem[];
   selectedIds: Iterable<string>;
   activeStatementId?: string;
 }): ReviewContents {
@@ -76,6 +81,19 @@ export function normalizeReviewContents(input: {
 
     return [normalized];
   });
+  const incomes = (input.incomes || []).flatMap((income) => {
+    const normalized = normalizeIncome(income, fallbackStatementId);
+
+    if (!normalized) {
+      return [];
+    }
+
+    if (statementIds.size > 0 && !statementIds.has(normalized.statementId || "")) {
+      return [];
+    }
+
+    return [normalized];
+  });
   const itemIds = new Set(expenses.map((item) => item.id));
   const selectedIds = [...input.selectedIds].filter((id) => itemIds.has(id));
   const activeStatementId = statementIds.has(input.activeStatementId || "")
@@ -85,6 +103,7 @@ export function normalizeReviewContents(input: {
   return {
     statements,
     expenses,
+    incomes,
     selectedIds,
     activeStatementId
   };
@@ -97,6 +116,7 @@ export function parseReviewContents(value: unknown): ReviewContents {
     return {
       statements: [],
       expenses: [],
+      incomes: [],
       selectedIds: [],
       activeStatementId: ""
     };
@@ -126,6 +146,21 @@ export function parseReviewContents(value: unknown): ReviewContents {
         return [expense];
       })
     : [];
+  const incomes = Array.isArray(record.incomes)
+    ? record.incomes.flatMap((item) => {
+        const income = parseIncome(item, fallbackStatementId);
+
+        if (!income) {
+          return [];
+        }
+
+        if (statementIds.size > 0 && !statementIds.has(income.statementId || "")) {
+          return [];
+        }
+
+        return [income];
+      })
+    : [];
   const itemIds = new Set(expenses.map((item) => item.id));
   const selectedIds = Array.isArray(record.selectedIds)
     ? record.selectedIds.filter(
@@ -139,6 +174,7 @@ export function parseReviewContents(value: unknown): ReviewContents {
   return {
     statements,
     expenses,
+    incomes,
     selectedIds,
     activeStatementId
   };
@@ -263,10 +299,18 @@ function parseExtraction(
         return expense ? [expense] : [];
       })
     : [];
+  const incomes = Array.isArray(record.incomes)
+    ? record.incomes.flatMap((item) => {
+        const income = parseIncome(item, fallbackStatementId);
+
+        return income ? [income] : [];
+      })
+    : [];
 
   return {
     statement,
-    expenses
+    expenses,
+    incomes
   };
 }
 
@@ -337,6 +381,51 @@ function parseStatement(value: unknown): StatementSummary | null {
     openingBalance,
     closingBalance,
     confidence
+  };
+}
+
+function parseIncome(
+  value: unknown,
+  fallbackStatementId: string
+): IncomeItem | null {
+  const record = asRecord(value);
+
+  if (!record) {
+    return null;
+  }
+
+  return normalizeIncome(
+    {
+      id: asString(record.id),
+      statementId: asString(record.statementId, fallbackStatementId),
+      date: asString(record.date),
+      source: asString(record.source),
+      amount: parseNumber(record.amount) ?? Number.NaN,
+      currency: asString(record.currency, "USD"),
+      kind: parseEnum(record.kind, INCOME_KINDS) || "other",
+      confidence: parseNumber(record.confidence) ?? 0.7,
+      notes: asString(record.notes)
+    },
+    fallbackStatementId
+  );
+}
+
+function normalizeIncome(
+  income: IncomeItem,
+  fallbackStatementId: string
+): IncomeItem | null {
+  if (
+    !income.id ||
+    !Number.isFinite(income.amount) ||
+    !Number.isFinite(income.confidence) ||
+    !INCOME_KINDS.includes(income.kind)
+  ) {
+    return null;
+  }
+
+  return {
+    ...income,
+    statementId: income.statementId || fallbackStatementId
   };
 }
 
