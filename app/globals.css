@@ -740,23 +740,25 @@ button:focus-visible,
   margin: 0;
 }
 
-/* One cash flow graph per month, laid out left to right. The months share the
-   width evenly and only start scrolling once a column would be too narrow to
-   read, so a normal year of statements is a row of full graphs, not a
-   scroller. */
+/* One cash flow graph per month, laid out left to right and scrolled
+   horizontally. Each card's width is the zoom level (`MONTH_CARD_WIDTH` in
+   `AllMonthsView`), so 100% is a month rendered big enough to read its labels
+   and the row is reached by scrolling sideways, not by shrinking twelve
+   months onto one screen. */
 .all-months-row {
   display: flex;
   gap: 12px;
   overflow-x: auto;
   padding-bottom: 6px;
+  scroll-snap-type: x proximity;
 }
 
 .all-months-month {
   display: flex;
-  flex: 1 1 0;
-  min-width: min(420px, 84vw);
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 6px;
+  scroll-snap-align: start;
 }
 
 /* The month name is the only chrome on a card: the amount it saved or

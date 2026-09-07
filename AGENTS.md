@@ -178,15 +178,18 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
 - The header month stepper has an `All` toggle (`allView` in `StatementWorkspace`).
   It hides the review workspace (with `hidden`, not unmounting — the drawer lane
   measures those panels) and shows `AllMonthsView`: every filed month's cash flow
-  as its own Sankey, plus totals across months. The cards share the row width
-  evenly (`flex: 1 1 0` with a `420px` floor) and only scroll horizontally once a
-  column would be too narrow to read, so a handful of months is a row of full
-  graphs rather than a scroller. A card's only chrome is the month name, which
-  opens that month; the saved/overspent amount is the riser label inside the
-  graph, so a heading would repeat it. Data comes from `/api/months/overview`,
-  which folds all month documents through `summarizeCashFlow` per month
-  (`lib/allMonths.ts`); the view flushes pending month writes first so the active
-  month's debounced edits are included.
+  as its own Sankey, plus totals across months. The row scrolls horizontally
+  and each card's width *is* the zoom level: `MONTH_CARD_WIDTH` (1040px) times
+  the current stop, so 100% renders one month at roughly the size the
+  single-month panel does and the other months are reached by scrolling
+  sideways. The stops themselves live in `lib/graphZoom.ts` and are shared with
+  the single-month graph's zoom controls, so 100% means the same thing in both.
+  A card's only chrome is the month name, which opens that month; the
+  saved/overspent amount is the riser label inside the graph, so a heading would
+  repeat it. Data comes from `/api/months/overview`, which folds all month
+  documents through `summarizeCashFlow` per month (`lib/allMonths.ts`); the view
+  flushes pending month writes first so the active month's debounced edits are
+  included.
 - In every Sankey, savings and overspending are not plain output nodes:
   `components/CashFlowSankey.tsx` draws the remainder as a riser ribbon that
   peels off the *top edge* of the trunk (saved at the output end, overspent at
@@ -307,6 +310,8 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   `lib/allMonths.test.ts` covers it. `app/api/months/overview/route.ts` serves it.
 - `lib/chartFormat.ts` / `lib/currency.ts` - chart colour/label helpers and the shared
   currency formatter, extracted so both chart components use one copy.
+- `lib/graphZoom.ts` - the zoom stops and stepping shared by the single-month
+  graph and the all-months row.
 - `lib/theme.ts` - theme preference storage, resolution, and the pre-paint init script;
   `components/ThemeToggle.tsx` is the segmented light/dark/system control.
 - `lib/months.ts` - month determination, filing, reassignment, listing, and legacy draft

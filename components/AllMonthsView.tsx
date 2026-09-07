@@ -1,6 +1,12 @@
 "use client";
 
-import { LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
+import {
+  LoaderCircle,
+  RefreshCw,
+  TriangleAlert,
+  ZoomIn,
+  ZoomOut
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import CashFlowSankey from "@/components/CashFlowSankey";
@@ -10,10 +16,24 @@ import {
   type MonthsTimeline
 } from "@/lib/allMonths";
 import { formatCurrency } from "@/lib/currency";
+import {
+  DEFAULT_GRAPH_ZOOM,
+  MAX_GRAPH_ZOOM,
+  MIN_GRAPH_ZOOM,
+  nextGraphZoomLevel
+} from "@/lib/graphZoom";
 import { formatMonthLabel } from "@/lib/months";
 import { flushMonths } from "@/lib/monthsClientStore";
 
 type TimelineStatus = "loading" | "ready" | "error";
+
+/**
+ * Width of one month card at 100%. The Sankey is 1360 user units wide, so this
+ * renders its labels at roughly the size the single-month panel shows them:
+ * legible first, with the row scrolling sideways to reach the other months,
+ * rather than every month squeezed into one screen and unreadable.
+ */
+const MONTH_CARD_WIDTH = 1040;
 
 export function AllMonthsView({
   onSelectMonth
@@ -26,6 +46,7 @@ export function AllMonthsView({
   const [status, setStatus] = useState<TimelineStatus>("loading");
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [zoom, setZoom] = useState(DEFAULT_GRAPH_ZOOM);
 
   useEffect(() => {
     let active = true;
@@ -123,20 +144,52 @@ export function AllMonthsView({
           top of a month&apos;s frame; overspending pours in from the top.
           Click a month to open it.
         </p>
-        <button
-          className="icon-button"
-          type="button"
-          title="Reload all months"
-          aria-label="Reload all months"
-          disabled={status === "loading"}
-          onClick={reload}
-        >
-          {status === "loading" ? (
-            <LoaderCircle className="spin" size={18} aria-hidden="true" />
-          ) : (
-            <RefreshCw size={18} aria-hidden="true" />
-          )}
-        </button>
+        <div className="graph-zoom-controls" aria-label="Graph zoom controls">
+          <button
+            className="mini-icon-button"
+            type="button"
+            title="Zoom out"
+            aria-label="Zoom out months"
+            disabled={zoom <= MIN_GRAPH_ZOOM}
+            onClick={() => setZoom((current) => nextGraphZoomLevel(current, "out"))}
+          >
+            <ZoomOut size={14} aria-hidden="true" />
+          </button>
+          <button
+            className="graph-zoom-reset"
+            type="button"
+            title="Reset zoom"
+            aria-label="Reset month zoom"
+            disabled={zoom === DEFAULT_GRAPH_ZOOM}
+            onClick={() => setZoom(DEFAULT_GRAPH_ZOOM)}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            className="mini-icon-button"
+            type="button"
+            title="Zoom in"
+            aria-label="Zoom in months"
+            disabled={zoom >= MAX_GRAPH_ZOOM}
+            onClick={() => setZoom((current) => nextGraphZoomLevel(current, "in"))}
+          >
+            <ZoomIn size={14} aria-hidden="true" />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            title="Reload all months"
+            aria-label="Reload all months"
+            disabled={status === "loading"}
+            onClick={reload}
+          >
+            {status === "loading" ? (
+              <LoaderCircle className="spin" size={18} aria-hidden="true" />
+            ) : (
+              <RefreshCw size={18} aria-hidden="true" />
+            )}
+          </button>
+        </div>
       </div>
 
       {status === "error" ? (
@@ -165,6 +218,7 @@ export function AllMonthsView({
               key={month.month}
               month={month}
               onSelect={onSelectMonth}
+              width={Math.round(MONTH_CARD_WIDTH * zoom)}
             />
           ))}
         </div>
@@ -176,17 +230,21 @@ export function AllMonthsView({
 function MonthFlowCard({
   currency,
   month,
-  onSelect
+  onSelect,
+  width
 }: {
   currency: string;
   month: MonthTimelineEntry;
   onSelect: (month: string) => void;
+  /** Zoom is card width: the chart fills whatever it is given. */
+  width: number;
 }) {
   return (
     <article
       className={`all-months-month ${
         month.summary.savedAmount < 0 ? "overspent" : "saved"
       }`}
+      style={{ width: `${width}px` }}
     >
       <button
         className="all-months-month-heading"

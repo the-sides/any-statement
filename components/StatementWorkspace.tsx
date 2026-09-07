@@ -53,6 +53,12 @@ import {
   truncateSvgText
 } from "@/lib/chartFormat";
 import {
+  DEFAULT_GRAPH_ZOOM,
+  MAX_GRAPH_ZOOM,
+  MIN_GRAPH_ZOOM,
+  nextGraphZoomLevel
+} from "@/lib/graphZoom";
+import {
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
   INCOME_KINDS,
   STATEMENT_TYPES,
@@ -275,10 +281,6 @@ const APP_CATEGORY_VISIBILITY_STORAGE_EVENT =
   "statement-ledger-include-app-categories";
 const REVIEW_HISTORY_STORAGE_EVENT = "statement-ledger-review-history";
 const MAX_STATEMENT_FILE_SIZE = 12 * 1024 * 1024;
-const GRAPH_ZOOM_LEVELS = [0.35, 0.5, 0.65, 0.75, 1, 1.25, 1.5, 1.75];
-const MIN_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[0];
-const MAX_GRAPH_ZOOM = GRAPH_ZOOM_LEVELS[GRAPH_ZOOM_LEVELS.length - 1];
-const DEFAULT_GRAPH_ZOOM = 1;
 const EXPENSE_CHAT_PROMPTS = [
   "How could I minimize food costs?",
   "Which merchants cost the most?",
@@ -3918,25 +3920,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function nextGraphZoomLevel(
-  current: number,
-  direction: "in" | "out"
-) {
-  const currentIndex = GRAPH_ZOOM_LEVELS.reduce(
-    (closestIndex, level, index) =>
-      Math.abs(level - current) <
-      Math.abs(GRAPH_ZOOM_LEVELS[closestIndex] - current)
-        ? index
-        : closestIndex,
-    0
-  );
-  const nextIndex = Math.min(
-    GRAPH_ZOOM_LEVELS.length - 1,
-    Math.max(0, currentIndex + (direction === "in" ? 1 : -1))
-  );
 
-  return GRAPH_ZOOM_LEVELS[nextIndex];
-}
 
 
 function formatBytes(value: number) {
