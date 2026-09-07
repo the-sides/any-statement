@@ -184,6 +184,9 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   expenses, stored in the `incomes` table (`lib/migrations/005_income_rows.sql`)
   and reviewed in the workspace Income panel. Notion save still covers expenses
   only.
+  Recognized income drives the cash flow Sankey's inputs for the month,
+  replacing the plan's manual input entries when present (see
+  `summarizeCashFlow`).
 - If OpenRouter returns PDF statement metadata but zero rows, `lib/fallbackExtractor.ts` parses
   Amex-style `New Charges Details` tables. PDF text now comes from `unpdf` in-process, not the
   `pdftotext` binary, so it works on hosts without Poppler. `lib/pdfText.ts` reconstructs a

@@ -432,8 +432,8 @@ export function StatementWorkspace() {
     [items, selectedIds, statements]
   );
   const cashFlowSummary = useMemo(
-    () => summarizeCashFlow(cashFlowEntries, items),
-    [cashFlowEntries, items]
+    () => summarizeCashFlow(cashFlowEntries, items, incomes),
+    [cashFlowEntries, items, incomes]
   );
   const cashFlowInputs = cashFlowEntries.filter(
     (entry) => entry.kind === "input"
@@ -2168,6 +2168,11 @@ export function StatementWorkspace() {
                     <Plus size={14} {...hydrationSafeIconProps} />
                   </button>
                 </div>
+                {incomes.length > 0 ? (
+                  <div className="cash-flow-empty-row">
+                    Bank-recognized income is driving the inputs this month.
+                  </div>
+                ) : null}
                 {cashFlowInputs.length === 0 ? (
                   <div className="cash-flow-empty-row">No income inputs</div>
                 ) : null}

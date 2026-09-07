@@ -1,4 +1,4 @@
-import type { ExpenseItem } from "@/lib/types";
+import type { ExpenseItem, IncomeItem } from "@/lib/types";
 
 export const CASH_FLOW_PLAN_STORAGE_KEY = "statement-ledger.cash-flow-plan";
 
@@ -83,12 +83,44 @@ export function parseCashFlowEntries(value: unknown): CashFlowEntry[] {
 
 export function summarizeCashFlow(
   entries: readonly CashFlowEntry[],
-  expenses: readonly ExpenseItem[]
+  expenses: readonly ExpenseItem[],
+  incomes: readonly IncomeItem[] = []
 ): CashFlowSummary {
   const activeEntries = entries.filter((entry) => entry.enabled);
-  const inputs = activeEntries.filter(
-    (entry) => entry.kind === "input" && entry.amount > 0
-  );
+  // Recognized income is the money that actually arrived, so when the month
+  // has any it replaces the planned inputs rather than adding to them; months
+  // without bank statements fall back to the manual plan.
+  const recognizedBySource = new Map<string, CashFlowEntry>();
+
+  for (const income of incomes) {
+    if (income.amount <= 0) {
+      continue;
+    }
+
+    const label = income.source.trim() || "Income";
+    const existing = recognizedBySource.get(label);
+
+    if (existing) {
+      existing.amount += income.amount;
+      continue;
+    }
+
+    recognizedBySource.set(label, {
+      id: `recognized-${income.id}`,
+      kind: "input",
+      label,
+      amount: income.amount,
+      enabled: true
+    });
+  }
+
+  const inputs = recognizedBySource.size
+    ? [...recognizedBySource.values()].sort(
+        (left, right) => right.amount - left.amount
+      )
+    : activeEntries.filter(
+        (entry) => entry.kind === "input" && entry.amount > 0
+      );
   const manualOutputs = activeEntries.filter(
     (entry) => entry.kind === "output" && entry.amount > 0
   );

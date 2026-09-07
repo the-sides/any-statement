@@ -5,7 +5,7 @@ import {
   summarizeCashFlow,
   type CashFlowEntry
 } from "@/lib/cashFlowPlan";
-import type { ExpenseItem } from "@/lib/types";
+import type { ExpenseItem, IncomeItem } from "@/lib/types";
 
 const entries: CashFlowEntry[] = [
   {
@@ -91,4 +91,38 @@ describe("cash flow plan", () => {
       true
     );
   });
+
+  test("recognized income replaces planned inputs and groups by source", () => {
+    const incomes: IncomeItem[] = [
+      incomeItem("MergerAI payroll", 3000),
+      incomeItem("MergerAI payroll", 1800),
+      incomeItem("Vicki White", 860)
+    ];
+    const summary = summarizeCashFlow(entries, expenses, incomes);
+
+    expect(summary.inputs.map((input) => input.label)).toEqual([
+      "MergerAI payroll",
+      "Vicki White"
+    ]);
+    expect(summary.inputs[0]?.amount).toBe(4800);
+    expect(summary.incomeTotal).toBe(5660);
+    expect(summary.allocations[0]?.label).toBe("Saved");
+  });
+
+  test("falls back to planned inputs without recognized income", () => {
+    expect(summarizeCashFlow(entries, expenses, []).incomeTotal).toBe(4200);
+  });
 });
+
+function incomeItem(source: string, amount: number): IncomeItem {
+  return {
+    id: `${source}-${amount}`,
+    date: "2026-08-05",
+    source,
+    amount,
+    currency: "USD",
+    kind: "other",
+    confidence: 0.9,
+    notes: ""
+  };
+}
