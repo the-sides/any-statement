@@ -143,13 +143,12 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   sit in `.app-header` across the top. Every other control lives in `.side-rail`, a fixed
   full-height overlay that is hidden by default: `StatementWorkspace` tracks the pointer and
   writes `--rail-reveal` (0..1) plus `data-rail-open` straight onto the element, fading and
-  creeping the rail out from 20px of the left edge and landing it flush when the cursor hits
-  the edge itself (`RAIL_FADE_DISTANCE_PX` 20 / `RAIL_OPEN_DISTANCE_PX` 0 - a mouse gets there
-  by running out of screen). It is driven by DOM writes on purpose:
-  a mousemove-per-frame `setState` re-renders the whole workspace. Below full reveal the rail
-  has `pointer-events: none` so a half-faded panel never eats clicks meant for the table;
-  once open, hover and `focusin` hold it out regardless of cursor distance. The pin button at
-  the top of the rail (mirrored by the header handle, which is the only way in on touch)
+  creeping the rail out from 20px of the left edge and landing it flush at 12px
+  (`RAIL_FADE_DISTANCE_PX` 20 / `RAIL_OPEN_DISTANCE_PX` 12). It is driven by DOM writes on
+  purpose: a mousemove-per-frame `setState` re-renders the whole workspace. Below full reveal
+  the rail has `pointer-events: none` so a half-faded panel never eats clicks meant for the
+  table; once open, hover and `focusin` hold it out regardless of cursor distance. The pin
+  button at the top of the rail (mirrored by the header handle, the only way in on touch)
   stores `statement-ledger:rail-pinned` and switches the rail to a reserved layout lane
   (`.app-shell[data-rail-pinned="true"]` pads left by the rail width) instead of an overlay,
   above 980px.

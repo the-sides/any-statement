@@ -175,13 +175,12 @@ type PendingUpload = {
 };
 
 /**
- * The controls rail is hidden until the pointer reaches the left edge: it fades
- * in from `RAIL_FADE_DISTANCE_PX` and is fully out when the cursor hits the
- * edge itself, which a mouse lands on by running out of screen. Pinning
- * bypasses the whole ramp.
+ * The controls rail is hidden until the pointer nears the left edge: it fades in
+ * from `RAIL_FADE_DISTANCE_PX` and is fully out by `RAIL_OPEN_DISTANCE_PX`.
+ * Pinning bypasses the whole ramp.
  */
 const RAIL_FADE_DISTANCE_PX = 20;
-const RAIL_OPEN_DISTANCE_PX = 0;
+const RAIL_OPEN_DISTANCE_PX = 12;
 const RAIL_PIN_STORAGE_KEY = "statement-ledger:rail-pinned";
 const RAIL_PIN_STORAGE_EVENT = "statement-ledger:rail-pinned-change";
 
