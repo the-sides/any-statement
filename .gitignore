@@ -14,3 +14,4 @@ bun.lockb
 .claude/worktrees/
 .env.local.bak*
 .worktree.json
+TODO.md
