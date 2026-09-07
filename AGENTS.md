@@ -176,9 +176,15 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   oversized files with a notice), and statements whose month cannot be
   determined queue up in the Pick a month panel instead of overwriting each
   other. The `/api/extract` contract is unchanged: one statement per request.
-- Payment rows and `AUTO PAYMENT REVERSAL` rows are excluded by the extraction
-  prompts. A reversal is not new spending: its charges were already ledgered as
-  expenses in the month they posted, so counting it again would double-count.
+- Payment rows, `AUTO PAYMENT REVERSAL` rows, and transfers between the user's
+  own accounts (for example `USAA FUNDS TRANSFER CR/DB` between checking and
+  savings) are excluded. A reversal is not new spending: its charges were
+  already ledgered as expenses in the month they posted. An own-account
+  transfer is neither spending nor income, on either side of the move.
+  `lib/openrouter.ts` prompts exclude them and `lib/internalTransfers.ts` is
+  the deterministic backstop applied in `lib/normalize.ts` to expenses and
+  incomes (the model once returned savings deposits as income despite its own
+  notes admitting they were internal transfers).
 - Expenses carry `reimbursedAmount` (default 0; net = amount − reimbursedAmount,
   derived, never stored — partial reimbursements are just a smaller value). The
   review table edits it per row, shows `net $X` under the gross amount plus a

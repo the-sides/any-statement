@@ -7,6 +7,7 @@ import {
   STATEMENT_SECTIONS,
   STATEMENT_TYPES
 } from "@/lib/categories";
+import { isInternalTransferRow } from "@/lib/internalTransfers";
 import type {
   ExpenseItem,
   IncomeItem,
@@ -129,10 +130,12 @@ export function normalizeExtraction(
     };
   });
 
-  // Balance movements are not spending. Card payments settle charges that are
-  // already itemized on the card statement, and bank transfers only move money
-  // between the user's own accounts. The prompts ask the model to skip these
-  // rows; this filter is the backstop when it returns them anyway.
+  // Balance movements are not spending or income. Card payments settle charges
+  // that are already itemized on the card statement, and own-account transfers
+  // only move money between the user's accounts. The prompts ask the model to
+  // skip these rows; this filter is the backstop when it returns them anyway
+  // (it once returned savings deposits as income with a note admitting they
+  // were "likely an internal transfer between own accounts").
   const excludedSections: ReadonlySet<ExpenseItem["statementSection"]> =
     statement.statementType === "bank"
       ? new Set(["payment", "transfer", "deposit"])
@@ -140,8 +143,13 @@ export function normalizeExtraction(
         ? new Set(["payment"])
         : new Set();
   const filteredExpenses = expenses.filter(
-    (expense) => !excludedSections.has(expense.statementSection)
+    (expense) =>
+      !excludedSections.has(expense.statementSection) &&
+      !isInternalTransferRow(expense.merchant, expense.description)
+  );
+  const filteredIncomes = incomes.filter(
+    (income) => !isInternalTransferRow(income.source)
   );
 
-  return { statement, expenses: filteredExpenses, incomes };
+  return { statement, expenses: filteredExpenses, incomes: filteredIncomes };
 }

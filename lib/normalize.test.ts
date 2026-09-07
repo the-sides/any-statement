@@ -80,3 +80,133 @@ describe("normalizeExtraction section filtering", () => {
     expect(expenses).toHaveLength(2);
   });
 });
+
+describe("normalizeExtraction internal transfer filtering", () => {
+  const bankStatement = {
+    institution: "USAA",
+    accountMask: "1234",
+    statementType: "bank" as const,
+    periodStart: "2026-07-01",
+    periodEnd: "2026-07-31",
+    currency: "USD",
+    openingBalance: null,
+    closingBalance: null,
+    confidence: 0.9
+  };
+
+  test("drops own-account transfer rows the model returned anyway", () => {
+    const { expenses, incomes } = normalizeExtraction({
+      statement: bankStatement,
+      expenses: [
+        {
+          id: "tx-1",
+          date: "2026-07-20",
+          description: "USAA FUNDS TRANSFER DB",
+          merchant: "USAA Funds Transfer DB",
+          amount: 2000,
+          currency: "USD",
+          category: "Other",
+          subcategory: "",
+          paymentMethod: "unknown",
+          statementSection: "other",
+          confidence: 0.6,
+          notes: ""
+        },
+        {
+          id: "tx-2",
+          date: "2026-07-03",
+          description: "Second Story Pro WEB PMTS",
+          merchant: "Second Story Pro",
+          amount: 2294,
+          currency: "USD",
+          category: "Work",
+          subcategory: "",
+          paymentMethod: "unknown",
+          statementSection: "other",
+          confidence: 0.75,
+          notes: ""
+        },
+        {
+          id: "tx-3",
+          date: "2026-07-05",
+          description: "WIRE TRANSFER FEE",
+          merchant: "Wire Transfer Fee",
+          amount: 25,
+          currency: "USD",
+          category: "Other",
+          subcategory: "",
+          paymentMethod: "unknown",
+          statementSection: "other",
+          confidence: 0.9,
+          notes: ""
+        }
+      ],
+      incomes: [
+        {
+          id: "income-1",
+          date: "2026-07-20",
+          source: "USAA Funds Transfer",
+          amount: 2000,
+          currency: "USD",
+          kind: "other",
+          confidence: 0.4,
+          notes:
+            "Incoming USAA funds transfer; likely an internal transfer between own accounts, included with low confidence as source is ambiguous."
+        },
+        {
+          id: "income-2",
+          date: "2026-08-11",
+          source: "NFCU ACH P2P VICKI WHITE",
+          amount: 860,
+          currency: "USD",
+          kind: "other",
+          confidence: 0.85,
+          notes: ""
+        },
+        {
+          id: "income-3",
+          date: "2026-07-19",
+          source: "MergerAI, Inc. Payroll",
+          amount: 5161.71,
+          currency: "USD",
+          kind: "paycheck",
+          confidence: 0.98,
+          notes: ""
+        }
+      ]
+    });
+
+    expect(expenses.map((expense) => expense.merchant)).toEqual([
+      "Second Story Pro",
+      "Wire Transfer Fee"
+    ]);
+
+    expect(incomes.map((income) => income.source)).toEqual([
+      "NFCU ACH P2P VICKI WHITE",
+      "MergerAI, Inc. Payroll"
+    ]);
+  });
+
+  test("keeps third-party income whose notes merely mention transfers", () => {
+    // Regression: CSFloat was dropped because its model note said "not an
+    // internal transfer"; notes are model commentary and are not scanned.
+    const { incomes } = normalizeExtraction({
+      statement: bankStatement,
+      expenses: [],
+      incomes: [
+        {
+          id: "income-1",
+          date: "2026-07-08",
+          source: "CSFloat",
+          amount: 170.62,
+          currency: "USD",
+          kind: "other",
+          confidence: 0.85,
+          notes: "Income from CSFloat; third-party platform, not an internal transfer"
+        }
+      ]
+    });
+
+    expect(incomes.map((income) => income.source)).toEqual(["CSFloat"]);
+  });
+});
