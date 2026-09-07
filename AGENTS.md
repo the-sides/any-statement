@@ -148,10 +148,12 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   ~500ms debounce, forced on page unload. The AI categorization notes are a per-user row in
   the `user_settings` Postgres table, written the same way; undo history and the
   app-category preference are still browser localStorage and stay global.
-- The `Income allocation` cash flow panel is gone: no Sankey, no pie, no manual input/output
-  editor. `lib/cashFlowPlan.ts` and the stored `cashFlowEntries` remain because
-  `summarizeCashFlow` still supplies the expense chat's cash-flow context, but nothing in the
-  UI writes those entries any more, so they stay at whatever the row already holds.
+- The cash flow panel keeps its Sankey and pie (`Cash flow` / `Where it went`, with the
+  Flow/Pie toggle and the graph zoom controls); only the manual input/output editor was
+  removed. `summarizeCashFlow` therefore drives both the graphs and the expense chat's
+  cash-flow context, but nothing in the UI writes `cashFlowEntries` any more: inputs come
+  from recognized income and outputs from the month's category spend, so a stored entry stays
+  at whatever the `user_settings` row already holds.
 - The workspace has a light/dark/system theme toggle in the brand lockup. The preference is
   stored in `localStorage` under `statement-ledger:theme` and defaults to the system setting.
   A small inline script in `app/layout.tsx` resolves it onto `<html data-theme>` before first
