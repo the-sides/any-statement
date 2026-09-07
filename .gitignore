@@ -13,3 +13,4 @@ bun.lockb
 .vercel
 .claude/worktrees/
 .env.local.bak*
+.worktree.json

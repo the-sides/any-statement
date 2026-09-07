@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "wt": "bun run scripts/worktree.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
