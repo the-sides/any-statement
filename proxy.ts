@@ -1,11 +1,12 @@
 import { authkit, handleAuthkitHeaders } from "@workos-inc/authkit-nextjs";
-import type { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import {
   ALLOWED_EMAILS_ENV,
   accessDenialMessage,
   decideAccess,
   parseAllowedEmails
 } from "@/lib/accessControl";
+import { isDemoMode } from "@/lib/demoMode";
 
 /**
  * Secure by default: everything the matcher covers requires a WorkOS session
@@ -15,6 +16,13 @@ import {
  * at a time would make an omission silently public.
  */
 export default async function proxy(request: NextRequest) {
+  // Demo build: no session exists to check, and `requireUserId()` answers with
+  // the demo tenant instead of the owner's. Calling authkit here would still
+  // 503 on a missing WORKOS_API_KEY, so it is skipped outright.
+  if (isDemoMode()) {
+    return NextResponse.next();
+  }
+
   const { session, headers, authorizationUrl } = await authkit(request);
 
   if (!session.user) {

@@ -1,4 +1,5 @@
 import { withAuth } from "@workos-inc/authkit-nextjs";
+import { DEMO_USER_ID, isDemoMode } from "@/lib/demoMode";
 
 /**
  * The ledger's tenant key. `proxy.ts` already refuses anonymous and
@@ -16,6 +17,12 @@ export class UnauthorizedError extends Error {
 }
 
 export async function getCurrentUserId(): Promise<string | null> {
+  // The demo tenant is a real user id with seeded rows, so every store call
+  // below this stays scoped exactly as it is in the authenticated build.
+  if (isDemoMode()) {
+    return DEMO_USER_ID;
+  }
+
   const { user } = await withAuth();
 
   return user?.id || null;

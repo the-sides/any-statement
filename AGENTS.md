@@ -139,6 +139,45 @@ If a stale value is inherited, drop it at launch rather than editing the file ag
 env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3000
 ```
 
+## Auth-Less Demo Mode (this worktree)
+
+This branch (`worktree-demo-noauth`) adds a demo build so a **headless browser can reach the
+UI without signing in**. A browser driver cannot complete AuthKit's redirect flow — WorkOS
+would need a real credential and an interactive consent — so on `main` the only reachable
+page for a driver is the sign-in bounce.
+
+`lib/demoMode.ts` owns the flag and is read in exactly two places, the same two that own auth:
+
+- `proxy.ts` returns `NextResponse.next()` before calling `authkit`, so no session is
+  required. It skips authkit entirely rather than tolerating a missing session, because
+  `authkit()` still 503s on a missing `WORKOS_API_KEY`.
+- `lib/currentUser.ts` `getCurrentUserId()` returns `DEMO_USER_ID`, so every store call below
+  it stays tenant-scoped exactly as in the authenticated build.
+
+It is a **tenant swap, not an opened door onto the real data**: `user_id` is part of every
+primary key, so the demo tenant (`user_demo_headless`) can only see rows seeded for it. The
+owner's statements remain unreachable. Two guards keep it out of production: the env var is
+off unless set, and `isDemoMode()` refuses when `VERCEL_ENV === "production"` even if the
+variable leaks onto the deployed project. Preview deployments are allowed on purpose — that
+is where a headless check would run against a real build.
+
+```bash
+# .env.local in this worktree already sets STATEMENT_LEDGER_DEMO_MODE=1
+STATEMENT_LEDGER_DEMO_MODE=1 bun run scripts/seed-demo.ts   # idempotent
+bun run wt dev demo-noauth                                  # http://localhost:3001
+```
+
+`scripts/seed-demo.ts` writes three fixed months (2026-06..2026-08) — 2 statements and 21
+expenses each, plus incomes. Nothing is random and nothing is copied from the real tenant, so
+a screenshot diff is stable across runs. The months are shaped to cover the states the UI
+renders differently: saved months (June/July), an overspent month (August, where the Sankey
+riser pours in from the top instead of climbing out), and a fully reimbursed row so `NET`
+differs from `AMOUNT`.
+
+What is still real and therefore *not* mocked: Postgres (the demo tenant lives in the shared
+`DATABASE_URL`), OpenRouter extraction, and Notion (unconnected for the demo user, so the
+Notion panel shows `Not connected`).
+
 ## Current Behavior
 
 - `/` renders the upload/review/save workspace, scoped to one month at a time.
