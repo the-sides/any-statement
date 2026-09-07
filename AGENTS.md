@@ -139,12 +139,12 @@ If a stale value is inherited, drop it at launch rather than editing the file ag
 env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3000
 ```
 
-## Auth-Less Demo Mode (this worktree)
+## Auth-Less Demo Mode
 
-This branch (`worktree-demo-noauth`) adds a demo build so a **headless browser can reach the
-UI without signing in**. A browser driver cannot complete AuthKit's redirect flow — WorkOS
-would need a real credential and an interactive consent — so on `main` the only reachable
-page for a driver is the sign-in bounce.
+A local-only demo build so a **headless browser can reach the UI without signing in**. A
+browser driver cannot complete AuthKit's redirect flow — WorkOS needs a real credential and
+an interactive consent — so without this the only page a driver can reach is the sign-in
+bounce.
 
 `lib/demoMode.ts` owns the flag and is read in exactly two places, the same two that own auth:
 
@@ -155,16 +155,29 @@ page for a driver is the sign-in bounce.
   it stays tenant-scoped exactly as in the authenticated build.
 
 It is a **tenant swap, not an opened door onto the real data**: `user_id` is part of every
-primary key, so the demo tenant (`user_demo_headless`) can only see rows seeded for it. The
-owner's statements remain unreachable. Two guards keep it out of production: the env var is
-off unless set, and `isDemoMode()` refuses when `VERCEL_ENV === "production"` even if the
-variable leaks onto the deployed project. Preview deployments are allowed on purpose — that
-is where a headless check would run against a real build.
+primary key, so the demo tenant (`user_demo_headless`) can only see rows seeded for it, and
+the owner's statements remain unreachable.
+
+**Never add `STATEMENT_LEDGER_DEMO_MODE` to the Vercel project.** Turning the gate off also
+drops the `STATEMENT_LEDGER_ALLOWED_EMAILS` allowlist, and a deployment URL is public while
+being backed by the same `DATABASE_URL` and the shared OpenRouter key. `isDemoMode()`
+therefore refuses whenever `process.env.VERCEL` is set — any Vercel build or runtime, not
+just production. Keying on `VERCEL_ENV === "production"` alone would fail open twice: a
+preview build keeps `VERCEL_ENV=preview` when promoted to the production alias, and a host
+exposing no Vercel system variables leaves it undefined. `## Vercel Env Pull Hazard` below is
+why a stray copy onto the project is a realistic accident. `lib/demoMode.test.ts` pins the
+guard, including the blank/`0`/`VERCEL` cases.
+
+`### Ambient env beats .env.local` applies to this flag more than any other: a supervised
+`bun run dev` inherits whatever the launching process held, so a stale `1` turns the auth gate
+off and swaps the tenant in a checkout whose `.env.local` never mentions it — the primary
+checkout then renders the empty demo ledger and looks like data loss. Confirm with
+`tr '\0' '\n' < /proc/<dev-pid>/environ | grep STATEMENT_LEDGER_DEMO_MODE`, and drop it at
+launch with `env -u STATEMENT_LEDGER_DEMO_MODE bun run dev` rather than editing the file.
 
 ```bash
-# .env.local in this worktree already sets STATEMENT_LEDGER_DEMO_MODE=1
 STATEMENT_LEDGER_DEMO_MODE=1 bun run scripts/seed-demo.ts   # idempotent
-bun run wt dev demo-noauth                                  # http://localhost:3001
+bun run dev                                                 # or `bun run wt dev <name>`
 ```
 
 `scripts/seed-demo.ts` writes three fixed months (2026-06..2026-08) — 2 statements and 21
@@ -172,11 +185,16 @@ expenses each, plus incomes. Nothing is random and nothing is copied from the re
 a screenshot diff is stable across runs. The months are shaped to cover the states the UI
 renders differently: saved months (June/July), an overspent month (August, where the Sankey
 riser pours in from the top instead of climbing out), and a fully reimbursed row so `NET`
-differs from `AMOUNT`.
+differs from `AMOUNT`. Its header comment lists the states the seed **cannot** reach (the
+empty state, the client-only `Pick a month` panel, every upload path, Notion connected,
+disabled/notion categories, partial reimbursement, unused enum values, layout stress,
+localStorage undo); read it before assuming a headless suite has full coverage.
 
 What is still real and therefore *not* mocked: Postgres (the demo tenant lives in the shared
-`DATABASE_URL`), OpenRouter extraction, and Notion (unconnected for the demo user, so the
-Notion panel shows `Not connected`).
+`DATABASE_URL`, so its rows sit beside the owner's and share migrations), OpenRouter
+extraction, and Notion (unconnected for the demo user, so the Notion panel shows
+`Not connected`). There is no purge flag; remove the tenant with
+`delete from ... where user_id = 'user_demo_headless'`.
 
 ## Current Behavior
 
@@ -378,11 +396,13 @@ Notion panel shows `Not connected`).
 - `lib/db.ts` - lazy Neon client (no Proxy wrapper) plus numeric/text column coercion.
 - `lib/migrations/*.sql` - schema history, applied in filename order and tracked in
   `schema_migrations`.
-- `lib/currentUser.ts` - `requireUserId()`, the tenant key every store call needs.
+- `lib/currentUser.ts` - `requireUserId()`, the tenant key every store call needs. In local
+  demo mode it answers with the demo tenant instead of a session's user.
 - `lib/notionConnection.ts` - per-user Notion credentials.
 - `lib/secrets.ts` - AES-256-GCM encryption for stored credentials.
 - `lib/apiErrors.ts` - shared 401/503 responses for missing sessions and unreadable credentials.
-- `proxy.ts` - WorkOS AuthKit gate over every route except the sign-in flow and static assets.
+- `proxy.ts` - WorkOS AuthKit gate over every route except the sign-in flow, static assets,
+  and local demo mode.
 - `app/callback/route.ts` - AuthKit callback. `handleAuth`'s default answer to a missing PKCE
   cookie, a missing `code`/`state`, or a state mismatch is a bare JSON 500, which strands the
   user with no way back into the flow; those three codes are recoverable, so `onError` restarts
@@ -392,6 +412,9 @@ Notion panel shows `Not connected`).
 - `lib/accessControl.ts` - email allowlist decision. A WorkOS session only proves *someone*
   signed in; without the allowlist anyone able to sign up would reach the ledger. Unset
   `STATEMENT_LEDGER_ALLOWED_EMAILS` denies everyone rather than falling open.
+- `lib/demoMode.ts` - the auth-less demo decision: `isDemoMode()`, `DEMO_USER_ID`, and the
+  pure `decideDemoMode` it delegates to. Refused on every Vercel deployment. See
+  `## Auth-Less Demo Mode`.
 - `app/api/months/route.ts` and `app/api/months/[month]/route.ts` - month list and
   read/write/delete of one month document.
 - `app/api/categories/route.ts` - category catalog: GET read, POST create a custom category,
@@ -412,6 +435,8 @@ Notion panel shows `Not connected`).
 - `scripts/generate-secret-key.ts` - prints a `STATEMENT_LEDGER_SECRET_KEY`.
 - `scripts/import-notion-connection.ts` - one-time move of `NOTION_*` env vars into a user's row.
 - `scripts/import-local-months.ts` - imports legacy `data/months/*.json` into Postgres.
+- `scripts/seed-demo.ts` - seeds three fixed months for the demo tenant; idempotent, and its
+  header lists the UI states the seed cannot reach.
 - `lib/openrouter.ts` - OpenRouter request, prompt, response parsing, debug payload.
 - `lib/fallbackExtractor.ts` - deterministic PDF text fallback.
 - `lib/artifacts.ts` - `/tmp` artifact persistence.

@@ -2,10 +2,15 @@ import { withAuth } from "@workos-inc/authkit-nextjs";
 import { DEMO_USER_ID, isDemoMode } from "@/lib/demoMode";
 
 /**
- * The ledger's tenant key. `proxy.ts` already refuses anonymous and
- * non-allowlisted requests, so a route reaching this without a user means the
- * matcher stopped covering it -- which would be a route serving another user's
- * statements. It throws rather than falling back to a shared scope.
+ * The ledger's tenant key. Outside demo mode `proxy.ts` already refuses
+ * anonymous and non-allowlisted requests, so a route reaching this without a
+ * user means the matcher stopped covering it -- which would be a route serving
+ * another user's statements. It throws rather than falling back to a shared
+ * scope.
+ *
+ * The one exception is `isDemoMode()` below, which is deliberately a *different
+ * tenant*, not a shared one: `DEMO_USER_ID` owns only its own seeded rows, and
+ * it is refused on every Vercel deployment (`lib/demoMode.ts`).
  */
 export class UnauthorizedError extends Error {
   status = 401;

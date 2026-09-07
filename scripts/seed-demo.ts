@@ -11,6 +11,31 @@
  * The three months are shaped to cover the states the UI renders differently:
  * a saved month, an overspent month (the Sankey riser pours in from the top
  * instead of climbing out of it), and a month with a reimbursed row.
+ *
+ * What this seed can NOT reach, so a headless suite does not mistake it for
+ * full coverage:
+ *
+ * - The empty state. Every seeded tenant has three months; a blank ledger
+ *   needs a second tenant or a purge, and there is no purge flag here.
+ * - The `Pick a month` panel. `pendingUploads` is client-only React state in
+ *   `StatementWorkspace`, produced solely by an `/api/extract` round trip, so
+ *   no database row reaches it.
+ * - Every upload path: PDF, CSV, the 12 MB skip notice, extraction failures.
+ *   Driving those means real OpenRouter calls, which cost money and return
+ *   different rows each run - the opposite of what this script is for.
+ * - Notion connected, the save flow, and the `unmatchedCategories` notice. A
+ *   seeded token would show "connected" and then fail against the real API.
+ * - Disabled and `notion`-sourced categories, and the rule that hides the
+ *   built-ins while an enabled Notion category exists.
+ * - Partial reimbursement (the seeded Marriott row is reimbursed in full),
+ *   non-USD currency, and zero or very large amounts.
+ * - Unused enum values: the `Payroll` / `Taxes` / `Professional Services` /
+ *   `Transfer` / `Other` categories, income kind `other`, and the `payment` /
+ *   `interest` / `transfer` / `withdrawal` / `deposit` sections.
+ * - Layout stress: 100+ rows, long merchant strings, and enough months for the
+ *   all-months row to scroll (three cards do not fill it).
+ * - Undo history and the app-category preference, which are browser
+ *   localStorage, not per-tenant rows.
  */
 import type { PaymentMethod, StatementSection } from "@/lib/categories";
 import { DEMO_USER_ID, isDemoMode } from "@/lib/demoMode";
@@ -21,8 +46,9 @@ import type { ExpenseItem, IncomeItem, StatementSummary } from "@/lib/types";
 
 if (!isDemoMode()) {
   console.error(
-    "Refusing to seed: STATEMENT_LEDGER_DEMO_MODE is not set, so this checkout " +
-      "is not a demo build and the demo tenant would be unreachable anyway."
+    "Refusing to seed: this is not a demo build, so the demo tenant would be " +
+      "unreachable anyway. Either STATEMENT_LEDGER_DEMO_MODE is unset, or this " +
+      "is a Vercel deployment, where demo mode is always refused."
   );
   process.exit(1);
 }
@@ -94,8 +120,18 @@ const MONTHS: SeedMonth[] = [
 ];
 
 for (const seed of MONTHS) {
+  const cardId = `demo-${seed.month}-card`;
+  const bankId = `demo-${seed.month}-bank`;
+
+  // Rows first, statements second: the card's closing balance is derived from
+  // the rows that were actually stored, so the statement header and the row
+  // total cannot disagree by a rounding cent.
+  const cardExpenses = expenseItems(cardId, seed.month, CARD_ROWS, seed.cardScale, "card");
+  const bankExpenses = expenseItems(bankId, seed.month, BANK_ROWS, 1, "ach");
+  const expenses = [...cardExpenses, ...bankExpenses];
+
   const cardStatement = createReviewStatement({
-    id: `demo-${seed.month}-card`,
+    id: cardId,
     sourceFileName: `amex-platinum-${seed.month}.pdf`,
     importedAt: `${seed.month}-05T12:00:00.000Z`,
     monthSource: "period",
@@ -104,12 +140,12 @@ for (const seed of MONTHS) {
       accountMask: "•••• 41007",
       statementType: "credit_card",
       month: seed.month,
-      closingBalance: -total(CARD_ROWS, seed.cardScale)
+      closingBalance: -sumAmounts(cardExpenses)
     })
   });
 
   const bankStatement = createReviewStatement({
-    id: `demo-${seed.month}-bank`,
+    id: bankId,
     sourceFileName: `wells-fargo-checking-${seed.month}.pdf`,
     importedAt: `${seed.month}-05T12:05:00.000Z`,
     monthSource: "period",
@@ -121,11 +157,6 @@ for (const seed of MONTHS) {
       closingBalance: 5120.44
     })
   });
-
-  const expenses = [
-    ...expenseItems(cardStatement.id, seed.month, CARD_ROWS, seed.cardScale, "card"),
-    ...expenseItems(bankStatement.id, seed.month, BANK_ROWS, 1, "ach")
-  ];
 
   const incomes = BANK_INCOMES.map((income, index): IncomeItem => ({
     id: `${bankStatement.id}-income-${index + 1}`,
@@ -210,8 +241,8 @@ function statementSummary(input: {
   };
 }
 
-function total(rows: readonly SeedRow[], scale: number) {
-  return rows.reduce((sum, row) => sum + row.amount * scale, 0);
+function sumAmounts(expenses: readonly ExpenseItem[]) {
+  return expenses.reduce((sum, expense) => sum + expense.amount, 0);
 }
 
 function dateOf(month: string, day: number) {

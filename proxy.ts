@@ -14,6 +14,10 @@ import { isDemoMode } from "@/lib/demoMode";
  * an anonymous request or to a stranger who simply signed themselves up. The
  * ledger is personal financial history on a public URL, so opting routes in one
  * at a time would make an omission silently public.
+ *
+ * The single exemption is local demo mode, which drops both checks together and
+ * is therefore refused on every Vercel deployment, not just production -- see
+ * `lib/demoMode.ts`.
  */
 export default async function proxy(request: NextRequest) {
   // Demo build: no session exists to check, and `requireUserId()` answers with
