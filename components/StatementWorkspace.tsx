@@ -173,6 +173,15 @@ type PendingUpload = {
   incomes: IncomeItem[];
 };
 
+type ExtractionOutcome = {
+  name: string;
+  rowCount: number;
+  month: string | null;
+  monthFromRows: boolean;
+  artifactDir: string;
+  error?: string;
+};
+
 const CASH_FLOW_GRAPH_TYPES = [
   { value: "flow", label: "Flow" },
   { value: "pie", label: "Pie" }
@@ -297,7 +306,7 @@ function compareBySortKey(
 }
 
 export function StatementWorkspace() {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   // The connection lives on the server, per user. The token is never sent back
   // to the browser, so `apiKeyDraft` is only ever a new value being typed.
   const [notionConnection, setNotionConnection] =
@@ -322,7 +331,7 @@ export function StatementWorkspace() {
     tone: "neutral",
     message: "Months are saved on this machine."
   });
-  const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [pendingUploadMonth, setPendingUploadMonth] = useState("");
   const [lastSave, setLastSave] = useState<SaveExpensesResult | null>(null);
   const [chatInput, setChatInput] = useState("");
@@ -382,6 +391,28 @@ export function StatementWorkspace() {
   const activeStatementId = activeStatement?.id || "";
   const activeStatementSummary = activeStatement?.statement || EMPTY_STATEMENT;
   const sourceFileName = activeStatement?.sourceFileName || "";
+  const firstPendingUpload = pendingUploads[0] || null;
+  const pendingMonth = pendingUploadMonth || activeMonth;
+  const selectedFilesTotalSize = files.reduce(
+    (total, selectedFile) => total + selectedFile.size,
+    0
+  );
+  const uploadLabel =
+    files.length > 1
+      ? `${files.length} files`
+      : files[0]?.name ||
+        sourceFileName ||
+        (statements.length > 1
+          ? `${statements.length} statements`
+          : "Choose file");
+  const uploadSizeLabel =
+    files.length > 1
+      ? `${formatBytes(selectedFilesTotalSize)} total`
+      : files[0]
+        ? formatBytes(files[0].size)
+        : sourceFileName
+          ? "Restored draft"
+          : "PDF or CSV";
 
   const selectedItems = useMemo(
     () => items.filter((item) => selectedIds.has(item.id)),
@@ -633,7 +664,7 @@ export function StatementWorkspace() {
   }
 
   async function extractStatement() {
-    if (!file) {
+    if (files.length === 0) {
       showNotice({
         tone: "error",
         message: "Choose a PDF or CSV statement first."
@@ -641,7 +672,14 @@ export function StatementWorkspace() {
       return;
     }
 
-    if (file.size > MAX_STATEMENT_FILE_SIZE) {
+    const oversizedNames = files
+      .filter((selectedFile) => selectedFile.size > MAX_STATEMENT_FILE_SIZE)
+      .map((selectedFile) => selectedFile.name);
+    const queue = files.filter(
+      (selectedFile) => selectedFile.size <= MAX_STATEMENT_FILE_SIZE
+    );
+
+    if (queue.length === 0) {
       showNotice({
         tone: "error",
         message: "Statement file is too large. The current limit is 12 MB."
@@ -653,70 +691,70 @@ export function StatementWorkspace() {
     setLastSave(null);
     showNotice({ tone: "neutral", message: "Extracting statement rows..." });
 
+    // Files are extracted one request at a time so each stays under the 12 MB
+    // body limit and the 90s function cap, failures stay per-file, and the
+    // months store is only ever mutated by one filing at a time.
+    const outcomes: ExtractionOutcome[] = [];
+
     try {
-      const formData = new FormData();
-      formData.append("statementFile", file);
+      for (const [index, statementFile] of queue.entries()) {
+        if (queue.length > 1) {
+          showNotice({
+            tone: "neutral",
+            message: `Extracting ${index + 1} of ${queue.length}: ${statementFile.name}...`
+          });
+        }
 
-      const notes = categorizationNotes.trim();
-      if (notes) {
-        formData.append("categorizationNotes", notes);
+        try {
+          const formData = new FormData();
+          formData.append("statementFile", statementFile);
+
+          const notes = categorizationNotes.trim();
+          if (notes) {
+            formData.append("categorizationNotes", notes);
+          }
+          formData.append("includeAppCategories", String(includeAppCategories));
+
+          const response = await fetch("/api/extract", {
+            method: "POST",
+            body: formData
+          });
+          const result = (await response.json()) as
+            | ExtractionResponse
+            | { error?: string };
+
+          if (!response.ok) {
+            throw new Error(
+              ("error" in result && result.error) || "Extraction failed."
+            );
+          }
+
+          const extractionResult = result as ExtractionResponse;
+          const determined = await loadExtraction(
+            extractionResult.extraction,
+            extractionResult.artifact?.fileName || statementFile.name
+          );
+
+          outcomes.push({
+            name: statementFile.name,
+            rowCount: extractionResult.extraction.expenses.length,
+            month: determined?.month ?? null,
+            monthFromRows: determined?.source === "rows",
+            artifactDir: extractionResult.artifact?.dir || ""
+          });
+        } catch (error) {
+          outcomes.push({
+            name: statementFile.name,
+            rowCount: 0,
+            month: null,
+            monthFromRows: false,
+            artifactDir: "",
+            error: error instanceof Error ? error.message : "Extraction failed."
+          });
+        }
       }
-      formData.append("includeAppCategories", String(includeAppCategories));
 
-      const response = await fetch("/api/extract", {
-        method: "POST",
-        body: formData
-      });
-      const result = (await response.json()) as
-        | ExtractionResponse
-        | { error?: string };
-
-      if (!response.ok) {
-        throw new Error(
-          ("error" in result && result.error) || "Extraction failed."
-        );
-      }
-
-      const extractionResult = result as ExtractionResponse;
-      const rowCount = extractionResult.extraction.expenses.length;
-      const artifactMessage = extractionResult.artifact?.dir
-        ? ` Artifacts: ${extractionResult.artifact.dir}`
-        : "";
-
-      const determined = await loadExtraction(
-        extractionResult.extraction,
-        extractionResult.artifact?.fileName || file.name
-      );
-
-      if (rowCount === 0) {
-        showNotice({
-          tone: "error",
-          message: `AI extraction returned no expense rows.${artifactMessage}`
-        });
-      } else if (!determined) {
-        showNotice({
-          tone: "neutral",
-          message: `Extracted ${rowCount} expenses. Choose the month this statement belongs to.${artifactMessage}`
-        });
-      } else {
-        const guessNote =
-          determined.source === "rows"
-            ? " Month came from the row dates, so check it."
-            : "";
-
-        showNotice({
-          tone: "success",
-          message: `Extracted ${rowCount} expenses into ${formatMonthLabel(
-            determined.month || ""
-          )}.${guessNote}${artifactMessage}`
-        });
-      }
-    } catch (error) {
-      showNotice({
-        tone: "error",
-        message:
-          error instanceof Error ? error.message : "Extraction failed."
-      });
+      showNotice(extractionNotice(outcomes, oversizedNames));
     } finally {
       setBusy("idle");
     }
@@ -740,7 +778,7 @@ export function StatementWorkspace() {
         },
         body: JSON.stringify({
           sourceFileName:
-            sourceFileName || file?.name || "sample-statement.pdf",
+            sourceFileName || files[0]?.name || "sample-statement.pdf",
           statement: activeStatementSummary,
           statements: statements.map(statementSourceForSave),
           expenses: selectedItems
@@ -1001,12 +1039,15 @@ export function StatementWorkspace() {
     });
 
     if (!determined.month) {
-      setPendingUpload({
-        statement,
-        expenses: statementItems,
-        incomes: statementIncomes
-      });
-      setPendingUploadMonth(activeMonth);
+      // Parked statements queue up so a batch upload never drops one.
+      setPendingUploads((current) => [
+        ...current,
+        {
+          statement,
+          expenses: statementItems,
+          incomes: statementIncomes
+        }
+      ]);
       return null;
     }
 
@@ -1021,32 +1062,42 @@ export function StatementWorkspace() {
   }
 
   async function filePendingUpload() {
+    const pendingUpload = pendingUploads[0];
+
     if (!pendingUpload) {
       return;
     }
 
-    if (!isMonthKey(pendingUploadMonth)) {
+    const month = pendingUploadMonth || activeMonth;
+
+    if (!isMonthKey(month)) {
       showNotice({ tone: "error", message: "Choose a month first." });
       return;
     }
 
     await fileStatement({
-      month: pendingUploadMonth,
+      month,
       statement: pendingUpload.statement,
       expenses: pendingUpload.expenses,
       incomes: pendingUpload.incomes
     });
-    setPendingUpload(null);
+    setPendingUploads((current) => current.slice(1));
+    if (pendingUploads.length <= 1) {
+      setPendingUploadMonth("");
+    }
     showNotice({
       tone: "success",
       message: `Filed ${formatStatementTitle(
         pendingUpload.statement
-      )} into ${formatMonthLabel(pendingUploadMonth)}.`
+      )} into ${formatMonthLabel(month)}.`
     });
   }
 
   function discardPendingUpload() {
-    setPendingUpload(null);
+    setPendingUploads((current) => current.slice(1));
+    if (pendingUploads.length <= 1) {
+      setPendingUploadMonth("");
+    }
     showNotice({ tone: "neutral", message: "Upload discarded." });
   }
 
@@ -1473,28 +1524,20 @@ export function StatementWorkspace() {
 
           <label className="file-drop" htmlFor="statement-upload">
             <Upload size={22} {...hydrationSafeIconProps} />
-            <span>
-              {file
-                ? file.name
-                : sourceFileName ||
-                  (statements.length > 1
-                    ? `${statements.length} statements`
-                    : "Choose file")}
-            </span>
-            <small>
-              {file
-                ? formatBytes(file.size)
-                : sourceFileName
-                  ? "Restored draft"
-                  : "PDF or CSV"}
-            </small>
+            <span>{uploadLabel}</span>
+            <small>{uploadSizeLabel}</small>
           </label>
           <input
             id="statement-upload"
             className="visually-hidden"
             type="file"
+            multiple
             accept="application/pdf,text/csv,.pdf,.csv"
-            onChange={(event) => setFile(event.target.files?.[0] || null)}
+            onChange={(event) => {
+              setFiles(Array.from(event.target.files ?? []));
+              // Reset so picking the same files again still fires onChange.
+              event.target.value = "";
+            }}
           />
 
           <button
@@ -1726,22 +1769,27 @@ export function StatementWorkspace() {
           </div>
         </section>
 
-        {pendingUpload ? (
+        {firstPendingUpload ? (
           <section className="panel month-prompt-panel">
             <div className="panel-heading">
               <CalendarRange size={18} {...hydrationSafeIconProps} />
-              <h2>Pick a month</h2>
+              <h2>
+                Pick a month
+                {pendingUploads.length > 1
+                  ? ` (${pendingUploads.length} left)`
+                  : ""}
+              </h2>
             </div>
             <p className="month-prompt-copy">
-              {formatStatementTitle(pendingUpload.statement)} has no usable
-              statement period and no usable row dates. Choose the month it
-              belongs to.
+              {formatStatementTitle(firstPendingUpload.statement)} has no
+              usable statement period and no usable row dates. Choose the
+              month it belongs to.
             </p>
             <label className="field">
               <span>Month</span>
               <input
                 type="month"
-                value={pendingUploadMonth}
+                value={pendingMonth}
                 onChange={(event) => setPendingUploadMonth(event.target.value)}
               />
             </label>
@@ -1749,7 +1797,7 @@ export function StatementWorkspace() {
               className="secondary-button"
               type="button"
               title="File this statement"
-              disabled={!isMonthKey(pendingUploadMonth)}
+              disabled={!isMonthKey(pendingMonth)}
               onClick={() => void filePendingUpload()}
             >
               <CalendarRange size={18} {...hydrationSafeIconProps} />
@@ -3946,4 +3994,110 @@ function formatBytes(value: number) {
   }
 
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function extractionNotice(
+  outcomes: readonly ExtractionOutcome[],
+  skippedNames: readonly string[]
+): Notice {
+  const failed = outcomes.filter((outcome) => Boolean(outcome.error));
+  const succeeded = outcomes.filter((outcome) => !outcome.error);
+
+  // A lone file keeps the exact wording the single upload flow always had.
+  if (outcomes.length === 1 && skippedNames.length === 0) {
+    const outcome = outcomes[0];
+    const artifactMessage = outcome.artifactDir
+      ? ` Artifacts: ${outcome.artifactDir}`
+      : "";
+
+    if (outcome.error) {
+      return { tone: "error", message: outcome.error };
+    }
+
+    if (outcome.rowCount === 0) {
+      return {
+        tone: "error",
+        message: `AI extraction returned no expense rows.${artifactMessage}`
+      };
+    }
+
+    if (!outcome.month) {
+      return {
+        tone: "neutral",
+        message: `Extracted ${outcome.rowCount} expenses. Choose the month this statement belongs to.${artifactMessage}`
+      };
+    }
+
+    return {
+      tone: "success",
+      message: `Extracted ${outcome.rowCount} expenses into ${formatMonthLabel(
+        outcome.month
+      )}.${
+        outcome.monthFromRows
+          ? " Month came from the row dates, so check it."
+          : ""
+      }${artifactMessage}`
+    };
+  }
+
+  const totalRows = succeeded.reduce(
+    (total, outcome) => total + outcome.rowCount,
+    0
+  );
+  const segments = [
+    `Extracted ${totalRows} expense${totalRows === 1 ? "" : "s"} from ${
+      succeeded.length
+    } of ${outcomes.length + skippedNames.length} statements.`
+  ];
+  // Parked statements (no usable month) are the ones the panel below asks
+  // about, whether or not they carried rows; filed-but-empty ones are the
+  // extraction-quality signal.
+  const zeroRows = succeeded.filter(
+    (outcome) => outcome.rowCount === 0 && outcome.month
+  );
+  const needsMonth = succeeded.filter((outcome) => !outcome.month);
+
+  if (zeroRows.length) {
+    segments.push(
+      `No expense rows: ${zeroRows
+        .map((outcome) =>
+          outcome.artifactDir
+            ? `${outcome.name} (artifacts: ${outcome.artifactDir})`
+            : outcome.name
+        )
+        .join(", ")}.`
+    );
+  }
+
+  if (needsMonth.length) {
+    segments.push(
+      `Needs a month below: ${needsMonth
+        .map((outcome) => outcome.name)
+        .join(", ")}.`
+    );
+  }
+
+  if (failed.length) {
+    segments.push(
+      `Failed: ${failed
+        .map(
+          (outcome) => `${outcome.name} (${outcome.error || "extraction failed"})`
+        )
+        .join(", ")}.`
+    );
+  }
+
+  if (skippedNames.length) {
+    segments.push(`Too large (12 MB limit): ${skippedNames.join(", ")}.`);
+  }
+
+  return {
+    tone:
+      failed.length || skippedNames.length
+        ? "error"
+        : zeroRows.length || needsMonth.length
+          ? "neutral"
+          : "success",
+    message: segments.join(" ")
+  };
 }

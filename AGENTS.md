@@ -171,6 +171,11 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
 - Reviewer categorization notes are stored per user in `user_settings`, submitted with
   `/api/extract`, and included in OpenRouter prompt/debug artifacts.
 - CSV uploads are extracted through OpenRouter from uploaded CSV text.
+- The file picker accepts multiple files. The workspace extracts them one
+  request at a time (per-file artifacts and failures; the 12 MB check skips
+  oversized files with a notice), and statements whose month cannot be
+  determined queue up in the Pick a month panel instead of overwriting each
+  other. The `/api/extract` contract is unchanged: one statement per request.
 - Payment rows and `AUTO PAYMENT REVERSAL` rows are excluded by the extraction
   prompts. A reversal is not new spending: its charges were already ledgered as
   expenses in the month they posted, so counting it again would double-count.
