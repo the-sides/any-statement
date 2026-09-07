@@ -142,8 +142,11 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
 ## Current Behavior
 
 - `/` renders the upload/review/save workspace, scoped to one month at a time.
-- The brand lockup, theme toggle, and a simplified upload (file picker + `Extract`, top right)
-  sit in `.app-header` across the top. Every other control lives in `.side-rail`, a fixed
+- `.app-header` is a three-column grid (`1fr auto 1fr`): the brand lockup left, the month
+  stepper (`.header-month`) centred on the page rather than on the leftover space, and the
+  upload (file picker + `Extract`) plus the theme toggle right. Under 1100px the month
+  control drops to its own centred second row, and under 680px the header stacks entirely.
+  Every other control lives in `.side-rail`, a fixed
   full-height overlay that is hidden by default: `StatementWorkspace` tracks the pointer and
   writes `--rail-reveal` (0..1) plus `data-rail-open` straight onto the element, fading and
   creeping the rail out from 20px of the left edge and landing it flush at 12px
@@ -172,7 +175,8 @@ env -u STATEMENT_LEDGER_ALLOWED_EMAILS bun run dev --hostname 127.0.0.1 --port 3
   cash-flow context, but nothing in the UI writes `cashFlowEntries` any more: inputs come
   from recognized income and outputs from the month's category spend, so a stored entry stays
   at whatever the `user_settings` row already holds.
-- The workspace has a light/dark/system theme toggle in the brand lockup. The preference is
+- The workspace has a light/dark/system theme toggle at the top right of the header, after
+  `Extract`. The preference is
   stored in `localStorage` under `statement-ledger:theme` and defaults to the system setting.
   A small inline script in `app/layout.tsx` resolves it onto `<html data-theme>` before first
   paint, so there is no flash of the light theme. Every colour in `app/globals.css` comes from

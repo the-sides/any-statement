@@ -1893,8 +1893,48 @@ export function StatementWorkspace() {
             <p className="eyebrow">Statement Ledger</p>
             <h1>Expense intake</h1>
           </div>
-          <ThemeToggle />
         </div>
+
+        <section className="header-month" aria-label="Active month">
+          <div className="month-stepper">
+            <button
+              className="mini-icon-button"
+              type="button"
+              title="Previous month"
+              aria-label="Previous month"
+              disabled={!previousMonth || monthsLoading}
+              onClick={() => void selectMonth(previousMonth)}
+            >
+              <ChevronLeft size={16} {...hydrationSafeIconProps} />
+            </button>
+            <div className="month-stepper-label">
+              <strong>
+                {activeMonth
+                  ? formatMonthLabel(activeMonth)
+                  : monthsLoading
+                    ? "Loading months"
+                    : "No months yet"}
+              </strong>
+              <small>
+                {activeMonth
+                  ? `${statements.length} ${
+                      statements.length === 1 ? "statement" : "statements"
+                    } / ${items.length} rows`
+                  : "Upload a statement to start one"}
+              </small>
+            </div>
+            <button
+              className="mini-icon-button"
+              type="button"
+              title="Next month"
+              aria-label="Next month"
+              disabled={!nextMonth || monthsLoading}
+              onClick={() => void selectMonth(nextMonth)}
+            >
+              <ChevronRight size={16} {...hydrationSafeIconProps} />
+            </button>
+          </div>
+        </section>
 
         <div className="header-upload">
           <label className="header-file" htmlFor="statement-upload">
@@ -1932,6 +1972,7 @@ export function StatementWorkspace() {
             )}
             Extract
           </button>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -2213,47 +2254,6 @@ export function StatementWorkspace() {
             </button>
           </section>
         ) : null}
-
-        <section className="panel month-stepper-panel">
-          <div className="month-stepper">
-            <button
-              className="mini-icon-button"
-              type="button"
-              title="Previous month"
-              aria-label="Previous month"
-              disabled={!previousMonth || monthsLoading}
-              onClick={() => void selectMonth(previousMonth)}
-            >
-              <ChevronLeft size={16} {...hydrationSafeIconProps} />
-            </button>
-            <div className="month-stepper-label">
-              <strong>
-                {activeMonth
-                  ? formatMonthLabel(activeMonth)
-                  : monthsLoading
-                    ? "Loading months"
-                    : "No months yet"}
-              </strong>
-              <small>
-                {activeMonth
-                  ? `${statements.length} ${
-                      statements.length === 1 ? "statement" : "statements"
-                    } / ${items.length} rows`
-                  : "Upload a statement to start one"}
-              </small>
-            </div>
-            <button
-              className="mini-icon-button"
-              type="button"
-              title="Next month"
-              aria-label="Next month"
-              disabled={!nextMonth || monthsLoading}
-              onClick={() => void selectMonth(nextMonth)}
-            >
-              <ChevronRight size={16} {...hydrationSafeIconProps} />
-            </button>
-          </div>
-        </section>
 
         <section className="panel statement-list-panel">
           <div className="panel-heading panel-heading-split">
