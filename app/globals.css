@@ -408,7 +408,9 @@ a {
   display: inline-flex;
   min-width: 0;
   max-width: 320px;
-  align-items: baseline;
+  /* Center, not baseline: the 16px icon and the 11px size text have no shared
+     baseline, so baseline alignment hangs the icon below the filename. */
+  align-items: center;
   gap: 8px;
   min-height: 40px;
   border: 1px dashed var(--line-strong);
@@ -425,8 +427,12 @@ a {
 }
 
 .header-file svg {
-  align-self: center;
   flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.header-file:hover svg {
+  color: var(--accent);
 }
 
 .header-file span,
@@ -435,6 +441,7 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.1;
 }
 
 .header-file span {

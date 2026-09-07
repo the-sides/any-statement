@@ -474,22 +474,18 @@ export function StatementWorkspace() {
     (total, selectedFile) => total + selectedFile.size,
     0
   );
+  // The chip only ever describes the files staged right now. A restored month
+  // is not a pending upload, so it must not look like one.
   const uploadLabel =
     files.length > 1
       ? `${files.length} files`
-      : files[0]?.name ||
-        sourceFileName ||
-        (statements.length > 1
-          ? `${statements.length} statements`
-          : "Choose file");
+      : files[0]?.name || "Choose file(s)";
   const uploadSizeLabel =
     files.length > 1
       ? `${formatBytes(selectedFilesTotalSize)} total`
       : files[0]
         ? formatBytes(files[0].size)
-        : sourceFileName
-          ? "Restored draft"
-          : "PDF or CSV";
+        : "PDF or CSV";
 
   const selectedItems = useMemo(
     () => items.filter((item) => selectedIds.has(item.id)),
@@ -928,6 +924,9 @@ export function StatementWorkspace() {
 
       showNotice(extractionNotice(outcomes, oversizedNames));
     } finally {
+      // Uploaded files are consumed: the statement now lives in the month
+      // document, so nothing is left staged to extract again.
+      setFiles([]);
       setBusy("idle");
     }
   }
