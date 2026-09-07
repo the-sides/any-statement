@@ -1419,14 +1419,26 @@ th:last-child {
   width: 42px;
 }
 
+.sort-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
 th:nth-child(2),
 td:nth-child(2) {
-  width: 170px;
+  width: 80px;
 }
 
 th:nth-child(3),
 td:nth-child(3) {
-  width: 150px;
+  width: 120px;
 }
 
 th:nth-child(4),
@@ -1441,26 +1453,17 @@ td:nth-child(5) {
 
 th:nth-child(6),
 td:nth-child(6) {
-  width: 120px;
-}
-
-th:nth-child(7),
-td:nth-child(7),
-th:nth-child(8),
-td:nth-child(8),
-th:nth-child(9),
-td:nth-child(9) {
   width: 150px;
 }
 
-th:nth-child(10),
-td:nth-child(10) {
-  width: 120px;
+th:nth-child(7),
+td:nth-child(7) {
+  width: 230px;
 }
 
-th:nth-child(11),
-td:nth-child(11) {
-  width: 230px;
+th:nth-child(8),
+td:nth-child(8) {
+  width: 150px;
 }
 
 td input,

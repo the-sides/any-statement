@@ -5,8 +5,10 @@ import {
   Bot,
   CalendarRange,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Database,
   FileText,
   Layers,
@@ -40,8 +42,6 @@ import {
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   DEFAULT_EXPENSE_CATEGORY_DEFINITIONS,
-  PAYMENT_METHODS,
-  STATEMENT_SECTIONS,
   STATEMENT_TYPES,
   FALLBACK_CATEGORY_NAME,
   getDefaultCategoryName,
@@ -51,8 +51,6 @@ import {
   selectActiveCategories,
   type ExpenseCategory,
   type ExpenseCategoryDefinition,
-  type PaymentMethod,
-  type StatementSection,
   type StatementType
 } from "@/lib/categories";
 import {
@@ -226,6 +224,69 @@ const hydrationSafeIconProps = {
   suppressHydrationWarning: true
 } as const;
 
+type SortKey =
+  | "statement"
+  | "amount"
+  | "merchant"
+  | "description"
+  | "category"
+  | "notes"
+  | "date";
+
+type SortState = { key: SortKey; dir: "asc" | "desc" };
+
+const TABLE_SORT_COLUMNS: { key: SortKey; label: string }[] = [
+  { key: "statement", label: "Statement" },
+  { key: "amount", label: "Amount" },
+  { key: "merchant", label: "Merchant" },
+  { key: "description", label: "Description" },
+  { key: "category", label: "Category" },
+  { key: "notes", label: "Notes" },
+  { key: "date", label: "Date" }
+];
+
+function sortKeyValue(
+  item: ExpenseItem,
+  key: SortKey,
+  statementById: Map<string, ReviewStatement>
+): string | number {
+  switch (key) {
+    case "statement":
+      return formatStatementShortLabel(
+        statementById.get(item.statementId || "")
+      );
+    case "amount":
+      return item.amount;
+    case "merchant":
+      return item.merchant;
+    case "description":
+      return item.description;
+    case "category":
+      return item.category;
+    case "notes":
+      return item.notes;
+    case "date":
+      return item.date;
+  }
+}
+
+function compareBySortKey(
+  a: ExpenseItem,
+  b: ExpenseItem,
+  key: SortKey,
+  direction: 1 | -1,
+  statementById: Map<string, ReviewStatement>
+): number {
+  const aValue = sortKeyValue(a, key, statementById);
+  const bValue = sortKeyValue(b, key, statementById);
+
+  if (typeof aValue === "number" && typeof bValue === "number") {
+    return (aValue - bValue) * direction;
+  }
+
+  return String(aValue).localeCompare(String(bValue)) * direction;
+}
+
 export function StatementWorkspace() {
   const [file, setFile] = useState<File | null>(null);
   // The connection lives on the server, per user. The token is never sent back
@@ -238,6 +299,7 @@ export function StatementWorkspace() {
   const [notionBusy, setNotionBusy] = useState(false);
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [graphZoom, setGraphZoom] = useState(DEFAULT_GRAPH_ZOOM);
+  const [sort, setSort] = useState<SortState | null>(null);
   const [cashFlowGraphType, setCashFlowGraphType] =
     useState<CashFlowGraphType>("flow");
   const [busy, setBusy] = useState<"idle" | "extracting" | "saving">("idle");
@@ -319,13 +381,23 @@ export function StatementWorkspace() {
     () => new Set(categoryFilters),
     [categoryFilters]
   );
-  const visibleItems = useMemo(
-    () =>
+  const visibleItems = useMemo(() => {
+    const filtered =
       categoryFilterSet.size === 0
         ? items
-        : items.filter((item) => categoryFilterSet.has(item.category)),
-    [categoryFilterSet, items]
-  );
+        : items.filter((item) => categoryFilterSet.has(item.category));
+
+    if (!sort) {
+      return filtered;
+    }
+
+    const direction = sort.dir === "asc" ? 1 : -1;
+
+    // Display-only ordering; the month document keeps its stored order.
+    return [...filtered].sort((a, b) =>
+      compareBySortKey(a, b, sort.key, direction, statementById)
+    );
+  }, [categoryFilterSet, items, sort, statementById]);
   const visibleSelectedItems = useMemo(
     () => visibleItems.filter((item) => selectedIds.has(item.id)),
     [selectedIds, visibleItems]
@@ -988,6 +1060,16 @@ export function StatementWorkspace() {
             }
           : statement
       )
+    });
+  }
+
+  function toggleSort(key: SortKey) {
+    setSort((current) => {
+      if (!current || current.key !== key) {
+        return { key, dir: "asc" };
+      }
+
+      return current.dir === "asc" ? { key, dir: "desc" } : null;
     });
   }
 
@@ -2336,23 +2418,48 @@ export function StatementWorkspace() {
             <thead>
               <tr>
                 <th aria-label="Selected" />
-                <th>Statement</th>
-                <th>Date</th>
-                <th>Merchant</th>
-                <th>Description</th>
-                <th>Amount</th>
-                <th>Category</th>
-                <th>Method</th>
-                <th>Section</th>
-                <th>Confidence</th>
-                <th>Notes</th>
+                {TABLE_SORT_COLUMNS.map((column) => {
+                  const activeSort =
+                    sort && sort.key === column.key ? sort : null;
+
+                  return (
+                    <th
+                      key={column.key}
+                      aria-sort={
+                        activeSort
+                          ? activeSort.dir === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : undefined
+                      }
+                    >
+                      <button
+                        className="sort-header"
+                        type="button"
+                        onClick={() => toggleSort(column.key)}
+                      >
+                        {column.label}
+                        {activeSort ? (
+                          activeSort.dir === "asc" ? (
+                            <ChevronUp size={13} {...hydrationSafeIconProps} />
+                          ) : (
+                            <ChevronDown
+                              size={13}
+                              {...hydrationSafeIconProps}
+                            />
+                          )
+                        ) : null}
+                      </button>
+                    </th>
+                  );
+                })}
                 <th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={12}>
+                  <td colSpan={9}>
                     <div className="empty-state">
                       {monthsLoading
                         ? "Loading this month..."
@@ -2365,7 +2472,7 @@ export function StatementWorkspace() {
               ) : null}
               {items.length > 0 && visibleItems.length === 0 ? (
                 <tr>
-                  <td colSpan={12}>
+                  <td colSpan={9}>
                     <div className="empty-state">
                       No rows match the active category filter.
                     </div>
@@ -2395,10 +2502,15 @@ export function StatementWorkspace() {
                   </td>
                   <td>
                     <input
-                      type="date"
-                      value={item.date}
+                      className="amount-input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.amount}
                       onChange={(event) =>
-                        updateItem(item.id, { date: event.target.value })
+                        updateItem(item.id, {
+                          amount: Number(event.target.value)
+                        })
                       }
                     />
                   </td>
@@ -2415,20 +2527,6 @@ export function StatementWorkspace() {
                       value={item.description}
                       onChange={(event) =>
                         updateItem(item.id, { description: event.target.value })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      className="amount-input"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={item.amount}
-                      onChange={(event) =>
-                        updateItem(item.id, {
-                          amount: Number(event.target.value)
-                        })
                       }
                     />
                   </td>
@@ -2453,49 +2551,19 @@ export function StatementWorkspace() {
                     </select>
                   </td>
                   <td>
-                    <select
-                      value={item.paymentMethod}
-                      onChange={(event) =>
-                        updateItem(item.id, {
-                          paymentMethod: event.target.value as PaymentMethod
-                        })
-                      }
-                    >
-                      {PAYMENT_METHODS.map((method) => (
-                        <option key={method} value={method}>
-                          {method}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <select
-                      value={item.statementSection}
-                      onChange={(event) =>
-                        updateItem(item.id, {
-                          statementSection: event.target
-                            .value as StatementSection
-                        })
-                      }
-                    >
-                      {STATEMENT_SECTIONS.map((section) => (
-                        <option key={section} value={section}>
-                          {section}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <div className="confidence">
-                      <span>{Math.round(item.confidence * 100)}%</span>
-                      <meter min="0" max="1" value={item.confidence} />
-                    </div>
-                  </td>
-                  <td>
                     <input
                       value={item.notes}
                       onChange={(event) =>
                         updateItem(item.id, { notes: event.target.value })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="date"
+                      value={item.date}
+                      onChange={(event) =>
+                        updateItem(item.id, { date: event.target.value })
                       }
                     />
                   </td>
@@ -3202,25 +3270,17 @@ function formatStatementShortLabel(statement?: ReviewStatement | null) {
     return "Unknown";
   }
 
-  return truncateText(
+  const label =
     statement.statement.accountMask.trim() ||
-      statement.statement.institution.trim() ||
-      statement.sourceFileName.trim() ||
-      "Statement",
-    18
-  );
+    statement.statement.institution.trim() ||
+    statement.sourceFileName.trim() ||
+    "Statement";
+
+  return label.slice(0, 5);
 }
 
 function formatStatementPeriod(statement: StatementSummary) {
   return [statement.periodStart, statement.periodEnd].filter(Boolean).join(" to ");
-}
-
-function truncateText(value: string, maxLength: number) {
-  if (value.length <= maxLength) {
-    return value;
-  }
-
-  return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
 function categoryOptionsForItem(
