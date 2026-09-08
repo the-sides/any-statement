@@ -48,6 +48,26 @@ export type MonthDetermination = {
   source: MonthDeterminationSource;
 };
 
+/**
+ * One month's share of a statement. A statement covering a single billing
+ * cycle produces exactly one; a multi-month export produces one per calendar
+ * month its rows fall in.
+ */
+export type StatementFilingSegment = {
+  month: string;
+  statement: ReviewStatement;
+  expenses: ExpenseItem[];
+  incomes: IncomeItem[];
+  selectedIds: string[];
+};
+
+export type StatementFilingPlan = {
+  segments: StatementFilingSegment[];
+  /** Where the workspace should land; null when nothing could be determined. */
+  month: string | null;
+  source: MonthDeterminationSource;
+};
+
 type CalendarDate = {
   year: number;
   month: number;
@@ -72,10 +92,10 @@ export function determineStatementMonth(input: {
   statement: StatementSummary;
   expenses: readonly ExpenseItem[];
 }): MonthDetermination {
-  const fromPeriod = monthFromPeriod(
-    input.statement.periodStart,
-    input.statement.periodEnd
-  );
+  const period = parsePeriod(input.statement);
+  const fromPeriod = period
+    ? pickBusiestMonth(countPeriodDaysByMonth(period.start, period.end))
+    : null;
 
   if (fromPeriod) {
     return { month: fromPeriod, source: "period" };
@@ -94,6 +114,109 @@ export function statementMonthSourceOf(
   determination: MonthDetermination
 ): StatementMonthSource {
   return determination.source === "rows" ? "rows" : "period";
+}
+
+/**
+ * A billing cycle is about a month long, so a period no longer than this is one
+ * statement of one month even when it straddles two calendar months - that is
+ * what keeps a Jun 12 - Jul 11 card cycle filed beside the calendar-month bank
+ * statement. Anything materially longer (a bank export covering Jan - May, say)
+ * is not a cycle at all, and filing all of it under its busiest month buries
+ * four months of rows in the fifth.
+ */
+const SINGLE_CYCLE_DAYS = 45;
+
+/**
+ * Decides which month or months a statement's rows belong to, and splits the
+ * rows accordingly. Callers file every returned segment; `month` is the one to
+ * show afterwards.
+ */
+export function planStatementFiling(input: {
+  statement: ReviewStatement;
+  expenses: readonly ExpenseItem[];
+  incomes?: readonly IncomeItem[];
+  selectedIds?: Iterable<string>;
+}): StatementFilingPlan {
+  const expenses = [...input.expenses];
+  const incomes = [...(input.incomes || [])];
+  const selectedIds = new Set(
+    input.selectedIds
+      ? [...input.selectedIds]
+      : expenses.map((expense) => expense.id)
+  );
+  const period = parsePeriod(input.statement.statement);
+  const rowMonths = countRowsByMonth(expenses, incomes);
+  const determined = determineStatementMonth({
+    statement: input.statement.statement,
+    expenses
+  });
+
+  if (!spansMultipleCycles(period, expenses, incomes) || rowMonths.size < 2) {
+    if (!determined.month) {
+      return { segments: [], month: null, source: "none" };
+    }
+
+    return {
+      segments: [
+        {
+          month: determined.month,
+          statement: {
+            ...input.statement,
+            monthSource: statementMonthSourceOf(determined)
+          },
+          expenses,
+          incomes,
+          selectedIds: expenses
+            .map((expense) => expense.id)
+            .filter((id) => selectedIds.has(id))
+        }
+      ],
+      month: determined.month,
+      source: determined.source
+    };
+  }
+
+  // Rows carry their own dates here, so they decide the months rather than the
+  // period. Undated rows fall to the busiest month instead of being dropped.
+  const primaryMonth = pickBusiestMonth(rowMonths) || determined.month;
+
+  if (!primaryMonth) {
+    return { segments: [], month: null, source: "none" };
+  }
+
+  const segments = [...rowMonths.keys()]
+    .sort()
+    .map((month) => {
+      const monthExpenses = expenses.filter(
+        (expense) => rowMonth(expense.date, expense.postedDate, primaryMonth) === month
+      );
+      const monthIncomes = incomes.filter(
+        (income) => rowMonth(income.date, "", primaryMonth) === month
+      );
+      const id = `${input.statement.id}-${month}`;
+
+      return {
+        month,
+        statement: {
+          ...input.statement,
+          id,
+          monthSource: "rows" as const,
+          statement: clampStatementPeriod(
+            input.statement.statement,
+            month,
+            period,
+            [...monthExpenses.map((expense) => expense.date), ...monthIncomes.map((income) => income.date)]
+          )
+        },
+        expenses: monthExpenses.map((expense) => ({ ...expense, statementId: id })),
+        incomes: monthIncomes.map((income) => ({ ...income, statementId: id })),
+        selectedIds: monthExpenses
+          .map((expense) => expense.id)
+          .filter((expenseId) => selectedIds.has(expenseId))
+      };
+    });
+
+  return { segments, month: primaryMonth, source: "rows" };
 }
 
 export function createMonthDocument(input: {
@@ -309,33 +432,24 @@ export function migrateReviewDraftToMonths(draft: ReviewContents): {
   const documents = new Map<string, MonthDocument>();
 
   for (const statement of draft.statements) {
-    const expenses = expensesForStatement(draft, statement.id);
-    const incomes = incomesForStatement(draft, statement.id);
-    const determined = determineStatementMonth({
-      statement: statement.statement,
-      expenses
+    const plan = planStatementFiling({
+      statement,
+      expenses: expensesForStatement(draft, statement.id),
+      incomes: incomesForStatement(draft, statement.id),
+      selectedIds
     });
 
-    if (!determined.month) {
+    if (plan.segments.length === 0) {
       unresolvedStatementIds.push(statement.id);
       continue;
     }
 
-    documents.set(
-      determined.month,
-      fileStatementIntoMonth(documents.get(determined.month) || null, {
-        month: determined.month,
-        statement: {
-          ...statement,
-          monthSource: statementMonthSourceOf(determined)
-        },
-        expenses,
-        incomes,
-        selectedIds: expenses
-          .map((expense) => expense.id)
-          .filter((id) => selectedIds.has(id))
-      })
-    );
+    for (const segment of plan.segments) {
+      documents.set(
+        segment.month,
+        fileStatementIntoMonth(documents.get(segment.month) || null, segment)
+      );
+    }
   }
 
   return {
@@ -364,15 +478,124 @@ function incomesForStatement(
   );
 }
 
-function monthFromPeriod(periodStart: string, periodEnd: string) {
-  const start = parseCalendarDate(periodStart);
-  const end = parseCalendarDate(periodEnd);
+type StatementPeriod = { start: CalendarDate; end: CalendarDate } | null;
+
+function parsePeriod(statement: StatementSummary): StatementPeriod {
+  const start = parseCalendarDate(statement.periodStart);
+  const end = parseCalendarDate(statement.periodEnd);
 
   if (!start || !end || compareCalendarDates(start, end) > 0) {
     return null;
   }
 
-  return pickBusiestMonth(countPeriodDaysByMonth(start, end));
+  return { start, end };
+}
+
+/**
+ * True when the statement covers materially more than one billing cycle, judged
+ * by its period, or by the span of its own row dates when the period is
+ * unusable.
+ */
+function spansMultipleCycles(
+  period: StatementPeriod,
+  expenses: readonly ExpenseItem[],
+  incomes: readonly IncomeItem[]
+) {
+  if (period) {
+    return inclusiveDays(period.start, period.end) > SINGLE_CYCLE_DAYS;
+  }
+
+  const dates = [
+    ...expenses.map((expense) => expense.date || expense.postedDate),
+    ...incomes.map((income) => income.date)
+  ]
+    .map(parseCalendarDate)
+    .filter((date): date is CalendarDate => Boolean(date))
+    .sort(compareCalendarDates);
+
+  if (dates.length < 2) {
+    return false;
+  }
+
+  return inclusiveDays(dates[0], dates[dates.length - 1]) > SINGLE_CYCLE_DAYS;
+}
+
+function countRowsByMonth(
+  expenses: readonly ExpenseItem[],
+  incomes: readonly IncomeItem[]
+) {
+  const counts = new Map<string, number>();
+
+  for (const key of [
+    ...expenses.map((expense) => rowMonth(expense.date, expense.postedDate, "")),
+    ...incomes.map((income) => rowMonth(income.date, "", ""))
+  ]) {
+    if (key) {
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+
+  return counts;
+}
+
+/** A row's own month, falling back to `fallbackMonth` when it carries no date. */
+function rowMonth(date: string, postedDate: string, fallbackMonth: string) {
+  const parsed = parseCalendarDate(date) || parseCalendarDate(postedDate);
+
+  return parsed ? monthKeyOf(parsed.year, parsed.month) : fallbackMonth;
+}
+
+/**
+ * Narrows a split statement's period to the part of it that lands in one month,
+ * so each month's copy describes that month rather than the whole export.
+ */
+function clampStatementPeriod(
+  statement: StatementSummary,
+  month: string,
+  period: StatementPeriod,
+  rowDates: readonly string[]
+): StatementSummary {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const monthStart: CalendarDate = { year, month: monthNumber, day: 1 };
+  const monthEnd: CalendarDate = {
+    year,
+    month: monthNumber,
+    day: daysInMonth(year, monthNumber)
+  };
+
+  if (period) {
+    return {
+      ...statement,
+      periodStart: formatCalendarDate(
+        compareCalendarDates(period.start, monthStart) > 0 ? period.start : monthStart
+      ),
+      periodEnd: formatCalendarDate(
+        compareCalendarDates(period.end, monthEnd) < 0 ? period.end : monthEnd
+      )
+    };
+  }
+
+  const dates = rowDates
+    .map(parseCalendarDate)
+    .filter((date): date is CalendarDate => Boolean(date))
+    .sort(compareCalendarDates);
+
+  return {
+    ...statement,
+    periodStart: formatCalendarDate(dates[0] || monthStart),
+    periodEnd: formatCalendarDate(dates[dates.length - 1] || monthEnd)
+  };
+}
+
+function inclusiveDays(start: CalendarDate, end: CalendarDate) {
+  const startMs = Date.UTC(start.year, start.month - 1, start.day);
+  const endMs = Date.UTC(end.year, end.month - 1, end.day);
+
+  return Math.round((endMs - startMs) / 86_400_000) + 1;
+}
+
+function formatCalendarDate(date: CalendarDate) {
+  return `${monthKeyOf(date.year, date.month)}-${String(date.day).padStart(2, "0")}`;
 }
 
 function monthFromRowDates(expenses: readonly ExpenseItem[]) {

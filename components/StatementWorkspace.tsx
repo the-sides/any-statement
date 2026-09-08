@@ -85,14 +85,14 @@ import {
   updateCategorizationNotes
 } from "@/lib/userSettingsClientStore";
 import {
-  determineStatementMonth,
   formatMonthLabel,
   isMonthKey,
-  statementMonthSourceOf
+  planStatementFiling
 } from "@/lib/months";
 import {
   clearMonthsNotice,
   fileStatement,
+  fileStatementSegments,
   flushMonths,
   applyExpenseEdits,
   readInitialMonthsSnapshot,
@@ -273,6 +273,8 @@ type ExtractionOutcome = {
   name: string;
   rowCount: number;
   month: string | null;
+  /** Every month the statement was filed into; more than one when it spans months. */
+  months: string[];
   monthFromRows: boolean;
   artifactDir: string;
   error?: string;
@@ -1288,7 +1290,7 @@ export function StatementWorkspace() {
           }
 
           const extractionResult = result as ExtractionResponse;
-          const determined = await loadExtraction(
+          const plan = await loadExtraction(
             extractionResult.extraction,
             extractionResult.artifact?.fileName || statementFile.name
           );
@@ -1296,8 +1298,9 @@ export function StatementWorkspace() {
           outcomes.push({
             name: statementFile.name,
             rowCount: extractionResult.extraction.expenses.length,
-            month: determined?.month ?? null,
-            monthFromRows: determined?.source === "rows",
+            month: plan?.month ?? null,
+            months: plan?.segments.map((segment) => segment.month) || [],
+            monthFromRows: plan?.source === "rows",
             artifactDir: extractionResult.artifact?.dir || ""
           });
         } catch (error) {
@@ -1305,6 +1308,7 @@ export function StatementWorkspace() {
             name: statementFile.name,
             rowCount: 0,
             month: null,
+            months: [],
             monthFromRows: false,
             artifactDir: "",
             error: error instanceof Error ? error.message : "Extraction failed."
@@ -1642,20 +1646,19 @@ export function StatementWorkspace() {
       id: `${statementId}-income-${index + 1}-${income.id}`,
       statementId
     }));
-    const determined = determineStatementMonth({
-      statement: nextExtraction.statement,
-      expenses: statementItems
-    });
     const statement = createReviewStatement({
       id: statementId,
       statement: nextExtraction.statement,
       sourceFileName: nextSourceFileName,
-      monthSource: determined.month
-        ? statementMonthSourceOf(determined)
-        : "manual"
+      monthSource: "manual"
+    });
+    const plan = planStatementFiling({
+      statement,
+      expenses: statementItems,
+      incomes: statementIncomes
     });
 
-    if (!determined.month) {
+    if (!plan.month || plan.segments.length === 0) {
       // Parked statements queue up so a batch upload never drops one.
       setPendingUploads((current) => [
         ...current,
@@ -1668,14 +1671,12 @@ export function StatementWorkspace() {
       return null;
     }
 
-    await fileStatement({
-      month: determined.month,
-      statement,
-      expenses: statementItems,
-      incomes: statementIncomes
+    await fileStatementSegments({
+      segments: plan.segments,
+      primaryMonth: plan.month
     });
 
-    return determined;
+    return plan;
   }
 
   async function filePendingUpload() {
@@ -4172,6 +4173,19 @@ function extractionNotice(
       return {
         tone: "neutral",
         message: `Extracted ${outcome.rowCount} expenses. Choose the month this statement belongs to.${artifactMessage}`
+      };
+    }
+
+    if (outcome.months.length > 1) {
+      return {
+        tone: "success",
+        message: `Extracted ${outcome.rowCount} expenses across ${
+          outcome.months.length
+        } months: ${outcome.months
+          .map(formatMonthLabel)
+          .join(", ")}. Showing ${formatMonthLabel(
+          outcome.month
+        )}.${artifactMessage}`
       };
     }
 

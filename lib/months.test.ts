@@ -8,6 +8,7 @@ import {
   mergeMonthDocuments,
   migrateReviewDraftToMonths,
   parseMonthDocument,
+  planStatementFiling,
   reassignStatementMonth
 } from "@/lib/months";
 import {
@@ -15,7 +16,7 @@ import {
   createReviewStatement,
   createStatementExpenses
 } from "@/lib/reviewDraft";
-import type { ExpenseItem, StatementSummary } from "@/lib/types";
+import type { ExpenseItem, IncomeItem, StatementSummary } from "@/lib/types";
 
 const statementSummary: StatementSummary = {
   institution: "American Express",
@@ -152,6 +153,162 @@ describe("statement month determination", () => {
 
     expect(determined.month).toBe(null);
     expect(determined.source).toBe("none");
+  });
+});
+
+describe("multi-month statements", () => {
+  function income(id: string, date: string, amount = 100): IncomeItem {
+    return {
+      id,
+      date,
+      source: "MergerAI, Inc.",
+      amount,
+      currency: "USD",
+      kind: "paycheck",
+      confidence: 0.9,
+      notes: ""
+    };
+  }
+
+  test("keeps a straddling billing cycle in one month", () => {
+    const card = statementWith(
+      "statement-card",
+      summaryWithPeriod("2026-06-12", "2026-07-11"),
+      ["2026-06-20", "2026-07-02", "2026-07-08"]
+    );
+    const plan = planStatementFiling({
+      statement: card.statement,
+      expenses: card.expenses
+    });
+
+    expect(plan.month).toBe("2026-06");
+    expect(plan.segments.map((segment) => segment.month)).toEqual(["2026-06"]);
+    expect(plan.segments[0].expenses.length).toBe(3);
+    expect(plan.segments[0].statement.id).toBe("statement-card");
+  });
+
+  test("splits an export covering several months into one segment per month", () => {
+    const exported = statementWith(
+      "statement-export",
+      summaryWithPeriod("2026-01-02", "2026-05-29"),
+      ["2026-01-05", "2026-03-06", "2026-03-19", "2026-05-28"]
+    );
+    const plan = planStatementFiling({
+      statement: exported.statement,
+      expenses: exported.expenses,
+      incomes: [income("inc-1", "2026-02-14")]
+    });
+
+    expect(plan.segments.map((segment) => segment.month)).toEqual([
+      "2026-01",
+      "2026-02",
+      "2026-03",
+      "2026-05"
+    ]);
+    expect(
+      plan.segments.map((segment) => segment.expenses.length)
+    ).toEqual([1, 0, 2, 1]);
+    expect(plan.segments[1].incomes.map((row) => row.id)).toEqual(["inc-1"]);
+    // The busiest month is where the reviewer lands.
+    expect(plan.month).toBe("2026-03");
+    expect(plan.source).toBe("rows");
+  });
+
+  test("gives each month its own statement so filing one cannot evict another", () => {
+    const exported = statementWith(
+      "statement-export",
+      summaryWithPeriod("2026-01-02", "2026-05-29"),
+      ["2026-01-05", "2026-03-06"]
+    );
+    const plan = planStatementFiling({
+      statement: exported.statement,
+      expenses: exported.expenses
+    });
+    const ids = plan.segments.map((segment) => segment.statement.id);
+
+    expect(new Set(ids).size).toBe(ids.length);
+
+    for (const segment of plan.segments) {
+      expect(
+        segment.expenses.every(
+          (expense) => expense.statementId === segment.statement.id
+        )
+      ).toBe(true);
+    }
+  });
+
+  test("narrows each segment's period to the month it covers", () => {
+    const exported = statementWith(
+      "statement-export",
+      summaryWithPeriod("2026-01-02", "2026-03-10"),
+      ["2026-01-05", "2026-02-14", "2026-03-06"]
+    );
+    const periods = planStatementFiling({
+      statement: exported.statement,
+      expenses: exported.expenses
+    }).segments.map((segment) => [
+      segment.statement.statement.periodStart,
+      segment.statement.statement.periodEnd
+    ]);
+
+    expect(periods).toEqual([
+      ["2026-01-02", "2026-01-31"],
+      ["2026-02-01", "2026-02-28"],
+      ["2026-03-01", "2026-03-10"]
+    ]);
+  });
+
+  test("files an undated row into the busiest month rather than dropping it", () => {
+    const exported = statementWith(
+      "statement-export",
+      summaryWithPeriod("2026-01-02", "2026-05-29"),
+      ["2026-01-05", "2026-03-06", "2026-03-19", ""]
+    );
+    const plan = planStatementFiling({
+      statement: exported.statement,
+      expenses: exported.expenses.map((expense) =>
+        expense.date ? expense : { ...expense, postedDate: "" }
+      )
+    });
+    const filed = plan.segments.flatMap((segment) => segment.expenses);
+
+    expect(filed.length).toBe(4);
+    expect(
+      plan.segments.find((segment) => segment.month === "2026-03")?.expenses
+        .length
+    ).toBe(3);
+  });
+
+  test("splits on row dates when the period is missing", () => {
+    const exported = statementWith("statement-export", summaryWithPeriod("", ""), [
+      "2026-01-05",
+      "2026-04-06"
+    ]);
+    const plan = planStatementFiling({
+      statement: exported.statement,
+      expenses: exported.expenses
+    });
+
+    expect(plan.segments.map((segment) => segment.month)).toEqual([
+      "2026-01",
+      "2026-04"
+    ]);
+  });
+
+  test("carries only the selected rows of each month into its segment", () => {
+    const exported = statementWith(
+      "statement-export",
+      summaryWithPeriod("2026-01-02", "2026-05-29"),
+      ["2026-01-05", "2026-03-06"]
+    );
+    const plan = planStatementFiling({
+      statement: exported.statement,
+      expenses: exported.expenses,
+      selectedIds: [exported.expenses[1].id]
+    });
+
+    expect(plan.segments[0].selectedIds).toEqual([]);
+    expect(plan.segments[1].selectedIds).toEqual([exported.expenses[1].id]);
   });
 });
 

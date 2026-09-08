@@ -7,7 +7,8 @@ import {
   reassignStatementMonth,
   summarizeMonthDocument,
   type MonthDocument,
-  type MonthSummary
+  type MonthSummary,
+  type StatementFilingSegment
 } from "@/lib/months";
 import {
   applyExpenseEditsToRows,
@@ -141,33 +142,61 @@ export async function selectMonth(month: string) {
   }
 }
 
+/**
+ * Files one statement, which may cover several months. Each segment is written
+ * as its own whole month document; the workspace lands on `primaryMonth`.
+ */
+export async function fileStatementSegments(input: {
+  segments: readonly StatementFilingSegment[];
+  primaryMonth: string;
+}) {
+  clearMonthsNotice();
+  await flushMonths();
+
+  try {
+    for (const segment of input.segments) {
+      const existing =
+        segment.month === state.activeMonth && state.document
+          ? state.document
+          : await fetchMonthDocument(segment.month);
+      const next = fileStatementIntoMonth(existing, segment);
+
+      setState({
+        status: "ready",
+        activeMonth: segment.month,
+        document: next,
+        months: withMonthSummary(state.months, summarizeMonthDocument(next))
+      });
+
+      await enqueueWrite(() => putMonthDocument(next));
+    }
+
+    if (state.activeMonth !== input.primaryMonth) {
+      await selectMonth(input.primaryMonth);
+    }
+  } catch (error) {
+    setState({ error: errorMessage(error, "Filing the statement failed.") });
+  }
+}
+
 export async function fileStatement(input: {
   month: string;
   statement: ReviewStatement;
   expenses: readonly ExpenseItem[];
   incomes?: readonly IncomeItem[];
 }) {
-  clearMonthsNotice();
-  await flushMonths();
-
-  try {
-    const existing =
-      input.month === state.activeMonth && state.document
-        ? state.document
-        : await fetchMonthDocument(input.month);
-    const next = fileStatementIntoMonth(existing, input);
-
-    setState({
-      status: "ready",
-      activeMonth: input.month,
-      document: next,
-      months: withMonthSummary(state.months, summarizeMonthDocument(next))
-    });
-
-    await enqueueWrite(() => putMonthDocument(next));
-  } catch (error) {
-    setState({ error: errorMessage(error, "Filing the statement failed.") });
-  }
+  await fileStatementSegments({
+    segments: [
+      {
+        month: input.month,
+        statement: input.statement,
+        expenses: [...input.expenses],
+        incomes: [...(input.incomes || [])],
+        selectedIds: input.expenses.map((expense) => expense.id)
+      }
+    ],
+    primaryMonth: input.month
+  });
 }
 
 export async function reassignStatement(input: {
