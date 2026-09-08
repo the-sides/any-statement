@@ -1,6 +1,13 @@
 import type { CashFlowSummary } from "@/lib/cashFlowPlan";
 import {
+  MAX_CATEGORY_DESCRIPTION_LENGTH,
+  MAX_CATEGORY_NAME_LENGTH,
+  normalizeCategoryName,
+  type ExpenseCategoryDefinition
+} from "@/lib/categories";
+import {
   EXPENSE_EDIT_FIELDS,
+  type CategoryProposal,
   type ExpenseChatEdit,
   type ExpenseEditField
 } from "@/lib/expenseEdits";
@@ -19,6 +26,11 @@ const MAX_CONTEXT_ROWS = 400;
 const MAX_TOP_GROUPS = 20;
 /** A single answer that rewrites more rows than this is a mistake, not a plan. */
 const MAX_EDITS = 200;
+/**
+ * A reply that invents more categories than this is reorganising the catalog
+ * rather than answering, and the reviewer would be approving cards blind.
+ */
+const MAX_NEW_CATEGORIES = 12;
 
 export type ExpenseChatMessage = {
   role: "user" | "assistant";
@@ -45,13 +57,28 @@ export type ExpenseChatInput = {
   cashFlowSummary?: CashFlowSummary;
   history?: readonly ExpenseChatMessage[];
   view?: ExpenseChatView;
-  /** Names the model may put in a `category` edit; anything else is dropped. */
+  /**
+   * Names the model may put in a `category` edit. A category it proposes in
+   * the same reply counts too, so "make a Pets category and move these rows"
+   * is one answer rather than two round trips.
+   */
   categoryNames?: readonly string[];
+  /**
+   * The whole catalog - names, descriptions, sources, and the disabled ones -
+   * so the model can tell what an existing category is *for* before deciding a
+   * row does not fit any of them. Names alone made every near-duplicate look
+   * plausible. It is also the dedupe list for a proposed category: repeating a
+   * disabled name would 409 on create, and disabled ones come back by ticking
+   * them, not by adding a second copy.
+   */
+  categories?: readonly ExpenseCategoryDefinition[];
 };
 
 export type ExpenseChatAnswer = {
   answer: string;
   edits: ExpenseChatEdit[];
+  /** Categories to create, awaiting the same approval as a row edit. */
+  categories: CategoryProposal[];
   model: string;
   context: {
     rowCount: number;
@@ -113,7 +140,7 @@ export async function answerExpenseQuestion(
         {
           role: "system",
           content:
-            "You are an expense-analysis assistant inside Statement Ledger. Use only the supplied expense rows, statement metadata, cash-flow summary, and conversation transcript. Do not invent transactions, balances, vendors, categories, or external facts. When useful, cite exact category or merchant totals from the context. Keep advice concrete and practical, and say when the rows are insufficient. You may also propose row edits, which are suggestions a human approves or rejects; never claim an edit has been applied."
+            "You are an expense-analysis assistant inside Statement Ledger. Use only the supplied expense rows, statement metadata, cash-flow summary, and conversation transcript. Do not invent transactions, balances, vendors, or external facts. When useful, cite exact category or merchant totals from the context. Keep advice concrete and practical, and say when the rows are insufficient. You may also propose row edits and new categories, which are suggestions a human approves or rejects; never claim either has been applied."
         },
         {
           role: "user",
@@ -140,13 +167,25 @@ export async function answerExpenseQuestion(
     (payload as OpenRouterChatResponse).choices?.[0]?.message?.content
   );
 
+  const categories = resolveExpenseChatCategories({
+    categories: parsed.categories,
+    existingCategoryNames: catalogNames(input)
+  });
+
   return {
     answer: parsed.answer,
     edits: resolveExpenseChatEdits({
       rows: input.expenses,
       edits: parsed.edits,
-      categoryNames: input.categoryNames
+      // A category proposed in this same reply is a legal edit target: the
+      // reviewer approves the category card first, and dropping the moves
+      // that motivated it would make the proposal pointless.
+      categoryNames: [
+        ...(input.categoryNames || []),
+        ...categories.map((category) => category.name)
+      ]
     }),
+    categories,
     model,
     context: summarizeChatContext(input)
   };
@@ -160,7 +199,7 @@ export const EXPENSE_CHAT_RESPONSE_FORMAT = {
     schema: {
       type: "object",
       additionalProperties: false,
-      required: ["answer", "edits"],
+      required: ["answer", "edits", "newCategories"],
       properties: {
         answer: {
           type: "string",
@@ -186,11 +225,37 @@ export const EXPENSE_CHAT_RESPONSE_FORMAT = {
               value: {
                 type: "string",
                 description:
-                  "New value. Amounts are plain numbers such as 12.34. Categories must be one of the allowed category names."
+                  "New value. Amounts are plain numbers such as 12.34. Categories must be one of the allowed category names or a name from newCategories in this same reply."
               },
               reason: {
                 type: "string",
                 description: "One short sentence justifying the change."
+              }
+            }
+          }
+        },
+        newCategories: {
+          type: "array",
+          description:
+            "Categories to add to the catalog, awaiting human approval. Empty unless the rows genuinely do not fit an existing category.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["name", "description", "reason"],
+            properties: {
+              name: {
+                type: "string",
+                description:
+                  "Short category name, not matching any existing category."
+              },
+              description: {
+                type: "string",
+                description: "One line naming what belongs in it."
+              },
+              reason: {
+                type: "string",
+                description:
+                  "One short sentence on why the existing categories do not cover these rows."
               }
             }
           }
@@ -251,7 +316,10 @@ export function buildExpenseChatPrompt(input: ExpenseChatInput) {
       )
     ),
     "",
-    "Allowed category names:",
+    "Category catalog (every category, disabled ones included):",
+    formatCategoryCatalog(input),
+    "",
+    "Allowed category names for a category edit:",
     formatCategoryNames(input.categoryNames),
     "",
     "Expense rows:",
@@ -269,16 +337,85 @@ export function buildExpenseChatPrompt(input: ExpenseChatInput) {
     "",
     `Current question: ${normalizeQuestion(input.question)}`,
     "",
-    "Answer with the most relevant totals, vendors, categories, and next actions. For cost-reduction questions, rank the highest-leverage reductions first.",
+    "Answer with the most relevant totals, vendors, categories, and next actions. For cost-reduction questions, rank the highest-leverage reductions first. When asked what the categories are, read them off the category catalog above, including each one's description and whether it is disabled.",
     "",
     "Editing rules:",
     `- Return edits only when the question asks for a change. Fields you may edit: ${EXPENSE_EDIT_FIELDS.join(", ")}.`,
     "- Every edit is a suggestion the reviewer approves or rejects. Nothing is written until they do, so describe them as proposals.",
     "- Use the exact id= value of a row. An id that is not listed above is dropped.",
-    "- category must be copied exactly from the allowed category names.",
+    "- category must be copied exactly from the allowed category names, or from a name you propose in newCategories in this same reply.",
     "- amount and reimbursedAmount are plain non-negative numbers, no currency symbols.",
-    "- Rows outside the month on screen are editable too, but if the request could mean either the current view or every month, return no edits and ask which one they mean."
+    "- Rows outside the month on screen are editable too, but if the request could mean either the current view or every month, return no edits and ask which one they mean.",
+    "",
+    "Category rules:",
+    "- Propose a new category only when rows genuinely do not fit an existing one, or the reviewer asks for one. Prefer an existing name over a near-duplicate.",
+    `- A proposed name must not match any name in the category catalog above, disabled ones included, and is limited to ${MAX_CATEGORY_NAME_LENGTH} characters.`,
+    "- A new category is also a proposal: the reviewer approves it before anything is created, so never say a category now exists.",
+    "- When a new category is worth proposing, also propose the category edits that move the rows into it."
   ].join("\n");
+}
+
+/**
+ * Same contract as the row edits: anything the reviewer could not safely
+ * approve - a blank or over-long name, a duplicate of a catalog entry the
+ * create route would reject with a 409, a repeat within one reply - is dropped
+ * before a card is ever shown.
+ */
+export function resolveExpenseChatCategories(input: {
+  categories: unknown;
+  existingCategoryNames?: readonly string[];
+}): CategoryProposal[] {
+  if (!Array.isArray(input.categories)) {
+    return [];
+  }
+
+  const taken = new Set(
+    (input.existingCategoryNames || []).map((name) =>
+      normalizeCategoryName(name).toLowerCase()
+    )
+  );
+  const resolved: CategoryProposal[] = [];
+
+  for (const raw of input.categories) {
+    if (resolved.length >= MAX_NEW_CATEGORIES) {
+      break;
+    }
+
+    if (!raw || typeof raw !== "object") {
+      continue;
+    }
+
+    // Model output: an object of unknown fields, each checked below.
+    const candidate = raw as Record<string, unknown>;
+    const name =
+      typeof candidate.name === "string"
+        ? normalizeCategoryName(candidate.name)
+        : "";
+    const key = name.toLowerCase();
+
+    if (!name || name.length > MAX_CATEGORY_NAME_LENGTH || taken.has(key)) {
+      continue;
+    }
+
+    taken.add(key);
+    resolved.push({
+      id: `category:${key}`,
+      name,
+      description:
+        typeof candidate.description === "string"
+          ? sanitizeInline(candidate.description).slice(
+              0,
+              MAX_CATEGORY_DESCRIPTION_LENGTH
+            )
+          : "",
+      reason:
+        typeof candidate.reason === "string"
+          ? sanitizeInline(candidate.reason).slice(0, 240)
+          : ""
+    });
+  }
+
+  return resolved;
 }
 
 /**
@@ -466,6 +603,50 @@ function formatMonthTotals(expenses: readonly ExpenseChatRow[]) {
 
 function formatCategoryNames(names: readonly string[] | undefined) {
   return names?.length ? names.map((name) => `- ${name}`).join("\n") : "- Any";
+}
+
+/**
+ * Every name in the catalog, falling back to the allowed names when a caller
+ * supplies no catalog. Callers on the fallback path can only de-duplicate
+ * against what they know, which is better than proposing a name that exists.
+ */
+function catalogNames(input: ExpenseChatInput) {
+  return input.categories?.length
+    ? input.categories.map((category) => category.name)
+    : input.categoryNames;
+}
+
+/**
+ * A name alone does not say what belongs in a category, so every near-miss
+ * looked like grounds for a new one. Description, source, and whether the
+ * category is currently selectable are what make "this row does not fit
+ * anything here" a judgement rather than a guess.
+ */
+function formatCategoryCatalog(input: ExpenseChatInput) {
+  const categories = input.categories;
+
+  if (!categories?.length) {
+    return formatCategoryNames(input.categoryNames);
+  }
+
+  const allowed = new Set(
+    (input.categoryNames || []).map((name) => name.toLowerCase())
+  );
+
+  return categories
+    .map((category) => {
+      const state = allowed.has(category.name.toLowerCase())
+        ? "selectable"
+        : category.enabled
+          ? "enabled but hidden in this view"
+          : "disabled";
+      const description = sanitizeInline(category.description || "");
+
+      return `- ${category.name} [${category.source}, ${state}]${
+        description ? `: ${description}` : ""
+      }`;
+    })
+    .join("\n");
 }
 
 function formatStatements(statements: readonly SaveStatementSource[] | undefined) {
@@ -667,14 +848,18 @@ function getProviderError(payload: unknown) {
 /**
  * The reply is asked for as JSON, but a provider that ignores the schema still
  * has a usable answer in it, so unparseable content degrades to plain prose
- * with no edits instead of failing the whole question.
+ * with no edits or categories instead of failing the whole question.
  */
-function parseChatReply(content: unknown): { answer: string; edits: unknown } {
+function parseChatReply(content: unknown): {
+  answer: string;
+  edits: unknown;
+  categories: unknown;
+} {
   const text = parseChatContent(content);
   const json = parseJsonObject(text);
 
   if (!json) {
-    return { answer: text, edits: [] };
+    return { answer: text, edits: [], categories: [] };
   }
 
   const answer =
@@ -682,7 +867,7 @@ function parseChatReply(content: unknown): { answer: string; edits: unknown } {
       ? json.answer.trim()
       : text;
 
-  return { answer, edits: json.edits };
+  return { answer, edits: json.edits, categories: json.newCategories };
 }
 
 function parseJsonObject(text: string): Record<string, unknown> | null {

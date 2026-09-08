@@ -123,7 +123,11 @@ import {
   type ReviewHistoryEvent
 } from "@/lib/reviewHistory";
 import type { ExpenseChatMessage } from "@/lib/expenseChat";
-import type { ExpenseChatEdit, ExpenseEditField } from "@/lib/expenseEdits";
+import type {
+  CategoryProposal,
+  ExpenseChatEdit,
+  ExpenseEditField
+} from "@/lib/expenseEdits";
 import type {
   ExpenseItem,
   IncomeItem,
@@ -191,14 +195,30 @@ type ExpenseChatUiEdit = ExpenseChatEdit & {
   state: ExpenseChatEditState;
 };
 
+type ExpenseChatUiCategory = CategoryProposal & {
+  state: ExpenseChatEditState;
+};
+
+/**
+ * One approval batch: categories are created before the row edits that use
+ * them, so an `Approve all` cannot move rows into a category that does not
+ * exist yet.
+ */
+type ExpenseChatProposals = {
+  categories: readonly ExpenseChatUiCategory[];
+  edits: readonly ExpenseChatUiEdit[];
+};
+
 type ExpenseChatUiMessage = ExpenseChatMessage & {
   id: string;
   edits?: ExpenseChatUiEdit[];
+  categories?: ExpenseChatUiCategory[];
 };
 
 type ExpenseChatResponse = {
   answer: string;
   edits?: ExpenseChatEdit[];
+  categories?: CategoryProposal[];
   context?: {
     rowCount: number;
     selectedRowCount: number;
@@ -447,24 +467,31 @@ function formatEditValue(
 }
 
 /**
- * The approval card under an assistant answer. Chat only ever proposes
- * changes; nothing reaches the month documents until one of these buttons is
- * clicked, and a pending card can always be dismissed instead.
+ * The approval cards under an assistant answer. Chat only ever proposes
+ * changes - new categories and row edits alike; nothing reaches the catalog or
+ * the month documents until one of these buttons is clicked, and a pending
+ * card can always be dismissed instead.
  */
 function ExpenseChatEditList(props: {
   message: ExpenseChatUiMessage;
   busy: boolean;
   onApprove: (
     messageId: string,
-    edits: readonly ExpenseChatUiEdit[]
+    proposals: ExpenseChatProposals
   ) => void | Promise<void>;
-  onDismiss: (messageId: string, edits: readonly ExpenseChatUiEdit[]) => void;
+  onDismiss: (messageId: string, proposals: ExpenseChatProposals) => void;
 }) {
   const { message, busy, onApprove, onDismiss } = props;
   const edits = message.edits || [];
-  const pending = edits.filter((edit) => edit.state === "pending");
+  const categories = message.categories || [];
+  const total = edits.length + categories.length;
+  const pending: ExpenseChatProposals = {
+    categories: categories.filter((category) => category.state === "pending"),
+    edits: edits.filter((edit) => edit.state === "pending")
+  };
+  const pendingCount = pending.categories.length + pending.edits.length;
 
-  if (edits.length === 0) {
+  if (total === 0) {
     return null;
   }
 
@@ -472,11 +499,9 @@ function ExpenseChatEditList(props: {
     <div className="expense-chat-edits">
       <div className="expense-chat-edits-heading">
         <span>
-          {edits.length === 1
-            ? "1 suggested change"
-            : `${edits.length} suggested changes`}
+          {total === 1 ? "1 suggested change" : `${total} suggested changes`}
         </span>
-        {pending.length > 1 ? (
+        {pendingCount > 1 ? (
           <span className="expense-chat-edits-bulk">
             <button
               type="button"
@@ -497,6 +522,64 @@ function ExpenseChatEditList(props: {
           </span>
         ) : null}
       </div>
+      {categories.map((category) => (
+        <div
+          className={`expense-chat-edit is-${category.state}`}
+          key={category.id}
+        >
+          <div className="expense-chat-edit-row">
+            <span className="expense-chat-edit-target">
+              New category · {category.name}
+            </span>
+            {category.state === "pending" ? (
+              <span className="expense-chat-edit-actions">
+                <button
+                  type="button"
+                  className="expense-chat-edit-approve"
+                  disabled={busy}
+                  title={`Add ${category.name} to the catalog`}
+                  onClick={() =>
+                    void onApprove(message.id, {
+                      categories: [category],
+                      edits: []
+                    })
+                  }
+                >
+                  <Check size={14} {...hydrationSafeIconProps} />
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  className="expense-chat-edit-dismiss"
+                  disabled={busy}
+                  title="Discard this suggestion"
+                  onClick={() =>
+                    onDismiss(message.id, { categories: [category], edits: [] })
+                  }
+                >
+                  <X size={14} {...hydrationSafeIconProps} />
+                  Dismiss
+                </button>
+              </span>
+            ) : (
+              <span className="expense-chat-edit-state">
+                {category.state === "applied" ? "Added" : "Dismissed"}
+              </span>
+            )}
+          </div>
+          {category.description ? (
+            <div className="expense-chat-edit-change">
+              <span className="expense-chat-edit-field">Description</span>
+              <span className="expense-chat-edit-diff">
+                <ins>{category.description}</ins>
+              </span>
+            </div>
+          ) : null}
+          {category.reason ? (
+            <p className="expense-chat-edit-reason">{category.reason}</p>
+          ) : null}
+        </div>
+      ))}
       {edits.map((edit) => (
         <div
           className={`expense-chat-edit is-${edit.state}`}
@@ -515,7 +598,9 @@ function ExpenseChatEditList(props: {
                   className="expense-chat-edit-approve"
                   disabled={busy}
                   title="Apply this change"
-                  onClick={() => void onApprove(message.id, [edit])}
+                  onClick={() =>
+                    void onApprove(message.id, { categories: [], edits: [edit] })
+                  }
                 >
                   <Check size={14} {...hydrationSafeIconProps} />
                   Approve
@@ -525,7 +610,9 @@ function ExpenseChatEditList(props: {
                   className="expense-chat-edit-dismiss"
                   disabled={busy}
                   title="Discard this suggestion"
-                  onClick={() => onDismiss(message.id, [edit])}
+                  onClick={() =>
+                    onDismiss(message.id, { categories: [], edits: [edit] })
+                  }
                 >
                   <X size={14} {...hydrationSafeIconProps} />
                   Dismiss
@@ -1463,6 +1550,10 @@ export function StatementWorkspace() {
           edits: (result.edits || []).map((edit) => ({
             ...edit,
             state: "pending" as const
+          })),
+          categories: (result.categories || []).map((category) => ({
+            ...category,
+            state: "pending" as const
           }))
         }
       ]);
@@ -1484,9 +1575,9 @@ export function StatementWorkspace() {
     }
   }
 
-  function resolveChatEdits(
+  function resolveChatProposals(
     messageId: string,
-    edits: readonly ExpenseChatUiEdit[],
+    proposals: ExpenseChatProposals,
     state: ExpenseChatEditState
   ) {
     setChatMessages((current) =>
@@ -1495,9 +1586,16 @@ export function StatementWorkspace() {
           ? {
               ...message,
               edits: message.edits?.map((edit) =>
-                edits.some((resolved) => resolved.id === edit.id)
+                proposals.edits.some((resolved) => resolved.id === edit.id)
                   ? { ...edit, state }
                   : edit
+              ),
+              categories: message.categories?.map((category) =>
+                proposals.categories.some(
+                  (resolved) => resolved.id === category.id
+                )
+                  ? { ...category, state }
+                  : category
               )
             }
           : message
@@ -1505,29 +1603,92 @@ export function StatementWorkspace() {
     );
   }
 
-  async function approveChatEdits(messageId: string, edits: readonly ExpenseChatUiEdit[]) {
-    resolveChatEdits(messageId, edits, "applied");
-    const applied = await applyExpenseEdits(edits);
+  /**
+   * Categories are created first: a row edit approved in the same batch names
+   * one of them, so creating them afterwards would leave the catalog missing
+   * the category the rows were just moved into.
+   */
+  async function approveChatProposals(
+    messageId: string,
+    proposals: ExpenseChatProposals
+  ) {
+    resolveChatProposals(messageId, proposals, "applied");
+
+    const failedCategories: ExpenseChatUiCategory[] = [];
+    let created = 0;
+
+    if (proposals.categories.length > 0) {
+      setCategoryBusy("updating");
+
+      for (const proposal of proposals.categories) {
+        try {
+          const response = await fetch("/api/categories", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: proposal.name,
+              description: proposal.description
+            })
+          });
+          const result = (await response.json()) as CategoryResponse;
+
+          if (!response.ok) {
+            throw new Error(result.error || "Creating the category failed.");
+          }
+
+          setCategories(result.categories);
+          created += 1;
+        } catch {
+          failedCategories.push(proposal);
+        }
+      }
+
+      setCategoryBusy("idle");
+    }
+
+    if (failedCategories.length > 0) {
+      // Back to pending rather than silently "Added": the catalog does not
+      // hold them, so the reviewer has to be able to retry the card.
+      resolveChatProposals(
+        messageId,
+        { categories: failedCategories, edits: [] },
+        "pending"
+      );
+    }
+
+    const applied =
+      proposals.edits.length > 0 ? await applyExpenseEdits(proposals.edits) : 0;
+    const requested = proposals.categories.length + proposals.edits.length;
+    const succeeded = created + applied;
 
     showNotice(
-      applied === edits.length
+      succeeded === requested
         ? {
             tone: "success",
-            message: `Applied ${applied} ${
-              applied === 1 ? "change" : "changes"
+            message: `Applied ${succeeded} ${
+              succeeded === 1 ? "change" : "changes"
             } from the chat.`
           }
         : {
             tone: "error",
-            message: `Applied ${applied} of ${edits.length} ${
-              edits.length === 1 ? "change" : "changes"
-            }; check the months they landed in.`
+            message: `Applied ${succeeded} of ${requested} ${
+              requested === 1 ? "change" : "changes"
+            } from the chat.${
+              failedCategories.length > 0
+                ? ` ${failedCategories
+                    .map((category) => category.name)
+                    .join(", ")} could not be created.`
+                : " Check the months they landed in."
+            }`
           }
     );
   }
 
-  function dismissChatEdits(messageId: string, edits: readonly ExpenseChatUiEdit[]) {
-    resolveChatEdits(messageId, edits, "dismissed");
+  function dismissChatProposals(
+    messageId: string,
+    proposals: ExpenseChatProposals
+  ) {
+    resolveChatProposals(messageId, proposals, "dismissed");
   }
 
   async function importCategories() {
@@ -3233,14 +3394,12 @@ export function StatementWorkspace() {
                     )}
                   </span>
                   <p>{message.content}</p>
-                  {message.edits && message.edits.length > 0 ? (
-                    <ExpenseChatEditList
-                      message={message}
-                      busy={chatBusy}
-                      onApprove={approveChatEdits}
-                      onDismiss={dismissChatEdits}
-                    />
-                  ) : null}
+                  <ExpenseChatEditList
+                    message={message}
+                    busy={chatBusy}
+                    onApprove={approveChatProposals}
+                    onDismiss={dismissChatProposals}
+                  />
                 </div>
               ))}
 

@@ -82,6 +82,10 @@ export async function POST(request: Request) {
       statements,
       view,
       categoryNames,
+      // The whole catalog, not just the enabled slice: descriptions are what
+      // let the model reuse an existing category, and a proposal repeating a
+      // disabled name would fail to create.
+      categories: catalog.categories,
       selectedExpenseIds: Array.isArray(payload.selectedExpenseIds)
         ? payload.selectedExpenseIds.filter(
             (id): id is string => typeof id === "string"

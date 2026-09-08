@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import {
   answerExpenseQuestion,
   buildExpenseChatPrompt,
+  resolveExpenseChatCategories,
   resolveExpenseChatEdits
 } from "@/lib/expenseChat";
 import { applyExpenseEditsToRows } from "@/lib/expenseEdits";
 import type { ExpenseChatRow } from "@/lib/expenseChat";
+import type { ExpenseCategoryDefinition } from "@/lib/categories";
 import type { ExpenseItem } from "@/lib/types";
 const expensesWithoutMonth: ExpenseItem[] = [
   {
@@ -66,6 +68,30 @@ const expenses: ExpenseChatRow[] = expensesWithoutMonth.map((expense) => ({
   month: "2026-06"
 }));
 
+const catalog: ExpenseCategoryDefinition[] = [
+  {
+    name: "Meals",
+    description: "Restaurants, groceries, and delivery",
+    enabled: true,
+    source: "app",
+    sortOrder: 10
+  },
+  {
+    name: "Software",
+    description: "Tools and licences",
+    enabled: true,
+    source: "app",
+    sortOrder: 20
+  },
+  {
+    name: "Archived",
+    description: "Turned off by the reviewer",
+    enabled: false,
+    source: "custom",
+    sortOrder: 30
+  }
+];
+
 describe("expense chat", () => {
   test("builds prompt context from category, merchant, and selected rows", () => {
     const prompt = buildExpenseChatPrompt({
@@ -99,6 +125,24 @@ describe("expense chat", () => {
     expect(prompt.includes("Food City: $72.50 across 1 row")).toBe(true);
     expect(prompt.includes("[selected]")).toBe(true);
     expect(prompt.includes("American Express | acct 12345")).toBe(true);
+  });
+
+  test("shows the model each category's description, source, and state", () => {
+    const prompt = buildExpenseChatPrompt({
+      question: "what categories do I have?",
+      expenses,
+      categories: catalog,
+      categoryNames: ["Meals", "Software"]
+    });
+
+    expect(
+      prompt.includes(
+        "- Meals [app, selectable]: Restaurants, groceries, and delivery"
+      )
+    ).toBe(true);
+    expect(
+      prompt.includes("- Archived [custom, disabled]: Turned off by the reviewer")
+    ).toBe(true);
   });
 
   test("sends expense context to OpenRouter and returns assistant text", async () => {
@@ -267,6 +311,90 @@ describe("expense chat", () => {
 
     expect(second.applied).toBe(0);
     expect(second.expenses).toBe(first.expenses);
+  });
+
+  test("drops proposed categories the catalog already holds or cannot store", () => {
+    const resolved = resolveExpenseChatCategories({
+      categories: [
+        { name: "  Pets  ", description: "Vet and pet supplies", reason: "x" },
+        { name: "meals", description: "", reason: "duplicate of Meals" },
+        { name: "Archived", description: "", reason: "disabled but present" },
+        { name: "pets", description: "", reason: "repeat within the reply" },
+        { name: "   ", description: "", reason: "blank" },
+        { name: "P".repeat(61), description: "", reason: "too long" }
+      ],
+      existingCategoryNames: ["Meals", "Software", "Archived"]
+    });
+
+    expect(resolved.map((category) => category.name)).toEqual(["Pets"]);
+    expect(resolved[0].id).toBe("category:pets");
+    expect(resolved[0].description).toBe("Vet and pet supplies");
+  });
+
+  test("keeps category edits that name a category proposed in the same reply", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalApiKey = process.env.OPENROUTER_API_KEY;
+
+    process.env.OPENROUTER_API_KEY = "test-api-key";
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  answer: "Figma is a subscription, not software you bought.",
+                  newCategories: [
+                    {
+                      name: "Subscriptions",
+                      description: "Recurring software and media",
+                      reason: "Recurring charges are not one-off software."
+                    }
+                  ],
+                  edits: [
+                    {
+                      expenseId: "tx-software",
+                      field: "category",
+                      value: "Subscriptions",
+                      reason: "Figma bills monthly."
+                    },
+                    {
+                      expenseId: "tx-food-1",
+                      field: "category",
+                      value: "Travel",
+                      reason: "Not a category anyone has."
+                    }
+                  ]
+                })
+              }
+            }
+          ]
+        }),
+        { status: 200 }
+      )) as typeof fetch;
+
+    try {
+      const result = await answerExpenseQuestion({
+        question: "should Figma be its own category?",
+        expenses,
+        categoryNames: ["Meals", "Software"],
+        categories: catalog
+      });
+
+      expect(result.categories.map((category) => category.name)).toEqual([
+        "Subscriptions"
+      ]);
+      expect(
+        result.edits.map((edit) => [edit.expenseId, edit.after])
+      ).toEqual([["tx-software", "Subscriptions"]]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalApiKey === undefined) {
+        delete process.env.OPENROUTER_API_KEY;
+      } else {
+        process.env.OPENROUTER_API_KEY = originalApiKey;
+      }
+    }
   });
 });
 

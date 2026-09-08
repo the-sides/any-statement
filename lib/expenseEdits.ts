@@ -40,6 +40,21 @@ export type ExpenseChatEdit = {
 };
 
 /**
+ * A category the chat wants added to the catalog, held as a proposal for the
+ * same reason a row edit is: the catalog belongs to the reviewer, and a model
+ * adding `Subscriptions` beside an existing `Software` is a judgement call,
+ * not a correction. Approving one creates it through `/api/categories`; the
+ * category edits that motivated it are separate cards.
+ */
+export type CategoryProposal = {
+  /** `category:<lowercased name>`; stable, so one name is one card. */
+  id: string;
+  name: string;
+  description: string;
+  reason: string;
+};
+
+/**
  * Returns the same array when nothing matched, so an approval that races a
  * deleted row does not schedule a pointless whole-month write.
  */
