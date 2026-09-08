@@ -1674,10 +1674,6 @@ button:focus-visible,
   opacity: 0.4;
 }
 
-.sankey-income-node {
-  fill: var(--positive);
-}
-
 /* Labels sit over the flat tail of their own ribbon, so they carry a halo to
    stay legible against whatever colour runs underneath. */
 .sankey-node-name,

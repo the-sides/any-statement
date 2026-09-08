@@ -259,6 +259,21 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   space. The trunk is scaled to the larger of income/spend so both packed ends
   plus the remainder slot fill it exactly. `fit` + `idPrefix` props exist because
   the all-months row renders many of these on one page.
+- The trunk bar is *spending*, not income: it is labelled `Spending` with the month's
+  allocated total (a percentage of income, so an overspent month reads over 100%), and
+  the column heading that used to say `Income` above it is gone. A saved month cuts the
+  bar short by the saved slot at the top, so the bar's height is literally what was
+  spent; an overspent month runs the full trunk and fades from `SPEND_COLOR` into
+  `OVERSPENT_COLOR` across the slot earnings did not cover, matching the coral riser
+  pouring in above it. The fill is an attribute, not a CSS rule: a class-based `fill`
+  would win over the gradient reference and silently paint the overspend green.
+- Colour carries the meaning, so the three tones are named constants at the top of
+  `CashFlowSankey.tsx`: `SPEND_COLOR` (`--cobalt`) for the trunk and the ends of every
+  ribbon meeting it, `SAVED_COLOR` (`--positive`) for the saved riser only, and
+  `OVERSPENT_COLOR` (`--coral`). Green means kept, not "money"; painting the trunk green
+  again would make saving invisible. The saved slot gets its own green segment of the
+  trunk column above the blue spending segment, drawn after the ribbons because the riser
+  it sits under is translucent, so the column still adds up to what came in.
 - The workspace has a light/dark/system theme toggle at the top right of the header, after
   `Extract`. The preference is
   stored in `localStorage` under `statement-ledger:theme` and defaults to the system setting.

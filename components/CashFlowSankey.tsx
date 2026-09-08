@@ -22,6 +22,12 @@ const SANKEY_MIN_NODE_HEIGHT = 3;
 const RISER_HEADROOM = 230;
 /** How far the riser leans away from the trunk before it turns vertical. */
 const RISER_RUN = 90;
+// The trunk and every ribbon meeting it are blue: green is reserved for the
+// saved riser, so the colour alone says whether money left the month or was
+// kept. Overspending stays coral at both the trunk and its riser.
+const SPEND_COLOR = "var(--cobalt)";
+const SAVED_COLOR = "var(--positive)";
+const OVERSPENT_COLOR = "var(--coral)";
 
 export type SankeySegment<T> = T & {
   color: string;
@@ -117,7 +123,16 @@ function CashFlowSankey({
   // Headroom is the strip the riser climbs through before it fades out of the
   // frame. Only a month with a remainder pays for it.
   const headroom = remainder ? RISER_HEADROOM : 0;
-  const trunkCenterY = top + SANKEY_TRUNK_HEIGHT / 2;
+  // The trunk is the *spending* bar, so it only spans the part of the month
+  // that was actually spent: a saved month cuts it short by the saved slot at
+  // the top, and an overspent month runs the full trunk with its top slot
+  // (the part earnings did not cover) fading from green into red.
+  const spendTop = top + savedHeight;
+  const spendHeight = SANKEY_TRUNK_HEIGHT - savedHeight;
+  const spendCenterY = spendTop + spendHeight / 2;
+  const spendGradientId = `${idPrefix}-trunk-spend`;
+  // Where along the spending bar earnings ran out, as a gradient offset.
+  const overspentBoundaryPercent = (overspentHeight / spendHeight) * 100;
   const hasTrunk = positiveInputs.length > 0 || allocationNodes.length > 0;
 
   return (
@@ -133,7 +148,7 @@ function CashFlowSankey({
       }
       viewBox={`0 ${-headroom} ${width} ${height + headroom}`}
       role="img"
-      aria-label="Income flowing to savings, manual outputs, and statement categories"
+      aria-label="Income flowing into the month's spending, savings, and statement categories"
     >
       <defs>
         {inputNodes.map((node) => (
@@ -145,7 +160,7 @@ function CashFlowSankey({
             x2={incomeX}
           >
             <stop offset="0%" stopColor={node.color} />
-            <stop offset="100%" stopColor="var(--positive)" />
+            <stop offset="100%" stopColor={SPEND_COLOR} />
           </linearGradient>
         ))}
         {allocationNodes.map((node) => (
@@ -156,10 +171,34 @@ function CashFlowSankey({
             x1={incomeX + SANKEY_NODE_WIDTH}
             x2={outputX}
           >
-            <stop offset="0%" stopColor="var(--positive)" />
+            <stop offset="0%" stopColor={SPEND_COLOR} />
             <stop offset="100%" stopColor={node.color} />
           </linearGradient>
         ))}
+        {overspent ? (
+          // The spending trunk is only green as far as earnings reached; the
+          // slot above that is the overspend, so the bar fades from green into
+          // the same coral the incoming riser arrives in.
+          <linearGradient
+            id={spendGradientId}
+            gradientUnits="userSpaceOnUse"
+            x1={0}
+            y1={spendTop}
+            x2={0}
+            y2={spendTop + spendHeight}
+          >
+            <stop offset="0%" stopColor={OVERSPENT_COLOR} />
+            <stop
+              offset={`${Math.max(0, overspentBoundaryPercent - 5)}%`}
+              stopColor={OVERSPENT_COLOR}
+            />
+            <stop
+              offset={`${Math.min(100, overspentBoundaryPercent + 5)}%`}
+              stopColor={SPEND_COLOR}
+            />
+            <stop offset="100%" stopColor={SPEND_COLOR} />
+          </linearGradient>
+        ) : null}
       </defs>
 
       <rect
@@ -172,9 +211,7 @@ function CashFlowSankey({
       <text className="sankey-title" x={inputX} y="34">
         Inputs
       </text>
-      <text className="sankey-title" x={incomeX} y="34">
-        Income
-      </text>
+
       <text
         className="sankey-title"
         x={outputX + SANKEY_NODE_WIDTH}
@@ -273,27 +310,44 @@ function CashFlowSankey({
 
         {hasTrunk ? (
           <>
+            {/* The saved slot gets its own green segment of the trunk, so the
+                column still adds up to what came in: green kept, blue spent.
+                It is drawn over the riser ribbon, which is translucent. */}
+            {saved ? (
+              <rect
+                x={incomeX}
+                y={top}
+                width={SANKEY_NODE_WIDTH}
+                height={savedHeight}
+                rx="2"
+                fill={SAVED_COLOR}
+              />
+            ) : null}
             <rect
-              className="sankey-income-node"
+              className="sankey-spend-node"
               x={incomeX}
-              y={top}
+              y={spendTop}
               width={SANKEY_NODE_WIDTH}
-              height={SANKEY_TRUNK_HEIGHT}
+              height={spendHeight}
               rx="2"
+              fill={overspent ? `url(#${spendGradientId})` : SPEND_COLOR}
             />
             <text
               className="sankey-node-name"
               x={incomeX + SANKEY_NODE_WIDTH + SANKEY_LABEL_GAP}
-              y={trunkCenterY - 4}
+              y={spendCenterY - 4}
             >
-              Income
+              Spending
             </text>
             <text
               className="sankey-node-value"
               x={incomeX + SANKEY_NODE_WIDTH + SANKEY_LABEL_GAP}
-              y={trunkCenterY + 19}
+              y={spendCenterY + 19}
             >
-              {formatCurrency(summary.incomeTotal, currency)} (100%)
+              {formatCurrency(summary.allocatedTotal, currency)} (
+              {formatPercent(
+                (summary.allocatedTotal / summary.percentBasis) * 100
+              )})
             </text>
           </>
         ) : null}
@@ -438,12 +492,12 @@ function RiserRibbon({
         >
           <stop
             offset="0%"
-            stopColor={direction === "down" ? "var(--coral)" : "var(--positive)"}
+            stopColor={direction === "down" ? OVERSPENT_COLOR : SAVED_COLOR}
             stopOpacity="0"
           />
           <stop
             offset="70%"
-            stopColor={direction === "down" ? "var(--coral)" : "var(--positive)"}
+            stopColor={direction === "down" ? OVERSPENT_COLOR : SAVED_COLOR}
             stopOpacity="1"
           />
         </linearGradient>
