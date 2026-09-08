@@ -15,8 +15,21 @@ export type MonthTimelineEntry = {
   summary: CashFlowSummary;
 };
 
+export type YearTimelineEntry = {
+  /** Calendar year, `YYYY`, taken from the month key. */
+  year: string;
+  monthCount: number;
+  statementCount: number;
+  expenseCount: number;
+  /** Every one of the year's rows folded through the same summarizer the
+   *  single-month panel uses, so the year graph is the month graph with a
+   *  year of transactions behind it. */
+  summary: CashFlowSummary;
+};
+
 export type MonthsTimeline = {
   months: MonthTimelineEntry[];
+  years: YearTimelineEntry[];
   currency: string;
   incomeTotal: number;
   spendTotal: number;
@@ -27,6 +40,7 @@ export type MonthsTimeline = {
 
 export const EMPTY_MONTHS_TIMELINE: MonthsTimeline = {
   months: [],
+  years: [],
   currency: DEFAULT_CURRENCY,
   incomeTotal: 0,
   spendTotal: 0,
@@ -44,8 +58,10 @@ export const EMPTY_MONTHS_TIMELINE: MonthsTimeline = {
 export function summarizeMonthsTimeline(
   documents: readonly MonthDocument[]
 ): MonthsTimeline {
-  const months = documents
-    .filter((document) => document.statements.length > 0)
+  const filed = documents.filter(
+    (document) => document.statements.length > 0
+  );
+  const months = filed
     .map((document) => ({
       month: document.month,
       statementCount: document.statements.length,
@@ -65,6 +81,7 @@ export function summarizeMonthsTimeline(
 
   return {
     months,
+    years: summarizeYears(filed),
     currency: pickCurrency(documents),
     incomeTotal,
     spendTotal,
@@ -73,6 +90,46 @@ export function summarizeMonthsTimeline(
     overspentMonths: months.filter((month) => month.summary.savedAmount < 0)
       .length
   };
+}
+
+/**
+ * One entry per calendar year, summarized from the year's *rows* rather than
+ * from its month summaries: merging the rows is what makes a category one
+ * ribbon across the year instead of twelve stacked slices.
+ */
+function summarizeYears(
+  documents: readonly MonthDocument[]
+): YearTimelineEntry[] {
+  const byYear = new Map<string, MonthDocument[]>();
+
+  for (const document of documents) {
+    const year = document.month.slice(0, 4);
+    const bucket = byYear.get(year);
+
+    if (bucket) {
+      bucket.push(document);
+    } else {
+      byYear.set(year, [document]);
+    }
+  }
+
+  return [...byYear.entries()]
+    .map(([year, yearDocuments]) => {
+      const expenses = yearDocuments.flatMap((document) => document.expenses);
+      const incomes = yearDocuments.flatMap((document) => document.incomes);
+
+      return {
+        year,
+        monthCount: yearDocuments.length,
+        statementCount: yearDocuments.reduce(
+          (total, document) => total + document.statements.length,
+          0
+        ),
+        expenseCount: expenses.length,
+        summary: summarizeCashFlow([], expenses, incomes)
+      };
+    })
+    .sort((first, second) => first.year.localeCompare(second.year));
 }
 
 /** Statements name the currency; expenses only echo it, so they are the fallback. */

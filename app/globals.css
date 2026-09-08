@@ -792,6 +792,36 @@ button:focus-visible,
   margin: 0;
 }
 
+/* The mode toggle sits with its own caption, so switching Compare/Year also
+   swaps the sentence explaining what the graph below is. */
+.all-months-modes {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Year picker: the same segmented control as the mode toggle, one button per
+   filed year. Hidden entirely when only one year is filed. */
+.all-months-years {
+  align-self: flex-start;
+}
+
+/* The year graph is the single-month chart at full size, so it gets the same
+   frame `.flow-visual` gives that one: scrollable, because zoom makes the
+   Sankey wider than the page. */
+.all-months-year-chart {
+  position: relative;
+  min-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, var(--teal-wash), transparent 24%),
+    linear-gradient(270deg, var(--gold-wash), transparent 34%),
+    var(--panel);
+}
+
 /* One cash flow graph per month, laid out left to right and scrolled
    horizontally. Each card's width is the zoom level (`MONTH_CARD_WIDTH` in
    `AllMonthsView`), so 100% is a month rendered big enough to read its labels

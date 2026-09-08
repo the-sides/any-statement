@@ -7,13 +7,14 @@ import {
   ZoomIn,
   ZoomOut
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import CashFlowSankey from "@/components/CashFlowSankey";
 import {
   EMPTY_MONTHS_TIMELINE,
   type MonthTimelineEntry,
-  type MonthsTimeline
+  type MonthsTimeline,
+  type YearTimelineEntry
 } from "@/lib/allMonths";
 import { formatCurrency } from "@/lib/currency";
 import {
@@ -26,6 +27,19 @@ import { formatMonthLabel } from "@/lib/months";
 import { flushMonths } from "@/lib/monthsClientStore";
 
 type TimelineStatus = "loading" | "ready" | "error";
+
+/**
+ * The overview renders the same cash flow graph two ways: `compare` is one
+ * card per month side by side, `year` is a single graph over every transaction
+ * in one calendar year, so a category is one ribbon for the year rather than
+ * twelve slices to eyeball across cards.
+ */
+type OverviewMode = "compare" | "year";
+
+const OVERVIEW_MODES: { value: OverviewMode; label: string }[] = [
+  { value: "compare", label: "Compare" },
+  { value: "year", label: "Year" }
+];
 
 /**
  * Width of one month card at 100%. The Sankey is 1360 user units wide, so this
@@ -47,6 +61,8 @@ export function AllMonthsView({
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [zoom, setZoom] = useState(DEFAULT_GRAPH_ZOOM);
+  const [mode, setMode] = useState<OverviewMode>("compare");
+  const [selectedYear, setSelectedYear] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -106,44 +122,96 @@ export function AllMonthsView({
 
   const currency = timeline.currency;
   const savedTotal = timeline.savedTotal;
+  const years = timeline.years;
+  // A year picked by hand survives a reload; otherwise fall to the current
+  // calendar year, and to the most recent filed year when this year is empty -
+  // an overview that opens on a blank year would look like data loss.
+  const activeYear = useMemo(
+    () => resolveYear(years, selectedYear),
+    [years, selectedYear]
+  );
 
   return (
     <section className="workspace all-months" aria-label="All months">
       <div className="workspace-top">
         <div>
-          <p className="eyebrow">All months</p>
-          <h2>
-            {timeline.months.length > 0
-              ? `${formatMonthLabel(timeline.months[0].month)} - ${formatMonthLabel(
-                  timeline.months[timeline.months.length - 1].month
-                )}`
-              : "Nothing filed yet"}
-          </h2>
+          <p className="eyebrow">{mode === "year" ? "Year" : "All months"}</p>
+          <h2>{describeHeading(mode, timeline, activeYear)}</h2>
         </div>
 
         <div className="stats-strip all-months-stats">
-          <AllMonthsStat label="Months" value={String(timeline.months.length)} />
-          <AllMonthsStat
-            label="Income"
-            value={formatCurrency(timeline.incomeTotal, currency)}
-          />
-          <AllMonthsStat
-            label="Spend"
-            value={formatCurrency(timeline.spendTotal, currency)}
-          />
-          <AllMonthsStat
-            label={savedTotal < 0 ? "Overspent" : "Saved"}
-            value={formatCurrency(Math.abs(savedTotal), currency)}
-          />
+          {mode === "year" && activeYear ? (
+            <>
+              <AllMonthsStat
+                label="Months"
+                value={String(activeYear.monthCount)}
+              />
+              <AllMonthsStat
+                label="Income"
+                value={formatCurrency(
+                  activeYear.summary.incomeTotal,
+                  currency
+                )}
+              />
+              <AllMonthsStat
+                label="Spend"
+                value={formatCurrency(
+                  activeYear.summary.allocatedTotal,
+                  currency
+                )}
+              />
+              <AllMonthsStat
+                label={activeYear.summary.savedAmount < 0 ? "Overspent" : "Saved"}
+                value={formatCurrency(
+                  Math.abs(activeYear.summary.savedAmount),
+                  currency
+                )}
+              />
+            </>
+          ) : (
+            <>
+              <AllMonthsStat
+                label="Months"
+                value={String(timeline.months.length)}
+              />
+              <AllMonthsStat
+                label="Income"
+                value={formatCurrency(timeline.incomeTotal, currency)}
+              />
+              <AllMonthsStat
+                label="Spend"
+                value={formatCurrency(timeline.spendTotal, currency)}
+              />
+              <AllMonthsStat
+                label={savedTotal < 0 ? "Overspent" : "Saved"}
+                value={formatCurrency(Math.abs(savedTotal), currency)}
+              />
+            </>
+          )}
         </div>
       </div>
 
       <div className="all-months-toolbar">
-        <p>
-          Every month&apos;s cash flow side by side. Savings climb out of the
-          top of a month&apos;s frame; overspending pours in from the top.
-          Click a month to open it.
-        </p>
+        <div className="all-months-modes">
+          <div className="graph-type-control" aria-label="Overview mode">
+            {OVERVIEW_MODES.map((option) => (
+              <button
+                className={mode === option.value ? "active" : ""}
+                key={option.value}
+                type="button"
+                aria-pressed={mode === option.value}
+                onClick={() => setMode(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <p>
+            {mode === "year"
+              ? "Every transaction in the year as one cash flow, the same graph the month view draws. Savings climb out of the top; overspending pours in from it."
+              : "Every month's cash flow side by side. Savings climb out of the top of a month's frame; overspending pours in from the top. Click a month to open it."}
+          </p>
+        </div>
         <div className="graph-zoom-controls" aria-label="Graph zoom controls">
           <button
             className="mini-icon-button"
@@ -207,7 +275,40 @@ export function AllMonthsView({
         </div>
       ) : null}
 
-      {timeline.months.length > 0 ? (
+      {mode === "year" && years.length > 1 ? (
+        <div className="graph-type-control all-months-years" aria-label="Year">
+          {years.map((year) => (
+            <button
+              className={year.year === activeYear?.year ? "active" : ""}
+              key={year.year}
+              type="button"
+              aria-pressed={year.year === activeYear?.year}
+              onClick={() => setSelectedYear(year.year)}
+            >
+              {year.year}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {mode === "year" && activeYear ? (
+        // The riser leaves through the top of the frame, so the chart is
+        // clipped by its own card exactly as a month card clips it.
+        <div
+          className={`all-months-year-chart ${
+            activeYear.summary.savedAmount < 0 ? "overspent" : "saved"
+          }`}
+        >
+          <CashFlowSankey
+            currency={currency}
+            idPrefix={`sankey-year-${activeYear.year}`}
+            summary={activeYear.summary}
+            zoom={zoom}
+          />
+        </div>
+      ) : null}
+
+      {mode === "compare" && timeline.months.length > 0 ? (
         <div
           className="all-months-row"
           aria-label="Cash flow per month"
@@ -225,6 +326,40 @@ export function AllMonthsView({
       ) : null}
     </section>
   );
+}
+
+/** Hand-picked year, else this calendar year, else the most recent filed one. */
+function resolveYear(
+  years: readonly YearTimelineEntry[],
+  selected: string
+): YearTimelineEntry | null {
+  if (years.length === 0) {
+    return null;
+  }
+
+  return (
+    years.find((year) => year.year === selected) ??
+    years.find((year) => year.year === String(new Date().getFullYear())) ??
+    years[years.length - 1]
+  );
+}
+
+function describeHeading(
+  mode: OverviewMode,
+  timeline: MonthsTimeline,
+  year: YearTimelineEntry | null
+) {
+  if (mode === "year") {
+    return year ? year.year : "Nothing filed yet";
+  }
+
+  if (timeline.months.length === 0) {
+    return "Nothing filed yet";
+  }
+
+  return `${formatMonthLabel(timeline.months[0].month)} - ${formatMonthLabel(
+    timeline.months[timeline.months.length - 1].month
+  )}`;
 }
 
 function MonthFlowCard({

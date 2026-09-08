@@ -154,3 +154,72 @@ describe("summarizeMonthsTimeline", () => {
     expect(timeline.savedTotal).toBe(0);
   });
 });
+
+describe("year rollups", () => {
+  test("merges a year's rows into one summary, one category per ribbon", () => {
+    const timeline = summarizeMonthsTimeline([
+      monthDocument("2026-06", {
+        expenses: [
+          expense({ id: "e1", amount: 100, category: "Groceries" }),
+          expense({ id: "e2", amount: 30, category: "Travel" })
+        ],
+        incomes: [income({ amount: 200 })]
+      }),
+      monthDocument("2026-07", {
+        expenses: [expense({ id: "e3", amount: 20, category: "Groceries" })],
+        incomes: [income({ id: "i2", amount: 400 })]
+      })
+    ]);
+
+    expect(timeline.years.map((year) => year.year)).toEqual(["2026"]);
+
+    const [year] = timeline.years;
+
+    expect(year.monthCount).toBe(2);
+    expect(year.statementCount).toBe(2);
+    expect(year.expenseCount).toBe(3);
+    expect(year.summary.incomeTotal).toBe(600);
+    expect(year.summary.categorySpendTotal).toBe(150);
+    expect(year.summary.savedAmount).toBe(450);
+
+    const groceries = year.summary.allocations.find(
+      (allocation) => allocation.label === "Groceries"
+    );
+
+    expect(groceries?.amount).toBe(120);
+  });
+
+  test("keeps years apart and orders them oldest first", () => {
+    const timeline = summarizeMonthsTimeline([
+      monthDocument("2026-01", {
+        expenses: [expense({ id: "e2", amount: 40 })],
+        incomes: [income({ id: "i2", amount: 10 })]
+      }),
+      monthDocument("2025-12", {
+        expenses: [expense({ id: "e1", amount: 25 })],
+        incomes: [income({ amount: 500 })]
+      })
+    ]);
+
+    expect(timeline.years.map((year) => year.year)).toEqual(["2025", "2026"]);
+    expect(timeline.years[0].summary.savedAmount).toBe(475);
+    expect(timeline.years[1].summary.savedAmount).toBe(-30);
+    expect(timeline.years[1].summary.allocations[0].source).toBe("overspent");
+  });
+
+  test("leaves out months with no statements, like the month series does", () => {
+    const timeline = summarizeMonthsTimeline([
+      monthDocument("2026-05", {
+        statements: [],
+        expenses: [expense({ amount: 999 })]
+      }),
+      monthDocument("2026-06", {
+        expenses: [expense({ amount: 10 })]
+      })
+    ]);
+
+    expect(timeline.years).toHaveLength(1);
+    expect(timeline.years[0].monthCount).toBe(1);
+    expect(timeline.years[0].summary.categorySpendTotal).toBe(10);
+  });
+});
