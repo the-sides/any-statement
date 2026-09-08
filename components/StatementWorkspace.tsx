@@ -378,7 +378,6 @@ const CLOSED_DRAWER_HOLDS: Record<DrawerId, DrawerHold> = {
 type SortKey =
   | "statement"
   | "amount"
-  | "reimbursed"
   | "merchant"
   | "description"
   | "category"
@@ -390,7 +389,6 @@ type SortState = { key: SortKey; dir: "asc" | "desc" };
 const TABLE_SORT_COLUMNS: { key: SortKey; label: string }[] = [
   { key: "statement", label: "Statement" },
   { key: "amount", label: "Amount" },
-  { key: "reimbursed", label: "Reimbursed" },
   { key: "merchant", label: "Merchant" },
   { key: "description", label: "Description" },
   { key: "category", label: "Category" },
@@ -410,8 +408,6 @@ function sortKeyValue(
       );
     case "amount":
       return item.amount;
-    case "reimbursed":
-      return item.reimbursedAmount;
     case "merchant":
       return item.merchant;
     case "description":
@@ -3716,7 +3712,7 @@ export function StatementWorkspace() {
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={9}>
                     <div className="empty-state">
                       {monthsLoading
                         ? "Loading this month..."
@@ -3729,7 +3725,7 @@ export function StatementWorkspace() {
               ) : null}
               {items.length > 0 && visibleItems.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={9}>
                     <div className="empty-state">
                       No rows match the active category filter.
                     </div>
@@ -3758,41 +3754,50 @@ export function StatementWorkspace() {
                     </button>
                   </td>
                   <td>
-                    <input
-                      className="amount-input"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={item.amount}
-                      onChange={(event) =>
-                        updateItem(item.id, {
-                          amount: Number(event.target.value)
-                        })
-                      }
-                    />
-                    {item.reimbursedAmount > 0 ? (
-                      <span className="net-amount">
-                        net{" "}
-                        {formatCurrency(
-                          item.amount - item.reimbursedAmount,
-                          currency
-                        )}
-                      </span>
-                    ) : null}
-                  </td>
-                  <td>
-                    <input
-                      className="amount-input"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={item.reimbursedAmount}
-                      onChange={(event) =>
-                        updateItem(item.id, {
-                          reimbursedAmount: Number(event.target.value)
-                        })
-                      }
-                    />
+                    <div className="amount-cell">
+                      <input
+                        className="amount-input"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={item.amount}
+                        onChange={(event) =>
+                          updateItem(item.id, {
+                            amount: Number(event.target.value)
+                          })
+                        }
+                      />
+                      <div
+                        className="amount-reimbursed"
+                        data-active={item.reimbursedAmount > 0 ? "true" : "false"}
+                      >
+                        <label className="reimbursed-field">
+                          <span>reimb</span>
+                          <input
+                            className="reimbursed-input"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.reimbursedAmount}
+                            aria-label={`Reimbursed for ${item.merchant || item.description}`}
+                            onChange={(event) =>
+                              updateItem(item.id, {
+                                reimbursedAmount: Number(event.target.value)
+                              })
+                            }
+                          />
+                        </label>
+                        {item.reimbursedAmount > 0 ? (
+                          <span className="net-amount">
+                            net{" "}
+                            {formatCurrency(
+                              item.amount - item.reimbursedAmount,
+                              currency
+                            )}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
                   </td>
                   <td>
                     <input

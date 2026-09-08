@@ -343,8 +343,13 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   notes admitting they were internal transfers).
 - Expenses carry `reimbursedAmount` (default 0; net = amount − reimbursedAmount,
   derived, never stored — partial reimbursements are just a smaller value). The
-  review table edits it per row, shows `net $X` under the gross amount plus a
-  Net stat, and the Notion save writes a `Reimbursed` number property
+  reimbursed editor lives *inside* the Amount cell rather than in a column of
+  its own: a second line under the gross amount holds a compact `reimb` input
+  and, once a reimbursement exists, `net $X`. That line always reserves its
+  height and only fades in on row hover or `:focus-within`, so revealing it
+  never reflows the table; a row that already carries a reimbursement keeps it
+  visible. There is still a Net stat above the table, and the Notion save
+  writes a `Reimbursed` number property
   (`lib/migrations/004_expense_reimbursements.sql`).
 - Bank statements also carry income: extraction returns an `incomes` array
   (payroll, interest, other deposits; never own-account transfers) alongside

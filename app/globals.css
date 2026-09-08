@@ -1895,38 +1895,38 @@ td:nth-child(2) {
   width: 80px;
 }
 
+/*
+ * Review table columns after the checkbox: statement, amount (which now also
+ * hosts the reimbursed editor), merchant, description, category, notes, date.
+ * The actions column is covered by the :last-child rule above.
+ */
 th:nth-child(3),
 td:nth-child(3) {
-  width: 120px;
+  width: 150px;
 }
 
 th:nth-child(4),
 td:nth-child(4) {
-  width: 100px;
+  width: 190px;
 }
 
 th:nth-child(5),
 td:nth-child(5) {
-  width: 190px;
+  width: 310px;
 }
 
 th:nth-child(6),
 td:nth-child(6) {
-  width: 310px;
+  width: 150px;
 }
 
 th:nth-child(7),
 td:nth-child(7) {
-  width: 150px;
+  width: 230px;
 }
 
 th:nth-child(8),
 td:nth-child(8) {
-  width: 230px;
-}
-
-th:nth-child(9),
-td:nth-child(9) {
   width: 150px;
 }
 
@@ -1947,8 +1947,51 @@ td select:focus {
   max-width: 110px;
 }
 
+/*
+ * The reimbursed editor lives inside the Amount cell instead of owning a
+ * column of its own. Its line always occupies height so revealing it on hover
+ * cannot shift the row; only its opacity changes. A row that already carries a
+ * reimbursement stays visible regardless, and :focus-within keeps it reachable
+ * by keyboard while the pointer is elsewhere.
+ */
+.amount-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.amount-reimbursed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+tr:hover .amount-reimbursed,
+.amount-reimbursed:focus-within,
+.amount-reimbursed[data-active="true"] {
+  opacity: 1;
+}
+
+.reimbursed-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.reimbursed-input {
+  max-width: 68px;
+  padding: 1px 4px;
+  font-size: 11px;
+}
+
 .net-amount {
-  display: block;
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
