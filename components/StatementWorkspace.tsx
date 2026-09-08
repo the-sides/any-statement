@@ -18,6 +18,7 @@ import {
   MessageCircle,
   NotebookPen,
   PanelLeft,
+  Pencil,
   Pin,
   PinOff,
   Plug,
@@ -63,8 +64,11 @@ import {
   INCOME_KINDS,
   STATEMENT_TYPES,
   FALLBACK_CATEGORY_NAME,
+  MAX_CATEGORY_DESCRIPTION_LENGTH,
+  MAX_CATEGORY_NAME_LENGTH,
   getDefaultCategoryName,
   getEnabledCategoryNames,
+  isEditableCategory,
   hasActiveNotionCategories,
   resolveIncludeAppCategories,
   selectActiveCategories,
@@ -150,6 +154,17 @@ type CategoryResponse = {
   imported?: number;
   importError?: string;
   error?: string;
+  renamedFrom?: string;
+  renamedTo?: string;
+  renamedRows?: number;
+};
+
+/** The add/rename panel form; `target` is the category being edited. */
+type CategoryFormState = {
+  mode: "create" | "edit";
+  target: string;
+  name: string;
+  description: string;
 };
 
 /** Mirrors `NotionConnectionStatus` from lib/notionConnection.ts. */
@@ -591,6 +606,9 @@ export function StatementWorkspace() {
   >("loading");
   const [categories, setCategories] = useState<ExpenseCategoryDefinition[]>(
     DEFAULT_EXPENSE_CATEGORY_DEFINITIONS
+  );
+  const [categoryForm, setCategoryForm] = useState<CategoryFormState | null>(
+    null
   );
   const [notice, setNotice] = useState<Notice>({
     tone: "neutral",
@@ -1579,6 +1597,162 @@ export function StatementWorkspace() {
     }
   }
 
+  function openCategoryForm(category?: ExpenseCategoryDefinition) {
+    setCategoryForm(
+      category
+        ? {
+            mode: "edit",
+            target: category.name,
+            name: category.name,
+            description: category.description
+          }
+        : { mode: "create", target: "", name: "", description: "" }
+    );
+  }
+
+  async function submitCategoryForm() {
+    const form = categoryForm;
+
+    if (!form) {
+      return;
+    }
+
+    const name = form.name.trim();
+    const description = form.description.trim();
+
+    if (!name) {
+      showNotice({ tone: "error", message: "A category needs a name." });
+      return;
+    }
+
+    setCategoryBusy("updating");
+
+    try {
+      if (form.mode === "edit") {
+        // A rename cascades to every stored row, so pending month writes have
+        // to land first: a debounced flush afterwards would write the old
+        // category name back onto the active month.
+        await flushMonths();
+      }
+
+      const response =
+        form.mode === "create"
+          ? await fetch("/api/categories", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name, description })
+            })
+          : await fetch("/api/categories", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: form.target, newName: name, description })
+            });
+      const result = (await response.json()) as CategoryResponse;
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ||
+            (form.mode === "create"
+              ? "Creating the category failed."
+              : "Category update failed.")
+        );
+      }
+
+      setCategories(result.categories);
+      setCategoryForm(null);
+
+      if (form.mode === "create") {
+        showNotice({ tone: "success", message: `Added ${name}.` });
+        return;
+      }
+
+      if (result.renamedFrom && result.renamedTo) {
+        renameActiveMonthCategory(result.renamedFrom, result.renamedTo);
+        showNotice({
+          tone: "success",
+          message: `Renamed ${result.renamedFrom} to ${result.renamedTo}${
+            result.renamedRows
+              ? ` and updated ${result.renamedRows} ${
+                  result.renamedRows === 1 ? "row" : "rows"
+                }`
+              : ""
+          }.`
+        });
+        return;
+      }
+
+      showNotice({ tone: "success", message: `Saved ${name}.` });
+    } catch (error) {
+      showNotice({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Category update failed."
+      });
+    } finally {
+      setCategoryBusy("idle");
+    }
+  }
+
+  /**
+   * The server renamed the rows it has stored; the active month is held in
+   * memory optimistically, so it has to be renamed here too.
+   */
+  function renameActiveMonthCategory(from: string, to: string) {
+    const normalized = from.trim().toLowerCase();
+    const matches = (item: ExpenseItem) =>
+      item.category.trim().toLowerCase() === normalized;
+
+    if (!items.some(matches)) {
+      return;
+    }
+
+    updateActiveMonth({
+      expenses: items.map((item) =>
+        matches(item) ? { ...item, category: to } : item
+      )
+    });
+  }
+
+  async function deleteCategory(name: string) {
+    if (
+      !window.confirm(
+        `Remove ${name}? Rows already using it keep the name until you recategorize them.`
+      )
+    ) {
+      return;
+    }
+
+    setCategoryBusy("updating");
+
+    try {
+      const response = await fetch(
+        `/api/categories?name=${encodeURIComponent(name)}`,
+        { method: "DELETE" }
+      );
+      const result = (await response.json()) as CategoryResponse;
+
+      if (!response.ok) {
+        throw new Error(result.error || "Removing the category failed.");
+      }
+
+      setCategories(result.categories);
+      setCategoryForm((current) =>
+        current && current.target === name ? null : current
+      );
+      showNotice({ tone: "success", message: `Removed ${name}.` });
+    } catch (error) {
+      showNotice({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Removing the category failed."
+      });
+    } finally {
+      setCategoryBusy("idle");
+    }
+  }
+
   function toggleAppCategoryVisibility(enabled: boolean) {
     if (!writeAppCategoryVisibilityPreference(enabled)) {
       showNotice({
@@ -2376,24 +2550,98 @@ export function StatementWorkspace() {
             </span>
           </div>
 
-          <button
-            className="secondary-button"
-            type="button"
-            title="Import categories"
-            disabled={controlsDisabled}
-            onClick={importCategories}
-          >
-            {categoryBusy === "importing" ? (
-              <LoaderCircle
-                className="spin"
-                size={18}
-                {...hydrationSafeIconProps}
+          <div className="category-panel-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              title="Import categories"
+              disabled={controlsDisabled}
+              onClick={importCategories}
+            >
+              {categoryBusy === "importing" ? (
+                <LoaderCircle
+                  className="spin"
+                  size={18}
+                  {...hydrationSafeIconProps}
+                />
+              ) : (
+                <RefreshCw size={18} {...hydrationSafeIconProps} />
+              )}
+              Import
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              title="Add a category"
+              disabled={controlsDisabled}
+              onClick={() => openCategoryForm()}
+            >
+              <Plus size={18} {...hydrationSafeIconProps} />
+              New
+            </button>
+          </div>
+
+          {categoryForm ? (
+            <form
+              className="category-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitCategoryForm();
+              }}
+            >
+              <input
+                value={categoryForm.name}
+                maxLength={MAX_CATEGORY_NAME_LENGTH}
+                placeholder="Category name"
+                aria-label="Category name"
+                autoFocus
+                onChange={(event) =>
+                  setCategoryForm((current) =>
+                    current ? { ...current, name: event.target.value } : current
+                  )
+                }
               />
-            ) : (
-              <RefreshCw size={18} {...hydrationSafeIconProps} />
-            )}
-            Import
-          </button>
+              <input
+                value={categoryForm.description}
+                maxLength={MAX_CATEGORY_DESCRIPTION_LENGTH}
+                placeholder="What belongs here (optional)"
+                aria-label="Category description"
+                onChange={(event) =>
+                  setCategoryForm((current) =>
+                    current
+                      ? { ...current, description: event.target.value }
+                      : current
+                  )
+                }
+              />
+              <div className="category-form-actions">
+                <button
+                  className="secondary-button"
+                  type="submit"
+                  disabled={controlsDisabled || !categoryForm.name.trim()}
+                >
+                  {categoryBusy === "updating" ? (
+                    <LoaderCircle
+                      className="spin"
+                      size={16}
+                      {...hydrationSafeIconProps}
+                    />
+                  ) : (
+                    <Check size={16} {...hydrationSafeIconProps} />
+                  )}
+                  {categoryForm.mode === "create" ? "Add" : "Save"}
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => setCategoryForm(null)}
+                >
+                  <X size={16} {...hydrationSafeIconProps} />
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : null}
 
           <label
             className={`category-source-toggle ${
@@ -2420,23 +2668,52 @@ export function StatementWorkspace() {
 
           <div className="category-list">
             {activeCategories.map((category) => (
-              <label
+              <div
                 className={`category-toggle ${category.enabled ? "enabled" : ""}`}
                 key={`${category.source}-${category.sourceId || category.name}`}
               >
-                <input
-                  type="checkbox"
-                  checked={category.enabled}
-                  disabled={categoryBusy !== "idle" || busy !== "idle"}
-                  onChange={(event) =>
-                    toggleCategory(category.name, event.target.checked)
-                  }
-                />
-                <span className="category-toggle-main">
-                  <strong>{category.name}</strong>
-                  <small>{category.source}</small>
-                </span>
-              </label>
+                <label
+                  className="category-toggle-label"
+                  title={category.description || undefined}
+                >
+                  <input
+                    type="checkbox"
+                    checked={category.enabled}
+                    disabled={controlsDisabled}
+                    onChange={(event) =>
+                      toggleCategory(category.name, event.target.checked)
+                    }
+                  />
+                  <span className="category-toggle-main">
+                    <strong>{category.name}</strong>
+                    <small>{category.source}</small>
+                  </span>
+                </label>
+                <div className="category-toggle-actions">
+                  {isEditableCategory(category) ? (
+                    <button
+                      className="icon-button"
+                      type="button"
+                      title={`Rename ${category.name}`}
+                      aria-label={`Rename ${category.name}`}
+                      disabled={controlsDisabled}
+                      onClick={() => openCategoryForm(category)}
+                    >
+                      <Pencil size={14} {...hydrationSafeIconProps} />
+                    </button>
+                  ) : null}
+                  <button
+                    className="icon-button danger"
+                    type="button"
+                    title={`Remove ${category.name}`}
+                    aria-label={`Remove ${category.name}`}
+                    disabled={controlsDisabled}
+                    onClick={() => deleteCategory(category.name)}
+                  >
+                    <Trash2 size={14} {...hydrationSafeIconProps} />
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         </section>
