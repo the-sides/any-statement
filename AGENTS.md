@@ -218,6 +218,17 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
 - An uploaded statement is filed into the calendar month covering most of its period,
   falling back to its row dates, and the workspace switches to that month. There is no
   save-month action; months are derived. See `specs/month-scoped-statements.md`.
+- A statement whose period runs longer than one billing cycle (`SINGLE_CYCLE_DAYS`, 45
+  days in `lib/months.ts`) is **split per calendar month** by row date:
+  `planStatementFiling` returns one segment per month, each with its own statement id
+  (`<id>-<YYYY-MM>`), its rows re-pointed at it, and its period narrowed to that month.
+  The workspace files every segment and lands on the busiest one. A bank export covering
+  January to May used to file all five months' rows under March, which is what this fixes.
+  Rows carrying no date at all fall to that busiest month rather than being dropped.
+  A 30-day cycle straddling two months is **not** split - that is what keeps a Jun 12 -
+  Jul 11 card cycle filed beside the calendar-month bank statement, which the spec's
+  stories 3 and 4 require. Distinct per-month ids matter: filing a statement into a month
+  that already holds the same id replaces it and drops its rows.
 - Month documents live in Postgres (Neon), in relational `months` / `statements` / `expenses`
   tables defined by the migrations in `lib/migrations/`, keyed by `(user_id, month)`. Writes are whole-month and transactional, matching the
   file-per-month semantics the app was built around. `./data/months/<YYYY-MM>.json` is now
@@ -469,6 +480,10 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
 - `scripts/import-local-months.ts` - imports legacy `data/months/*.json` into Postgres.
 - `scripts/seed-demo.ts` - seeds three fixed months for the demo tenant; idempotent, and its
   header lists the UI states the seed cannot reach.
+- `scripts/refile-multi-month-statements.ts` - re-files already stored statements that
+  cover several months, using the same `planStatementFiling`. Dry run unless `--apply`;
+  skips statements whose month was set by hand. Used once to split the ledger's
+  January-May rows out of 2026-03.
 - `lib/openrouter.ts` - OpenRouter request, prompt, response parsing, debug payload.
 - `lib/fallbackExtractor.ts` - deterministic PDF text fallback.
 - `lib/artifacts.ts` - `/tmp` artifact persistence.
