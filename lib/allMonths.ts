@@ -27,9 +27,28 @@ export type YearTimelineEntry = {
   summary: CashFlowSummary;
 };
 
+/**
+ * One expense row, flattened out of its month document so the overview can
+ * list the transactions behind the graphs. It is a read-only projection: the
+ * fields the table shows and the month key needed to open the row where it is
+ * editable, nothing else.
+ */
+export type TimelineTransaction = {
+  id: string;
+  month: string;
+  date: string;
+  merchant: string;
+  description: string;
+  category: string;
+  amount: number;
+  reimbursedAmount: number;
+};
+
 export type MonthsTimeline = {
   months: MonthTimelineEntry[];
   years: YearTimelineEntry[];
+  /** Every filed month's expenses, newest first. */
+  transactions: TimelineTransaction[];
   currency: string;
   incomeTotal: number;
   spendTotal: number;
@@ -41,6 +60,7 @@ export type MonthsTimeline = {
 export const EMPTY_MONTHS_TIMELINE: MonthsTimeline = {
   months: [],
   years: [],
+  transactions: [],
   currency: DEFAULT_CURRENCY,
   incomeTotal: 0,
   spendTotal: 0,
@@ -82,6 +102,7 @@ export function summarizeMonthsTimeline(
   return {
     months,
     years: summarizeYears(filed),
+    transactions: listTransactions(filed),
     currency: pickCurrency(documents),
     incomeTotal,
     spendTotal,
@@ -90,6 +111,44 @@ export function summarizeMonthsTimeline(
     overspentMonths: months.filter((month) => month.summary.savedAmount < 0)
       .length
   };
+}
+
+/**
+ * Every filed month's expenses as one list, newest first. Rows with no date
+ * sort last rather than to the top, where an empty date string would otherwise
+ * put them; the month key breaks ties so a month's rows stay together.
+ */
+function listTransactions(
+  documents: readonly MonthDocument[]
+): TimelineTransaction[] {
+  return documents
+    .flatMap((document) =>
+      document.expenses.map((expense) => ({
+        id: expense.id,
+        month: document.month,
+        date: expense.date,
+        merchant: expense.merchant,
+        description: expense.description,
+        category: expense.category,
+        amount: expense.amount,
+        reimbursedAmount: expense.reimbursedAmount
+      }))
+    )
+    .sort((first, second) => {
+      if (first.date !== second.date) {
+        if (!first.date) {
+          return 1;
+        }
+
+        if (!second.date) {
+          return -1;
+        }
+
+        return second.date.localeCompare(first.date);
+      }
+
+      return second.month.localeCompare(first.month);
+    });
 }
 
 /**

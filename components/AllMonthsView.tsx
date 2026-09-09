@@ -14,6 +14,7 @@ import {
   EMPTY_MONTHS_TIMELINE,
   type MonthTimelineEntry,
   type MonthsTimeline,
+  type TimelineTransaction,
   type YearTimelineEntry
 } from "@/lib/allMonths";
 import { formatCurrency } from "@/lib/currency";
@@ -129,6 +130,17 @@ export function AllMonthsView({
   const activeYear = useMemo(
     () => resolveYear(years, selectedYear),
     [years, selectedYear]
+  );
+  // Year mode lists that year's rows; Compare spans every filed month, so its
+  // table is the whole ledger in the same order.
+  const transactions = useMemo(
+    () =>
+      mode === "year"
+        ? timeline.transactions.filter(
+            (transaction) => transaction.month.slice(0, 4) === activeYear?.year
+          )
+        : timeline.transactions,
+    [activeYear, mode, timeline.transactions]
   );
 
   return (
@@ -324,6 +336,14 @@ export function AllMonthsView({
           ))}
         </div>
       ) : null}
+
+      {transactions.length > 0 ? (
+        <TransactionsTable
+          currency={currency}
+          onSelectMonth={onSelectMonth}
+          transactions={transactions}
+        />
+      ) : null}
     </section>
   );
 }
@@ -360,6 +380,93 @@ function describeHeading(
   return `${formatMonthLabel(timeline.months[0].month)} - ${formatMonthLabel(
     timeline.months[timeline.months.length - 1].month
   )}`;
+}
+
+/**
+ * The rows behind the graphs, read-only: editing a row means opening its month,
+ * where the review table owns the optimistic write path and the undo history.
+ * The month cell is the way in.
+ */
+function TransactionsTable({
+  currency,
+  onSelectMonth,
+  transactions
+}: {
+  currency: string;
+  onSelectMonth: (month: string) => void;
+  transactions: readonly TimelineTransaction[];
+}) {
+  const grossTotal = transactions.reduce(
+    (total, transaction) => total + transaction.amount,
+    0
+  );
+  const netTotal = transactions.reduce(
+    (total, transaction) =>
+      total + transaction.amount - transaction.reimbursedAmount,
+    0
+  );
+
+  return (
+    <section className="all-months-transactions" aria-label="Transactions">
+      <div className="all-months-transactions-heading">
+        <p className="eyebrow">Transactions</p>
+        <p>
+          {transactions.length}{" "}
+          {transactions.length === 1 ? "row" : "rows"} &middot;{" "}
+          {formatCurrency(grossTotal, currency)}
+          {netTotal === grossTotal
+            ? ""
+            : ` gross, ${formatCurrency(netTotal, currency)} net`}
+        </p>
+      </div>
+      <div className="table-frame">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Month</th>
+              <th>Merchant</th>
+              <th>Description</th>
+              <th>Category</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {transactions.map((transaction) => (
+              <tr key={`${transaction.month}-${transaction.id}`}>
+                <td>{transaction.date || "-"}</td>
+                <td>
+                  <button
+                    className="statement-chip"
+                    type="button"
+                    title="Open this month"
+                    onClick={() => onSelectMonth(transaction.month)}
+                  >
+                    {formatMonthLabel(transaction.month)}
+                  </button>
+                </td>
+                <td>{transaction.merchant || "-"}</td>
+                <td>{transaction.description}</td>
+                <td>{transaction.category}</td>
+                <td>
+                  {formatCurrency(transaction.amount, currency)}
+                  {transaction.reimbursedAmount > 0 ? (
+                    <span className="net-amount">
+                      net{" "}
+                      {formatCurrency(
+                        transaction.amount - transaction.reimbursedAmount,
+                        currency
+                      )}
+                    </span>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 }
 
 function MonthFlowCard({

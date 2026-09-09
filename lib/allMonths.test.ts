@@ -223,3 +223,58 @@ describe("year rollups", () => {
     expect(timeline.years[0].summary.categorySpendTotal).toBe(10);
   });
 });
+
+describe("timeline transactions", () => {
+  test("flattens every filed month's rows newest first, undated rows last", () => {
+    const timeline = summarizeMonthsTimeline([
+      monthDocument("2026-07", {
+        expenses: [
+          expense({ id: "e3", date: "2026-07-02", amount: 50 }),
+          expense({ id: "e4", date: "", amount: 5 })
+        ]
+      }),
+      monthDocument("2026-06", {
+        expenses: [
+          expense({
+            id: "e1",
+            date: "2026-06-04",
+            amount: 100,
+            reimbursedAmount: 40,
+            merchant: "Hotel",
+            category: "Travel"
+          })
+        ]
+      })
+    ]);
+
+    expect(timeline.transactions.map((row) => row.id)).toEqual([
+      "e3",
+      "e1",
+      "e4"
+    ]);
+    expect(timeline.transactions[1]).toEqual({
+      id: "e1",
+      month: "2026-06",
+      date: "2026-06-04",
+      description: "Charge",
+      merchant: "Hotel",
+      category: "Travel",
+      amount: 100,
+      reimbursedAmount: 40
+    });
+  });
+
+  test("leaves out rows from months with no statements", () => {
+    const timeline = summarizeMonthsTimeline([
+      monthDocument("2026-05", {
+        statements: [],
+        expenses: [expense({ id: "unfiled", amount: 999 })]
+      }),
+      monthDocument("2026-06", {
+        expenses: [expense({ id: "filed", amount: 10 })]
+      })
+    ]);
+
+    expect(timeline.transactions.map((row) => row.id)).toEqual(["filed"]);
+  });
+});

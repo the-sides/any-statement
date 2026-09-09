@@ -822,6 +822,76 @@ button:focus-visible,
     var(--panel);
 }
 
+/* The rows behind the graphs. The review table's global `table` rules assume
+   its own columns - a 1600px min-width and per-index widths - so this table
+   resets both and sizes its six columns itself; without the reset the Date
+   column inherits the checkbox's 42px. */
+.all-months-transactions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.all-months-transactions-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.all-months-transactions-heading p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.all-months-transactions .table-frame {
+  max-height: 420px;
+}
+
+.all-months-transactions table {
+  min-width: 720px;
+}
+
+.all-months-transactions th,
+.all-months-transactions td {
+  width: auto;
+}
+
+.all-months-transactions th:nth-child(1),
+.all-months-transactions td:nth-child(1) {
+  width: 110px;
+}
+
+.all-months-transactions th:nth-child(2),
+.all-months-transactions td:nth-child(2) {
+  width: 130px;
+}
+
+.all-months-transactions th:nth-child(3),
+.all-months-transactions td:nth-child(3) {
+  width: 190px;
+}
+
+.all-months-transactions th:nth-child(5),
+.all-months-transactions td:nth-child(5) {
+  width: 150px;
+}
+
+.all-months-transactions th:nth-child(6),
+.all-months-transactions td:nth-child(6) {
+  width: 130px;
+  white-space: nowrap;
+}
+
+/* The review table's amount cell is a flex column; here the net line is a
+   plain child of the cell, so it needs its own line break. */
+.all-months-transactions .net-amount {
+  display: block;
+}
+
 /* One cash flow graph per month, laid out left to right and scrolled
    horizontally. Each card's width is the zoom level (`MONTH_CARD_WIDTH` in
    `AllMonthsView`), so 100% is a month rendered big enough to read its labels
