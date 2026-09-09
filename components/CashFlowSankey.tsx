@@ -42,7 +42,9 @@ function CashFlowSankey({
   currency,
   fit,
   idPrefix = "sankey",
-  zoom = 1
+  zoom = 1,
+  selectedCategory = "",
+  onSelectCategory
 }: {
   summary: CashFlowSummary;
   currency: string;
@@ -51,6 +53,14 @@ function CashFlowSankey({
   /** Unique per rendered chart, so two on one page never share gradient ids. */
   idPrefix?: string;
   zoom?: number;
+  /** Category currently filtered on: its ribbon stays lit, the others dim. */
+  selectedCategory?: string;
+  /**
+   * Set to make category ribbons and their labels clickable. Only allocations
+   * that came from a statement category are offered - a manual output has no
+   * rows behind it, so clicking one could only filter a table to nothing.
+   */
+  onSelectCategory?: (category: string) => void;
 }) {
   const width = SANKEY_WIDTH;
   const top = 84;
@@ -134,6 +144,26 @@ function CashFlowSankey({
   // Where along the spending bar earnings ran out, as a gradient offset.
   const overspentBoundaryPercent = (overspentHeight / spendHeight) * 100;
   const hasTrunk = positiveInputs.length > 0 || allocationNodes.length > 0;
+
+  /** The category name a click on this allocation should filter on, if any. */
+  function selectableCategory(node: { source: string; label: string }) {
+    return onSelectCategory && node.source === "category" ? node.label : "";
+  }
+
+  /** Everything but the filtered category fades back, so the pick reads. */
+  function isDimmed(label: string) {
+    return Boolean(selectedCategory) && label !== selectedCategory;
+  }
+
+  function ribbonClassName(category: string, label: string) {
+    return [
+      "sankey-ribbon",
+      category ? "selectable" : "",
+      isDimmed(label) ? "dimmed" : ""
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
 
   return (
     <svg
@@ -248,21 +278,30 @@ function CashFlowSankey({
             fill={`url(#${idPrefix}-input-${svgId(node.id)})`}
           />
         ))}
-        {allocationNodes.map((node, index) => (
-          <path
-            className="sankey-ribbon"
-            key={`allocation-ribbon-${node.id}`}
-            d={sankeyRibbonPath(
-              incomeX + SANKEY_NODE_WIDTH,
-              outputX,
-              trunkOutflow[index].y0,
-              trunkOutflow[index].y1,
-              node.y0,
-              node.y1
-            )}
-            fill={`url(#${idPrefix}-allocation-${svgId(node.id)})`}
-          />
-        ))}
+        {allocationNodes.map((node, index) => {
+          const category = selectableCategory(node);
+
+          return (
+            <path
+              className={ribbonClassName(category, node.label)}
+              key={`allocation-ribbon-${node.id}`}
+              d={sankeyRibbonPath(
+                incomeX + SANKEY_NODE_WIDTH,
+                outputX,
+                trunkOutflow[index].y0,
+                trunkOutflow[index].y1,
+                node.y0,
+                node.y1
+              )}
+              fill={`url(#${idPrefix}-allocation-${svgId(node.id)})`}
+              onClick={category ? () => onSelectCategory?.(category) : undefined}
+            >
+              {category ? (
+                <title>{`Show only ${category} transactions`}</title>
+              ) : null}
+            </path>
+          );
+        })}
 
         {/* Saved climbs out of the top of the frame from the output end of the
             trunk; overspent pours in from the top to the input end. Both peel
@@ -352,18 +391,27 @@ function CashFlowSankey({
           </>
         ) : null}
 
-        {allocationNodes.map((node) => (
-          <SankeyNodeMark
-            key={`allocation-${node.id}`}
-            x={outputX}
-            node={node}
-            label={truncateSvgText(node.label, 30)}
-            value={`${formatCurrency(node.amount, currency)} (${formatPercent(
-              node.percent
-            )})`}
-            side="left"
-          />
-        ))}
+        {allocationNodes.map((node) => {
+          const category = selectableCategory(node);
+
+          return (
+            <SankeyNodeMark
+              key={`allocation-${node.id}`}
+              x={outputX}
+              node={node}
+              label={truncateSvgText(node.label, 30)}
+              value={`${formatCurrency(node.amount, currency)} (${formatPercent(
+                node.percent
+              )})`}
+              side="left"
+              dimmed={isDimmed(node.label)}
+              selected={Boolean(selectedCategory) && node.label === selectedCategory}
+              onSelect={
+                category ? () => onSelectCategory?.(category) : undefined
+              }
+            />
+          );
+        })}
       </g>
     </svg>
   );
@@ -376,13 +424,19 @@ function SankeyNodeMark({
   node,
   label,
   value,
-  side
+  side,
+  dimmed = false,
+  selected = false,
+  onSelect
 }: {
   x: number;
   node: { color: string; height: number; y0: number; yc: number };
   label: string;
   value: string;
   side: "left" | "right";
+  dimmed?: boolean;
+  selected?: boolean;
+  onSelect?: () => void;
 }) {
   // Hairline categories still need a bar you can see and a label you can read,
   // so the mark keeps a floor height and stays centred on its own flow.
@@ -391,9 +445,33 @@ function SankeyNodeMark({
     side === "right"
       ? x + SANKEY_NODE_WIDTH + SANKEY_LABEL_GAP
       : x - SANKEY_LABEL_GAP;
+  const className = [
+    "sankey-node-mark",
+    onSelect ? "selectable" : "",
+    selected ? "selected" : "",
+    dimmed ? "dimmed" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <g>
+    <g
+      className={className}
+      onClick={onSelect}
+      onKeyDown={
+        onSelect
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelect();
+              }
+            }
+          : undefined
+      }
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-pressed={onSelect ? selected : undefined}
+    >
       <rect
         x={x}
         y={node.yc - barHeight / 2}

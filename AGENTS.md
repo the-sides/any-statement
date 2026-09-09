@@ -269,6 +269,20 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   `summarizeCashFlow` per month *and* per year (`lib/allMonths.ts`); the view
   flushes pending month writes first so the active month's debounced edits are
   included.
+  Under the graphs the overview lists the rows behind them: `timeline.transactions`
+  is every filed month's expenses flattened, newest first (undated rows last), and
+  the table is scoped to the picked year in `Year` and to the whole ledger in
+  `Compare`. It is read-only on purpose — the review table owns the optimistic
+  write path and the undo history — so the Month cell is a button that opens the
+  row's month instead.
+  Clicking a category ribbon or its label filters that table to the category, in
+  either mode and across every month. `CashFlowSankey` takes `selectedCategory`
+  plus `onSelectCategory`; only allocations whose `source` is `category` are
+  clickable, because a manual output has no rows behind it and could only filter
+  to nothing. Picking one dims every other ribbon, clicking it again clears it, and
+  so does the chip in the table heading. A filter that matches nothing in the
+  current scope (switch years while one is set) still renders the heading and its
+  chip, so there is always a way back.
 - In every Sankey, savings and overspending are not plain output nodes:
   `components/CashFlowSankey.tsx` draws the remainder as a riser ribbon that
   peels off the *top edge* of the trunk (saved at the output end, overspent at
@@ -457,10 +471,10 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   all-months row, including the saved/overspent riser shapes.
 - `components/AllMonthsView.tsx` - the All view: fetches `/api/months/overview` and renders
   either one Sankey card per month (`Compare`) or one Sankey for a whole calendar year
-  (`Year`).
+  (`Year`), plus the read-only transactions table and its category filter.
 - `lib/allMonths.ts` - per-month cash flow summaries, per-year rollups (`summarizeYears`),
-  and cross-month totals; `lib/allMonths.test.ts` covers it.
-  `app/api/months/overview/route.ts` serves it.
+  the flattened transaction list (`listTransactions`), and cross-month totals;
+  `lib/allMonths.test.ts` covers it. `app/api/months/overview/route.ts` serves it.
 - `lib/chartFormat.ts` / `lib/currency.ts` - chart colour/label helpers and the shared
   currency formatter, extracted so both chart components use one copy.
 - `lib/graphZoom.ts` - the zoom stops and stepping shared by the single-month

@@ -4,6 +4,7 @@ import {
   LoaderCircle,
   RefreshCw,
   TriangleAlert,
+  X,
   ZoomIn,
   ZoomOut
 } from "lucide-react";
@@ -64,6 +65,12 @@ export function AllMonthsView({
   const [zoom, setZoom] = useState(DEFAULT_GRAPH_ZOOM);
   const [mode, setMode] = useState<OverviewMode>("compare");
   const [selectedYear, setSelectedYear] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+
+  /** Clicking the category that is already filtered clears the filter. */
+  function toggleCategory(category: string) {
+    setCategoryFilter((current) => (current === category ? "" : category));
+  }
 
   useEffect(() => {
     let active = true;
@@ -132,16 +139,22 @@ export function AllMonthsView({
     [years, selectedYear]
   );
   // Year mode lists that year's rows; Compare spans every filed month, so its
-  // table is the whole ledger in the same order.
-  const transactions = useMemo(
-    () =>
+  // table is the whole ledger in the same order. A category picked in any
+  // graph narrows whichever set that is.
+  const transactions = useMemo(() => {
+    const scoped =
       mode === "year"
         ? timeline.transactions.filter(
             (transaction) => transaction.month.slice(0, 4) === activeYear?.year
           )
-        : timeline.transactions,
-    [activeYear, mode, timeline.transactions]
-  );
+        : timeline.transactions;
+
+    return categoryFilter
+      ? scoped.filter(
+          (transaction) => transaction.category === categoryFilter
+        )
+      : scoped;
+  }, [activeYear, categoryFilter, mode, timeline.transactions]);
 
   return (
     <section className="workspace all-months" aria-label="All months">
@@ -314,6 +327,8 @@ export function AllMonthsView({
           <CashFlowSankey
             currency={currency}
             idPrefix={`sankey-year-${activeYear.year}`}
+            onSelectCategory={toggleCategory}
+            selectedCategory={categoryFilter}
             summary={activeYear.summary}
             zoom={zoom}
           />
@@ -331,15 +346,19 @@ export function AllMonthsView({
               key={month.month}
               month={month}
               onSelect={onSelectMonth}
+              onSelectCategory={toggleCategory}
+              selectedCategory={categoryFilter}
               width={Math.round(MONTH_CARD_WIDTH * zoom)}
             />
           ))}
         </div>
       ) : null}
 
-      {transactions.length > 0 ? (
+      {timeline.transactions.length > 0 ? (
         <TransactionsTable
+          categoryFilter={categoryFilter}
           currency={currency}
+          onClearCategory={() => setCategoryFilter("")}
           onSelectMonth={onSelectMonth}
           transactions={transactions}
         />
@@ -388,11 +407,15 @@ function describeHeading(
  * The month cell is the way in.
  */
 function TransactionsTable({
+  categoryFilter,
   currency,
+  onClearCategory,
   onSelectMonth,
   transactions
 }: {
+  categoryFilter: string;
   currency: string;
+  onClearCategory: () => void;
   onSelectMonth: (month: string) => void;
   transactions: readonly TimelineTransaction[];
 }) {
@@ -410,6 +433,17 @@ function TransactionsTable({
     <section className="all-months-transactions" aria-label="Transactions">
       <div className="all-months-transactions-heading">
         <p className="eyebrow">Transactions</p>
+        {categoryFilter ? (
+          <button
+            className="category-filter-chip"
+            type="button"
+            title="Clear the category filter"
+            onClick={onClearCategory}
+          >
+            <span>{categoryFilter}</span>
+            <X size={12} aria-hidden="true" />
+          </button>
+        ) : null}
         <p>
           {transactions.length}{" "}
           {transactions.length === 1 ? "row" : "rows"} &middot;{" "}
@@ -419,6 +453,13 @@ function TransactionsTable({
             : ` gross, ${formatCurrency(netTotal, currency)} net`}
         </p>
       </div>
+      {transactions.length === 0 ? (
+        <div className="empty-state">
+          No {categoryFilter} rows here. Clear the filter, or pick another
+          category in the graph.
+        </div>
+      ) : null}
+      {transactions.length > 0 ? (
       <div className="table-frame">
         <table>
           <thead>
@@ -465,6 +506,7 @@ function TransactionsTable({
           </tbody>
         </table>
       </div>
+      ) : null}
     </section>
   );
 }
@@ -473,11 +515,15 @@ function MonthFlowCard({
   currency,
   month,
   onSelect,
+  onSelectCategory,
+  selectedCategory,
   width
 }: {
   currency: string;
   month: MonthTimelineEntry;
   onSelect: (month: string) => void;
+  onSelectCategory: (category: string) => void;
+  selectedCategory: string;
   /** Zoom is card width: the chart fills whatever it is given. */
   width: number;
 }) {
@@ -503,6 +549,8 @@ function MonthFlowCard({
           currency={currency}
           fit
           idPrefix={`sankey-${month.month}`}
+          onSelectCategory={onSelectCategory}
+          selectedCategory={selectedCategory}
           summary={month.summary}
         />
       </div>

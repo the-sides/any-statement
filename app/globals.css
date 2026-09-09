@@ -1774,6 +1774,36 @@ button:focus-visible,
   opacity: 0.4;
 }
 
+/* A category ribbon is only interactive where the chart was given a handler
+   (the All view). Picking one dims everything else so the filtered category
+   is the one shape still reading at full strength. */
+.sankey-ribbon.selectable,
+.sankey-node-mark.selectable {
+  cursor: pointer;
+}
+
+.sankey-ribbon.selectable:hover {
+  opacity: 0.75;
+}
+
+.sankey-ribbon.dimmed {
+  opacity: 0.12;
+}
+
+.sankey-node-mark.dimmed {
+  opacity: 0.35;
+}
+
+.sankey-node-mark.selected .sankey-node-name,
+.sankey-node-mark.selected .sankey-node-value {
+  fill: var(--accent-dark);
+}
+
+.sankey-node-mark:focus-visible {
+  outline: 2px solid var(--accent-dark);
+  outline-offset: 2px;
+}
+
 /* Labels sit over the flat tail of their own ribbon, so they carry a halo to
    stay legible against whatever colour runs underneath. */
 .sankey-node-name,
