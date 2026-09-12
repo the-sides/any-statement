@@ -470,7 +470,8 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   `AllMonthsView`. `components/SpendingCalendar.tsx` projects stacked 3D prisms into SVG,
   initially isometric, with pointer orbit, keyboard camera controls, zoom, and reset.
 - Every day has the same tower footprint; segment height is linear in gross positive spending
-  for its category. Each calendar scales against its busiest day and labels that amount.
+  for its category. Rent is excluded from calendar blocks, totals, and scaling (case-insensitive).
+  Each calendar scales against its busiest day and labels that amount.
   Category colors are keyed by name and use theme tokens. Selecting a day shows its breakdown;
   selecting a category highlights that category without changing the volume scale.
 - `lib/spendingCalendar.ts` validates actual transaction dates and aggregates charges. Invalid,

@@ -2,6 +2,19 @@ import { describe, expect, test } from "bun:test";
 import { calendarCategoryColor, calendarDate, summarizeCalendar } from "./spendingCalendar";
 
 describe("spending calendar", () => {
+  test("excludes Rent from daily stacks, counts, totals, and height scaling", () => {
+    const calendar = summarizeCalendar("2026-08", [
+      { date: "2026-08-01", category: "Rent", amount: 2500 },
+      { date: "2026-08-02", category: " rent ", amount: 100 },
+      { date: "2026-08-01", category: "Food", amount: 25 }
+    ])!;
+    expect(calendar.total).toBe(25);
+    expect(calendar.peak).toBe(25);
+    expect(calendar.days[0].count).toBe(1);
+    expect(calendar.days[1].total).toBe(0);
+    expect(calendar.categories).toEqual([["Food", 25]]);
+    expect(calendar.excluded).toBe(0);
+  });
   test("stacks categories on the actual day, using gross charges", () => {
     const calendar = summarizeCalendar("2026-08", [
       { date: "2026-08-04", category: "Food", amount: 20 },
@@ -29,8 +42,8 @@ describe("spending calendar", () => {
     expect(calendar.total).toBe(0);
     expect(calendar.peak).toBe(0);
     expect(calendar.days).toHaveLength(28);
-    expect(calendarDate("2026-02-29")).toBeNull();
-    expect(summarizeCalendar("2026-13", [])).toBeNull();
+    expect(calendarDate("2026-02-29")).toBe(null);
+    expect(summarizeCalendar("2026-13", [])).toBe(null);
   });
   test("leap days and empty days remain addressable", () => {
     const calendar = summarizeCalendar("2024-02", [{ date: "2024-02-29", category: "", amount: 0.01 }])!;

@@ -42,7 +42,7 @@ export default function SpendingCalendar({ month, expenses, currency }: {
   return <section className="spending-calendar" aria-label={`3D spending calendar for ${formatMonthLabel(month)}`}>
     <div className="calendar-heading">
       <div><p className="eyebrow">Spending in three dimensions</p><h3>{formatMonthLabel(month)}</h3></div>
-      <div className="calendar-total"><strong>{money(calendar.total)}</strong><span>gross spending · by transaction date</span></div>
+      <div className="calendar-total"><strong>{money(calendar.total)}</strong><span>gross spending · excluding Rent</span></div>
     </div>
     <div className="calendar-controls" aria-label="Calendar camera controls">
       <span>Drag to orbit · select a day to explore</span>
@@ -143,6 +143,6 @@ export default function SpendingCalendar({ month, expenses, currency }: {
         </> : <p>Pick a tile or tower to see the day’s category breakdown. Tap a category to highlight its blocks.</p>}
       </div>
     </div>
-    {calendar.excluded > 0 ? <p className="calendar-excluded">{calendar.excluded} rows outside this calendar month, without a valid date, or with non-positive amounts are not plotted. Amounts are before reimbursements.</p> : <p className="calendar-excluded">Amounts are before reimbursements. Each month scales to its own busiest day.</p>}
+    {calendar.excluded > 0 ? <p className="calendar-excluded">{calendar.excluded} rows outside this calendar month, without a valid date, or with non-positive amounts are not plotted. Rent is excluded. Amounts are before reimbursements.</p> : <p className="calendar-excluded">Rent is excluded. Amounts are before reimbursements. Each month scales to its own busiest day.</p>}
   </section>;
 }

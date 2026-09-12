@@ -24,6 +24,7 @@ export function summarizeCalendar(month: string, expenses: readonly CalendarExpe
   }));
   let excluded = 0;
   for (const row of expenses) {
+    if (row.category.trim().toLowerCase() === "rent") continue;
     const date = calendarDate(row.date);
     if (!date || !row.date.startsWith(`${month}-`) || !Number.isFinite(row.amount) || row.amount <= 0) {
       excluded++;
