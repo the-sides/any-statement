@@ -75,26 +75,50 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
   }).sort((a, b) => depth(a.x, a.y) - depth(b.x, b.y));
   // Labels are screen-aligned and painted after the geometry so another tower
   // cannot hide an amount. Small caps use a leader; crowded labels move outward.
-  const amountLabels: { key: string; text: string; x: number; y: number; anchorX: number; anchorY: number; width: number; income: boolean; detached: boolean }[] = [];
+  const amountLabels: { key: string; text: string; x: number; y: number; anchorX: number; anchorY: number; width: number; income: boolean; detached: boolean; transform: string }[] = [];
   for (const day of cells) {
     for (const income of [false, true]) {
       const amount = income ? day.incomeTotal : day.total;
       if (amount <= 0) continue;
       const z = income ? -6 - amount * scale : amount * scale;
       const [anchorX, anchorY] = project([day.x + 30, day.y + 24, z]);
-      const text = money(amount);
+      const text = money(amount).replace(/\.00\b/, "");
       const width = text.length * 6.2 + 10;
       const cap = rectangle(day.x + 12, day.y + 6, 36, z).map(project);
-      const capWidth = Math.max(...cap.map(p => p[0])) - Math.min(...cap.map(p => p[0]));
-      const detached = income || amount * scale * view.zoom < 22 || capWidth < width + 8;
+      let origin = cap[0], right = cap[1], down = cap[3];
+      if (right[0] < origin[0]) {
+        origin = cap[2]; right = cap[3]; down = cap[1];
+      }
+      if (income) {
+        // Print on the broadest visible vertical face of the hanging block.
+        const edge = [0, 1, 2, 3].filter(i => [-cos, sin, cos, -sin][i] > 0)
+          .sort((a, b) => Math.abs(cap[(b + 1) % 4][0] - cap[b][0]) - Math.abs(cap[(a + 1) % 4][0] - cap[a][0]))[0];
+        const first = cap[edge], second = cap[(edge + 1) % 4];
+        const left = first[0] < second[0] ? first : second;
+        const other = first[0] < second[0] ? second : first;
+        const faceHeight = amount * scale * Math.cos(view.tilt) * view.zoom;
+        origin = [left[0], left[1] - faceHeight / 2 - 18];
+        right = [other[0], other[1] - faceHeight / 2 - 18];
+        down = [origin[0], origin[1] + 36];
+      }
+      const transform = `matrix(${(right[0] - origin[0]) / 36} ${(right[1] - origin[1]) / 36} ${(down[0] - origin[0]) / 36} ${(down[1] - origin[1]) / 36} ${origin[0]} ${origin[1]})`;
+      const detached = amount * scale * view.zoom < (income ? 14 : 4) || (income && Math.abs(right[0] - origin[0]) < 20);
       const direction = income ? 1 : -1;
       let y = anchorY + (detached ? direction * 26 : 0);
       // Keep labels readable during orbit, zoom, and volume changes.
-      while (amountLabels.some(label => Math.abs(label.x - anchorX) < (label.width + width) / 2 + 3 && Math.abs(label.y - y) < 18)) {
+      while (detached && amountLabels.some(label => label.detached && Math.abs(label.x - anchorX) < (label.width + width) / 2 + 3 && Math.abs(label.y - y) < 18)) {
         y += direction * 18;
       }
-      amountLabels.push({ key: `${day.date}-${income ? "income" : "spend"}`, text, x: anchorX, y, anchorX, anchorY, width, income, detached: detached || y !== anchorY });
+      amountLabels.push({ key: `${day.date}-${income ? "income" : "spend"}`, text, x: anchorX, y, anchorX, anchorY, width, income, detached, transform });
     }
+  }
+  function surfaceAmount(key: string) {
+    const label = amountLabels.find(entry => entry.key === key);
+    if (!label || label.detached) return null;
+    return <text className="calendar-surface-amount" transform={label.transform}
+      x={18} y={18} textAnchor="middle" dominantBaseline="central"
+      textLength={Math.min(30, label.text.length * 4.5)} lengthAdjust="spacingAndGlyphs"
+      pointerEvents="none" aria-hidden="true">{label.text}</text>;
   }
   function zoom(delta: number) {
     setView(v => ({ ...v, zoom: Math.max(0.6, Math.min(1.8, v.zoom + delta)) }));
@@ -172,6 +196,7 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
                 fill={`color-mix(in srgb, var(--positive) ${i % 2 === 0 ? 80 : 60}%, var(--surface-sunken))`}
                 stroke="var(--positive)" strokeWidth="0.6" />;
             })}
+            {surfaceAmount(`${day.date}-income`)}
           </g>;
         })}
         {WEEKDAYS.map((name, index) => {
@@ -204,11 +229,12 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
                 <polygon points={points(top)} fill={color} stroke="var(--panel)" strokeWidth="0.35" />
               </g>;
             })}
+            {surfaceAmount(`${day.date}-spend`)}
             <text x={label[0]} y={label[1]} className="calendar-day-number">{day.day}{day.incomeTotal > 0 ? " ↓" : ""}</text>
           </g>;
         })}
         <g className="calendar-amount-labels" pointerEvents="none" aria-hidden="true">
-          {amountLabels.map(label => <g key={label.key} className={label.income ? "calendar-amount income" : "calendar-amount"}>
+          {amountLabels.filter(label => label.detached).map(label => <g key={label.key} className={label.income ? "calendar-amount income" : "calendar-amount"}>
             {label.detached ? <line x1={label.anchorX} y1={label.anchorY} x2={label.x} y2={label.y} /> : null}
             <rect x={label.x - label.width / 2} y={label.y - 8} width={label.width} height={16} rx={4} />
             <text x={label.x} y={label.y} textAnchor="middle" dominantBaseline="central">{label.text}</text>

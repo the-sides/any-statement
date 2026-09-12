@@ -478,8 +478,8 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   Reset scale returns to 100%. Camera zoom remains independent.
   Recognized income is grouped by actual date and shown as green blocks beneath the day tiles,
   using the same dollars-to-volume scale as spending. Day details list deposit sources and totals.
-  Amount labels sit on spending stack caps and beneath income blocks. Small caps use detached
-  labels with leaders; overlapping labels move outward. Labels render after the geometry.
+  Amount labels are projected onto spending caps and visible income faces, with no badge.
+  Small blocks use detached labels with leaders; overlapping detached labels move outward.
   The overview includes dated income rows from the same tenant-scoped month documents.
   Category colors are keyed by name and use theme tokens. Selecting a day shows its breakdown;
   selecting a category highlights that category without changing the volume scale.

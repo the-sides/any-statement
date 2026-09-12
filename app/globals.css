@@ -2480,3 +2480,5 @@ meter {
 
 .calendar-stage svg[data-pan-ready="true"], .calendar-stage svg[data-pan-ready="true"] .calendar-day { cursor: grab; }
 .calendar-stage svg[data-pan-ready="true"]:active, .calendar-stage svg[data-pan-ready="true"]:active .calendar-day { cursor: grabbing; }
+
+.calendar-surface-amount { fill: var(--on-ink); stroke: var(--ink); stroke-width: 0.4; paint-order: stroke; font-size: 8px; font-weight: 700; font-variant-numeric: tabular-nums; }
