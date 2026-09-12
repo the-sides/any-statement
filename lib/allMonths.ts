@@ -2,6 +2,7 @@ import {
   summarizeCashFlow,
   type CashFlowSummary
 } from "@/lib/cashFlowPlan";
+import type { CalendarIncome } from "@/lib/spendingCalendar";
 import type { MonthDocument } from "@/lib/months";
 
 const DEFAULT_CURRENCY = "USD";
@@ -49,6 +50,7 @@ export type MonthsTimeline = {
   years: YearTimelineEntry[];
   /** Every filed month's expenses, newest first. */
   transactions: TimelineTransaction[];
+  incomes: CalendarIncome[];
   currency: string;
   incomeTotal: number;
   spendTotal: number;
@@ -61,6 +63,7 @@ export const EMPTY_MONTHS_TIMELINE: MonthsTimeline = {
   months: [],
   years: [],
   transactions: [],
+  incomes: [],
   currency: DEFAULT_CURRENCY,
   incomeTotal: 0,
   spendTotal: 0,
@@ -103,6 +106,7 @@ export function summarizeMonthsTimeline(
     months,
     years: summarizeYears(filed),
     transactions: listTransactions(filed),
+    incomes: filed.flatMap(document => document.incomes.map(({ date, source, amount }) => ({ date, source, amount }))),
     currency: pickCurrency(documents),
     incomeTotal,
     spendTotal,

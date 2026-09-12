@@ -73,10 +73,13 @@ export function AllMonthsView({
   // Actual transaction months can differ from the month a billing cycle was filed in.
   const calendarMonths = useMemo(() => [...new Set([
     ...timeline.months.map(entry => entry.month),
-    ...timeline.transactions.filter(row => calendarDate(row.date)).map(row => row.date.slice(0, 7))
-  ])].sort(), [timeline.months, timeline.transactions]);
+    ...timeline.transactions.filter(row => calendarDate(row.date)).map(row => row.date.slice(0, 7)),
+    ...timeline.incomes.filter(row => calendarDate(row.date)).map(row => row.date.slice(0, 7))
+  ])].sort(), [timeline.months, timeline.transactions, timeline.incomes]);
   const activeCalendarMonth = calendarMonths.includes(calendarMonth) ? calendarMonth : calendarMonths.at(-1);
   const calendarExpenses = useMemo(() => timeline.transactions.filter(row => row.date.startsWith(`${activeCalendarMonth}-`)), [timeline.transactions, activeCalendarMonth]);
+
+  const calendarIncomes = useMemo(() => timeline.incomes.filter(row => row.date.startsWith(`${activeCalendarMonth}-`)), [timeline.incomes, activeCalendarMonth]);
 
   /** Clicking the category that is already filtered clears the filter. */
   function toggleCategory(category: string) {
@@ -321,7 +324,7 @@ export function AllMonthsView({
             {calendarMonths.map(month => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
           </select>
         </label>
-        <SpendingCalendar month={activeCalendarMonth} expenses={calendarExpenses} currency={currency} />
+        <SpendingCalendar month={activeCalendarMonth} expenses={calendarExpenses} incomes={calendarIncomes} currency={currency} />
         {timeline.transactions.some(row => !calendarDate(row.date)) ? <p className="calendar-excluded">Rows without valid transaction dates remain in the table below and cannot be placed on a calendar.</p> : null}
       </div> : null}
 

@@ -3,18 +3,19 @@
 import { useMemo, useRef, useState } from "react";
 import { formatCurrency } from "@/lib/currency";
 import { formatMonthLabel } from "@/lib/months";
-import { calendarCategoryColor, summarizeCalendar, type CalendarExpense } from "@/lib/spendingCalendar";
+import { calendarCategoryColor, summarizeCalendar, type CalendarExpense, type CalendarIncome } from "@/lib/spendingCalendar";
 
+const EMPTY_INCOMES: readonly CalendarIncome[] = [];
 const INITIAL_VIEW = { yaw: -Math.PI / 4, tilt: Math.atan(1 / Math.sqrt(2)), zoom: 1 };
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 type Point = [number, number, number];
 
-export default function SpendingCalendar({ month, expenses, currency }: {
-  month: string; expenses: readonly CalendarExpense[]; currency: string;
+export default function SpendingCalendar({ month, expenses, currency, incomes = EMPTY_INCOMES }: {
+  month: string; expenses: readonly CalendarExpense[]; currency: string; incomes?: readonly CalendarIncome[];
 }) {
   const [hideRent, setHideRent] = useState(true);
   const [volumeScale, setVolumeScale] = useState(1);
-  const calendar = useMemo(() => summarizeCalendar(month, expenses, hideRent), [month, expenses, hideRent]);
+  const calendar = useMemo(() => summarizeCalendar(month, expenses, hideRent, incomes), [month, expenses, hideRent, incomes]);
   const [view, setView] = useState(INITIAL_VIEW);
   const [selected, setSelected] = useState("");
   const [category, setCategory] = useState("");
@@ -24,7 +25,8 @@ export default function SpendingCalendar({ month, expenses, currency }: {
   const money = (amount: number) => formatCurrency(amount, currency);
   const selectedDay = calendar.days.find(day => day.date === selected);
   const activeCategory = calendar.categories.some(([name]) => name === category) ? category : "";
-  const scale = calendar.peak > 0 ? (125 * volumeScale) / calendar.peak : 0;
+  const peak = Math.max(calendar.peak, calendar.incomePeak);
+  const scale = peak > 0 ? (125 * volumeScale) / peak : 0;
   const cos = Math.cos(view.yaw), sin = Math.sin(view.yaw);
   const depth = (x: number, y: number) => x * sin + y * cos;
   function project([x, y, z]: Point): [number, number] {
@@ -44,7 +46,7 @@ export default function SpendingCalendar({ month, expenses, currency }: {
   return <section className="spending-calendar" aria-label={`3D spending calendar for ${formatMonthLabel(month)}`}>
     <div className="calendar-heading">
       <div><p className="eyebrow">Spending in three dimensions</p><h3>{formatMonthLabel(month)}</h3></div>
-      <div className="calendar-total"><strong>{money(calendar.total)}</strong><span>gross spending · {hideRent ? "excluding Rent" : "including Rent"}</span></div>
+      <div className="calendar-total"><span className="calendar-income-total">{money(calendar.incomeTotal)} incoming</span><strong>{money(calendar.total)}</strong><span>gross spending · {hideRent ? "excluding Rent" : "including Rent"}</span></div>
     </div>
     <div className="calendar-controls" aria-label="Calendar camera controls">
       <span>Drag to orbit · select a day to explore</span>
@@ -66,7 +68,7 @@ export default function SpendingCalendar({ month, expenses, currency }: {
       <output>{Math.round(volumeScale * 100)}%</output>
       <button type="button" onClick={() => setVolumeScale(1)} disabled={volumeScale === 1}>Reset scale</button>
     </label>
-    <div className="calendar-stage">
+    <div className="calendar-stage" data-has-income={calendar.incomeTotal > 0}>
       <svg viewBox="0 0 940 590" role="group" aria-label="Interactive 3D calendar. Drag to orbit. Arrow keys rotate and tilt; plus and minus zoom; Home resets."
         tabIndex={0}
         onKeyDown={event => {
@@ -99,6 +101,18 @@ export default function SpendingCalendar({ month, expenses, currency }: {
         onPointerLeave={() => { if (drag.current && !drag.current.moved) drag.current = null; }}>
         <title>{formatMonthLabel(month)} daily spending, stacked by category</title>
         <polygon className="calendar-foundation" points={points([[-245, -calendar.weeks * 33 - 16, -6], [235, -calendar.weeks * 33 - 16, -6], [235, calendar.weeks * 33 + 10, -6], [-245, calendar.weeks * 33 + 10, -6]])} />
+        {cells.filter(day => day.incomeTotal > 0).map(day => {
+          const top = rectangle(day.x + 12, day.y + 6, 36, -6);
+          const bottom = rectangle(day.x + 12, day.y + 6, 36, -6 - day.incomeTotal * scale);
+          return <g key={`income-${day.date}`} className="calendar-income-block" pointerEvents="none">
+            {[0, 1, 2, 3].filter(i => [-cos, sin, cos, -sin][i] > 0).map(i => {
+              const next = (i + 1) % 4;
+              return <polygon key={i} points={points([bottom[i], bottom[next], top[next], top[i]])}
+                fill={`color-mix(in srgb, var(--positive) ${i % 2 === 0 ? 80 : 60}%, var(--surface-sunken))`}
+                stroke="var(--positive)" strokeWidth="0.6" />;
+            })}
+          </g>;
+        })}
         {WEEKDAYS.map((name, index) => {
           const [x, y] = project([(index - 3) * 66 - 3, -calendar.weeks * 33 - 28, 0]);
           return <text key={name} x={x} y={y} className="calendar-weekday" textAnchor="middle">{name}</text>;
@@ -112,10 +126,10 @@ export default function SpendingCalendar({ month, expenses, currency }: {
           });
           const label = project([day.x + 8, day.y + 56, 0]);
           return <g key={day.date} role="button" tabIndex={0} className="calendar-day" aria-pressed={selected === day.date}
-            aria-label={`${day.date}: ${money(day.total)}, ${day.count} transactions`}
+            aria-label={`${day.date}: ${money(day.total)} spent, ${money(day.incomeTotal)} incoming, ${day.count} expenses, ${day.incomeCount} deposits`}
             onClick={() => { if (!suppressClick.current) setSelected(day.date); }}
             onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(day.date); } }}>
-            <title>{`${day.date} · ${money(day.total)}${segments.map(s => `\n${s.name}: ${money(s.amount)}`).join("")}`}</title>
+            <title>{`${day.date} · ${money(day.total)} spent · ${money(day.incomeTotal)} incoming${segments.map(s => `\n${s.name}: ${money(s.amount)}`).join("")}`}</title>
             <polygon className={`calendar-tile ${selected === day.date ? "selected" : ""}`} points={points(rectangle(day.x, day.y, 60, 0))} />
             {segments.map(segment => {
               const bottom = rectangle(day.x + 12, day.y + 6, 36, segment.bottom);
@@ -129,14 +143,15 @@ export default function SpendingCalendar({ month, expenses, currency }: {
                 <polygon points={points(top)} fill={color} stroke="var(--panel)" strokeWidth="0.35" />
               </g>;
             })}
-            <text x={label[0]} y={label[1]} className="calendar-day-number">{day.day}</text>
+            <text x={label[0]} y={label[1]} className="calendar-day-number">{day.day}{day.incomeTotal > 0 ? " ↓" : ""}</text>
           </g>;
         })}
       </svg>
-      <div className="calendar-scale">Equal footprints. Height ∝ spend.<br />Tallest day: {money(calendar.peak)}</div>
+      <div className="calendar-scale">Above: spending · Below: income<br />Equal volume per dollar · largest daily total: {money(peak)}</div>
     </div>
     <div className="calendar-bottom">
       <div className="calendar-legend" aria-label="Spending categories">
+        {calendar.incomeTotal > 0 ? <span className="calendar-income-key"><i style={{ background: "var(--positive)" }} />Income below · {money(calendar.incomeTotal)}</span> : null}
         {calendar.categories.map(([name, amount]) => <button type="button" key={name} aria-pressed={activeCategory === name}
           className={activeCategory && activeCategory !== name ? "dimmed" : ""}
           onClick={() => setCategory(current => current === name ? "" : name)}>
@@ -147,13 +162,16 @@ export default function SpendingCalendar({ month, expenses, currency }: {
       <div className="calendar-detail" aria-live="polite">
         <label>Explore a day<select aria-label="Calendar day" value={selectedDay?.date ?? ""} onChange={e => setSelected(e.target.value)}>
           <option value="">Select a day</option>
-          {calendar.days.map(day => <option key={day.date} value={day.date}>{day.date} · {money(day.total)}</option>)}
+          {calendar.days.map(day => <option key={day.date} value={day.date}>{day.date} · spent {money(day.total)} · in {money(day.incomeTotal)}</option>)}
         </select></label>
         {selectedDay ? <><strong>{money(selectedDay.total)}</strong><p>{selectedDay.count} transactions · {selectedDay.date}</p>
+          <p className="calendar-income-total">{money(selectedDay.incomeTotal)} incoming · {selectedDay.incomeCount} deposits</p>
+          {[...selectedDay.incomeSources].map(([source, amount]) => <div className="calendar-detail-row" key={`income-${source}`}><span>↓ {source}</span><b>{money(amount)}</b></div>)}
           {[...selectedDay.categories].map(([name, amount]) => <div className="calendar-detail-row" key={name}><span>{name}</span><b>{money(amount)}</b></div>)}
         </> : <p>Pick a tile or tower to see the day’s category breakdown. Tap a category to highlight its blocks.</p>}
       </div>
     </div>
+    {calendar.excludedIncomes > 0 ? <p className="calendar-excluded">{calendar.excludedIncomes} income rows outside this month, without valid dates, or with non-positive amounts are not plotted.</p> : null}
     {calendar.excluded > 0 ? <p className="calendar-excluded">{calendar.excluded} rows outside this calendar month, without a valid date, or with non-positive amounts are not plotted. {hideRent ? "Rent is excluded. " : ""}Amounts are before reimbursements.</p> : <p className="calendar-excluded">{hideRent ? "Rent is excluded. " : ""}Amounts are before reimbursements. Each month scales to its own busiest day.</p>}
   </section>;
 }

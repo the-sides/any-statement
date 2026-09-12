@@ -278,3 +278,12 @@ describe("timeline transactions", () => {
     expect(timeline.transactions.map((row) => row.id)).toEqual(["filed"]);
   });
 });
+
+
+test("calendar income keeps actual dates and sources from filed months", () => {
+  const timeline = summarizeMonthsTimeline([
+    monthDocument("2026-06", { incomes: [income({ date: "2026-05-31", amount: 2400 })] }),
+    monthDocument("2026-07", { statements: [], incomes: [income({ amount: 9000 })] })
+  ]);
+  expect(timeline.incomes).toEqual([{ date: "2026-05-31", source: "Payroll", amount: 2400 }]);
+});

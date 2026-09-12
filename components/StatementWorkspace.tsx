@@ -3535,7 +3535,7 @@ export function StatementWorkspace() {
                   zoom={graphZoom}
                 />
               ) : cashFlowGraphType === "calendar" ? (
-                activeMonth ? <SpendingCalendar month={activeMonth} expenses={items} currency={currency} /> : <p>Pick a month to see its spending calendar.</p>
+                activeMonth ? <SpendingCalendar month={activeMonth} expenses={items} incomes={incomes} currency={currency} /> : <p>Pick a month to see its spending calendar.</p>
               ) : (
                 <CashFlowPie summary={cashFlowSummary} currency={currency} />
               )}

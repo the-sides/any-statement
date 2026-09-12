@@ -2466,3 +2466,8 @@ meter {
 .calendar-volume-control output { min-width: 38px; font-variant-numeric: tabular-nums; }
 .calendar-volume-control button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; background: var(--panel); color: var(--ink); cursor: pointer; }
 .calendar-volume-control button:disabled { opacity: 0.4; cursor: default; }
+
+.calendar-stage[data-has-income="true"] .calendar-foundation { fill-opacity: 0.18; }
+.calendar-income-key { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; padding-bottom: 8px; color: var(--positive); }
+.calendar-total .calendar-income-total, .calendar-detail .calendar-income-total { color: var(--positive); }
+.calendar-stage[data-has-income="true"] .calendar-tile { fill-opacity: 0.28; }

@@ -472,9 +472,12 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
 - Every day has the same tower footprint; segment height is linear in gross positive spending
   for its category. The “Hide Rent” toggle starts enabled and excludes Rent from blocks, totals,
   and scaling (case-insensitive); turning it off restores Rent throughout the calendar.
-  Each calendar scales against its busiest day and labels that amount. A Volume scale slider
+  Each calendar scales against its largest daily spending or income total and labels that amount. A Volume scale slider
   multiplies tower heights by 25–300%, keeping footprints and spending proportions fixed;
   Reset scale returns to 100%. Camera zoom remains independent.
+  Recognized income is grouped by actual date and shown as green blocks beneath the day tiles,
+  using the same dollars-to-volume scale as spending. Day details list deposit sources and totals.
+  The overview includes dated income rows from the same tenant-scoped month documents.
   Category colors are keyed by name and use theme tokens. Selecting a day shows its breakdown;
   selecting a category highlights that category without changing the volume scale.
 - `lib/spendingCalendar.ts` validates actual transaction dates and aggregates charges. Invalid,

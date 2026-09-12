@@ -25,6 +25,23 @@ describe("spending calendar", () => {
     expect(calendar.days[0].count).toBe(2);
     expect(calendar.days[0].categories.get("Rent")).toBe(2500);
   });
+  test("groups incoming money by date and source without mixing it with spending", () => {
+    const calendar = summarizeCalendar("2026-08", [], true, [
+      { date: "2026-08-14", source: "Payroll", amount: 2000 },
+      { date: "2026-08-14", source: "Payroll", amount: 500 },
+      { date: "2026-08-14", source: "Interest", amount: 5 },
+      { date: "2026-08-28", source: "Payroll", amount: 2000 },
+      { date: "", source: "Payroll", amount: 100 },
+      { date: "2026-07-31", source: "Payroll", amount: 100 },
+      { date: "2026-08-14", source: "Payroll", amount: -100 }
+    ])!;
+    expect(calendar.total).toBe(0);
+    expect(calendar.incomeTotal).toBe(4505);
+    expect(calendar.incomePeak).toBe(2505);
+    expect(calendar.days[13].incomeCount).toBe(3);
+    expect(calendar.days[13].incomeSources.get("Payroll")).toBe(2500);
+    expect(calendar.excludedIncomes).toBe(3);
+  });
   test("stacks categories on the actual day, using gross charges", () => {
     const calendar = summarizeCalendar("2026-08", [
       { date: "2026-08-04", category: "Food", amount: 20 },

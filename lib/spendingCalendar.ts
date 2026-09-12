@@ -4,6 +4,12 @@ export type CalendarExpense = {
   amount: number;
 };
 
+export type CalendarIncome = {
+  date: string;
+  source: string;
+  amount: number;
+};
+
 export function calendarDate(value: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const date = new Date(`${value}T00:00:00Z`);
@@ -11,7 +17,7 @@ export function calendarDate(value: string): Date | null {
 }
 
 /** Gross positive charges, by actual transaction date. Never invent a day for undated rows. */
-export function summarizeCalendar(month: string, expenses: readonly CalendarExpense[], hideRent = true) {
+export function summarizeCalendar(month: string, expenses: readonly CalendarExpense[], hideRent = true, incomes: readonly CalendarIncome[] = []) {
   const first = calendarDate(`${month}-01`);
   if (!first) return null;
   const count = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
@@ -20,7 +26,10 @@ export function summarizeCalendar(month: string, expenses: readonly CalendarExpe
     day: index + 1,
     categories: new Map<string, number>(),
     total: 0,
-    count: 0
+    count: 0,
+    incomeTotal: 0,
+    incomeSources: new Map<string, number>(),
+    incomeCount: 0
   }));
   let excluded = 0;
   for (const row of expenses) {
@@ -38,14 +47,30 @@ export function summarizeCalendar(month: string, expenses: readonly CalendarExpe
     day.total += amount;
     day.count++;
   }
+  let excludedIncomes = 0;
+  for (const row of incomes) {
+    const date = calendarDate(row.date);
+    if (!date || !row.date.startsWith(`${month}-`) || !Number.isFinite(row.amount) || row.amount <= 0) {
+      excludedIncomes++;
+      continue;
+    }
+    const day = days[date.getUTCDate() - 1];
+    const amount = Math.round(row.amount * 100) / 100;
+    const source = row.source.trim() || "Income";
+    day.incomeTotal += amount;
+    day.incomeCount++;
+    day.incomeSources.set(source, (day.incomeSources.get(source) ?? 0) + amount);
+  }
   const totals = new Map<string, number>();
   for (const day of days) for (const [category, amount] of day.categories) {
     totals.set(category, (totals.get(category) ?? 0) + amount);
   }
   return {
-    days, excluded, offset: first.getUTCDay(),
+    days, excluded, excludedIncomes, offset: first.getUTCDay(),
     weeks: Math.ceil((first.getUTCDay() + count) / 7),
     peak: Math.max(0, ...days.map(day => day.total)),
+    incomePeak: Math.max(0, ...days.map(day => day.incomeTotal)),
+    incomeTotal: days.reduce((sum, day) => sum + day.incomeTotal, 0),
     total: days.reduce((sum, day) => sum + day.total, 0),
     categories: [...totals].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
   };
