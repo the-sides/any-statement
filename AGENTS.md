@@ -483,6 +483,8 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   The overview includes dated income rows from the same tenant-scoped month documents.
   Category colors are keyed by name and use theme tokens. Selecting a day shows its breakdown;
   selecting a category highlights that category without changing the volume scale.
+  Selecting a day also filters the expense table below in both month and All views, combined
+  with category filters. Click the day again, select All days, or clear the date chip to reset.
 - `lib/spendingCalendar.ts` validates actual transaction dates and aggregates charges. Invalid,
   out-of-month, zero, and negative rows are not plotted and are disclosed. Reimbursements are
   not subtracted. The single-month view uses the active document's rows; the All view groups

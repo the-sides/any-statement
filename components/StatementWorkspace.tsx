@@ -782,15 +782,17 @@ export function StatementWorkspace() {
     () => items.filter((item) => selectedIds.has(item.id)),
     [items, selectedIds]
   );
+  const [calendarDateFilter, setCalendarDateFilter] = useState("");
+  const activeCalendarDateFilter = cashFlowGraphType === "calendar" && calendarDateFilter.startsWith(`${activeMonth}-`) ? calendarDateFilter : "";
   const categoryFilterSet = useMemo(
     () => new Set(categoryFilters),
     [categoryFilters]
   );
   const visibleItems = useMemo(() => {
-    const filtered =
-      categoryFilterSet.size === 0
-        ? items
-        : items.filter((item) => categoryFilterSet.has(item.category));
+    const filtered = items.filter(item =>
+      (categoryFilterSet.size === 0 || categoryFilterSet.has(item.category)) &&
+      (!activeCalendarDateFilter || item.date === activeCalendarDateFilter)
+    );
 
     if (!sort) {
       return filtered;
@@ -802,7 +804,7 @@ export function StatementWorkspace() {
     return [...filtered].sort((a, b) =>
       compareBySortKey(a, b, sort.key, direction, statementById)
     );
-  }, [categoryFilterSet, items, sort, statementById]);
+  }, [categoryFilterSet, items, sort, statementById, activeCalendarDateFilter]);
   const visibleSelectedItems = useMemo(
     () => visibleItems.filter((item) => selectedIds.has(item.id)),
     [selectedIds, visibleItems]
@@ -3484,7 +3486,7 @@ export function StatementWorkspace() {
                       key={graphType.value}
                       type="button"
                       aria-pressed={cashFlowGraphType === graphType.value}
-                      onClick={() => setCashFlowGraphType(graphType.value)}
+                      onClick={() => { setCashFlowGraphType(graphType.value); setCalendarDateFilter(""); }}
                     >
                       {graphType.label}
                     </button>
@@ -3535,7 +3537,7 @@ export function StatementWorkspace() {
                   zoom={graphZoom}
                 />
               ) : cashFlowGraphType === "calendar" ? (
-                activeMonth ? <SpendingCalendar month={activeMonth} expenses={items} incomes={incomes} currency={currency} /> : <p>Pick a month to see its spending calendar.</p>
+                activeMonth ? <SpendingCalendar month={activeMonth} expenses={items} incomes={incomes} currency={currency} selectedDate={activeCalendarDateFilter} onSelectDate={setCalendarDateFilter} /> : <p>Pick a month to see its spending calendar.</p>
               ) : (
                 <CashFlowPie summary={cashFlowSummary} currency={currency} />
               )}
@@ -3643,6 +3645,9 @@ export function StatementWorkspace() {
               ))}
             </select>
           </label>
+          {activeCalendarDateFilter ? <button type="button" className="category-filter-chip" onClick={() => setCalendarDateFilter("")} aria-label="Clear day filter">
+            {activeCalendarDateFilter}<X size={13} {...hydrationSafeIconProps} />
+          </button> : null}
           {categoryFilters.length > 0 ? (
             <div className="category-filter-chips" aria-label="Active filters">
               {categoryFilters.map((category) => (
@@ -3731,7 +3736,7 @@ export function StatementWorkspace() {
                 <tr>
                   <td colSpan={9}>
                     <div className="empty-state">
-                      No rows match the active category filter.
+                      No rows match the active filters.
                     </div>
                   </td>
                 </tr>

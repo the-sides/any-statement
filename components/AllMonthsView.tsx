@@ -70,6 +70,7 @@ export function AllMonthsView({
   const [selectedYear, setSelectedYear] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [calendarMonth, setCalendarMonth] = useState("");
+  const [calendarDateFilter, setCalendarDateFilter] = useState("");
   // Actual transaction months can differ from the month a billing cycle was filed in.
   const calendarMonths = useMemo(() => [...new Set([
     ...timeline.months.map(entry => entry.month),
@@ -77,6 +78,7 @@ export function AllMonthsView({
     ...timeline.incomes.filter(row => calendarDate(row.date)).map(row => row.date.slice(0, 7))
   ])].sort(), [timeline.months, timeline.transactions, timeline.incomes]);
   const activeCalendarMonth = calendarMonths.includes(calendarMonth) ? calendarMonth : calendarMonths.at(-1);
+  const activeCalendarDateFilter = mode === "calendar" && calendarDateFilter.startsWith(`${activeCalendarMonth}-`) ? calendarDateFilter : "";
   const calendarExpenses = useMemo(() => timeline.transactions.filter(row => row.date.startsWith(`${activeCalendarMonth}-`)), [timeline.transactions, activeCalendarMonth]);
 
   const calendarIncomes = useMemo(() => timeline.incomes.filter(row => row.date.startsWith(`${activeCalendarMonth}-`)), [timeline.incomes, activeCalendarMonth]);
@@ -163,12 +165,11 @@ export function AllMonthsView({
           )
         : timeline.transactions;
 
-    return categoryFilter
-      ? scoped.filter(
-          (transaction) => transaction.category === categoryFilter
-        )
-      : scoped;
-  }, [activeYear, categoryFilter, mode, timeline.transactions]);
+    return scoped.filter(transaction =>
+      (!categoryFilter || transaction.category === categoryFilter) &&
+      (!activeCalendarDateFilter || transaction.date === activeCalendarDateFilter)
+    );
+  }, [activeYear, categoryFilter, mode, timeline.transactions, activeCalendarDateFilter]);
 
   return (
     <section className="workspace all-months" aria-label="All months">
@@ -239,7 +240,7 @@ export function AllMonthsView({
                 key={option.value}
                 type="button"
                 aria-pressed={mode === option.value}
-                onClick={() => setMode(option.value)}
+                onClick={() => { setMode(option.value); setCalendarDateFilter(""); }}
               >
                 {option.label}
               </button>
@@ -320,11 +321,11 @@ export function AllMonthsView({
 
       {mode === "calendar" && activeCalendarMonth ? <div className="calendar-overview">
         <label className="calendar-month-picker">Calendar month
-          <select value={activeCalendarMonth} onChange={event => setCalendarMonth(event.target.value)}>
+          <select value={activeCalendarMonth} onChange={event => { setCalendarMonth(event.target.value); setCalendarDateFilter(""); }}>
             {calendarMonths.map(month => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
           </select>
         </label>
-        <SpendingCalendar month={activeCalendarMonth} expenses={calendarExpenses} incomes={calendarIncomes} currency={currency} />
+        <SpendingCalendar month={activeCalendarMonth} expenses={calendarExpenses} incomes={calendarIncomes} currency={currency} selectedDate={activeCalendarDateFilter} onSelectDate={setCalendarDateFilter} />
         {timeline.transactions.some(row => !calendarDate(row.date)) ? <p className="calendar-excluded">Rows without valid transaction dates remain in the table below and cannot be placed on a calendar.</p> : null}
       </div> : null}
 
@@ -384,6 +385,8 @@ export function AllMonthsView({
 
       {timeline.transactions.length > 0 ? (
         <TransactionsTable
+          dateFilter={activeCalendarDateFilter}
+          onClearDate={() => setCalendarDateFilter("")}
           categoryFilter={categoryFilter}
           currency={currency}
           onClearCategory={() => setCategoryFilter("")}
@@ -435,12 +438,16 @@ function describeHeading(
  * The month cell is the way in.
  */
 function TransactionsTable({
+  dateFilter,
+  onClearDate,
   categoryFilter,
   currency,
   onClearCategory,
   onSelectMonth,
   transactions
 }: {
+  dateFilter: string;
+  onClearDate: () => void;
   categoryFilter: string;
   currency: string;
   onClearCategory: () => void;
@@ -461,6 +468,7 @@ function TransactionsTable({
     <section className="all-months-transactions" aria-label="Transactions">
       <div className="all-months-transactions-heading">
         <p className="eyebrow">Transactions</p>
+        {dateFilter ? <button type="button" className="category-filter-chip" onClick={onClearDate} aria-label="Clear day filter">{dateFilter}<X size={12} aria-hidden="true" /></button> : null}
         {categoryFilter ? (
           <button
             className="category-filter-chip"
@@ -483,8 +491,7 @@ function TransactionsTable({
       </div>
       {transactions.length === 0 ? (
         <div className="empty-state">
-          No {categoryFilter} rows here. Clear the filter, or pick another
-          category in the graph.
+          No rows match the active filters. Clear a filter or choose another day.
         </div>
       ) : null}
       {transactions.length > 0 ? (

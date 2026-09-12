@@ -10,14 +10,19 @@ const INITIAL_VIEW = { yaw: -Math.PI / 4, tilt: Math.atan(1 / Math.sqrt(2)), zoo
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 type Point = [number, number, number];
 
-export default function SpendingCalendar({ month, expenses, currency, incomes = EMPTY_INCOMES }: {
-  month: string; expenses: readonly CalendarExpense[]; currency: string; incomes?: readonly CalendarIncome[];
+export default function SpendingCalendar({ month, expenses, currency, incomes = EMPTY_INCOMES, selectedDate, onSelectDate }: {
+  month: string; expenses: readonly CalendarExpense[]; currency: string; incomes?: readonly CalendarIncome[]; selectedDate?: string; onSelectDate?: (date: string) => void;
 }) {
   const [hideRent, setHideRent] = useState(true);
   const [volumeScale, setVolumeScale] = useState(1);
   const calendar = useMemo(() => summarizeCalendar(month, expenses, hideRent, incomes), [month, expenses, hideRent, incomes]);
   const [view, setView] = useState(INITIAL_VIEW);
-  const [selected, setSelected] = useState("");
+  const [localSelected, setLocalSelected] = useState("");
+  const selected = selectedDate ?? localSelected;
+  function setSelected(date: string) {
+    setLocalSelected(date);
+    onSelectDate?.(date);
+  }
   const [category, setCategory] = useState("");
   const svgRef = useRef<SVGSVGElement>(null);
   const hovering = useRef(false);
@@ -213,8 +218,8 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
           const label = project([day.x + 8, day.y + 56, 0]);
           return <g key={day.date} role="button" tabIndex={0} className="calendar-day" aria-pressed={selected === day.date}
             aria-label={`${day.date}: ${money(day.total)} spent, ${money(day.incomeTotal)} incoming, ${day.count} expenses, ${day.incomeCount} deposits`}
-            onClick={() => { if (!suppressClick.current) setSelected(day.date); }}
-            onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); setSelected(day.date); } }}>
+            onClick={() => { if (!suppressClick.current) setSelected(selected === day.date ? "" : day.date); }}
+            onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); setSelected(selected === day.date ? "" : day.date); } }}>
             <title>{`${day.date} · ${money(day.total)} spent · ${money(day.incomeTotal)} incoming${segments.map(s => `\n${s.name}: ${money(s.amount)}`).join("")}`}</title>
             <polygon className={`calendar-tile ${selected === day.date ? "selected" : ""}`} points={points(rectangle(day.x, day.y, 60, 0))} />
             {segments.map(segment => {
@@ -255,7 +260,7 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
       </div>
       <div className="calendar-detail" aria-live="polite">
         <label>Explore a day<select aria-label="Calendar day" value={selectedDay?.date ?? ""} onChange={e => setSelected(e.target.value)}>
-          <option value="">Select a day</option>
+          <option value="">All days</option>
           {calendar.days.map(day => <option key={day.date} value={day.date}>{day.date} · spent {money(day.total)} · in {money(day.incomeTotal)}</option>)}
         </select></label>
         {selectedDay ? <><strong>{money(selectedDay.total)}</strong><p>{selectedDay.count} transactions · {selectedDay.date}</p>
