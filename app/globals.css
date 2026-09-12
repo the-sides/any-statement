@@ -2323,7 +2323,7 @@ meter {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .header-month {
+  .header-month-anchor {
     grid-row: 2;
     grid-column: 1 / -1;
   }
@@ -2374,7 +2374,7 @@ meter {
     align-items: stretch;
   }
 
-  .header-month,
+  .header-month-anchor,
   .header-upload {
     justify-self: stretch;
   }
@@ -2482,3 +2482,8 @@ meter {
 .calendar-stage svg[data-pan-ready="true"]:active, .calendar-stage svg[data-pan-ready="true"]:active .calendar-day { cursor: grabbing; }
 
 .calendar-surface-amount { fill: var(--on-ink); stroke: var(--ink); stroke-width: 0.4; paint-order: stroke; font-size: 8px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.header-month-anchor { justify-self: center; min-width: 0; }
+.header-month { position: relative; z-index: 30; translate: 0 var(--month-float-offset, 0px); }
+.header-month[data-floating="true"] { background: var(--panel-glass-strong); backdrop-filter: blur(16px); }
+@media (max-width: 680px) { .header-month-anchor { justify-self: stretch; } }

@@ -677,6 +677,34 @@ export function StatementWorkspace() {
     useState<NotionConnectionStatus>(EMPTY_NOTION_CONNECTION);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [dataSourceId, setDataSourceId] = useState("");
+  const monthAnchorRef = useRef<HTMLDivElement>(null);
+  const floatingMonthRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    let frame = 0;
+    function update() {
+      frame = 0;
+      const anchor = monthAnchorRef.current;
+      const control = floatingMonthRef.current;
+      if (!anchor || !control) return;
+      const offset = Math.max(0, 12 - anchor.getBoundingClientRect().top);
+      control.style.setProperty("--month-float-offset", `${offset}px`);
+      control.dataset.floating = String(offset > 0);
+    }
+    function schedule() {
+      if (!frame) frame = requestAnimationFrame(update);
+    }
+    const observer = new ResizeObserver(schedule);
+    if (monthAnchorRef.current) observer.observe(monthAnchorRef.current);
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    update();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+    };
+  }, []);
   const [categoryDataSourceId, setCategoryDataSourceId] = useState("");
   const [notionBusy, setNotionBusy] = useState(false);
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
@@ -2438,7 +2466,8 @@ export function StatementWorkspace() {
           </div>
         </div>
 
-        <section className="header-month" aria-label="Active month">
+        <div className="header-month-anchor" ref={monthAnchorRef}>
+        <section className="header-month" ref={floatingMonthRef} aria-label="Active month">
           <div className="month-stepper">
             <button
               className="mini-icon-button"
@@ -2500,6 +2529,8 @@ export function StatementWorkspace() {
             All
           </button>
         </section>
+
+        </div>
 
         <div className="header-upload">
           <label className="header-file" htmlFor="statement-upload">

@@ -11,8 +11,6 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import CashFlowSankey from "@/components/CashFlowSankey";
-import SpendingCalendar from "@/components/SpendingCalendar";
-import { calendarDate } from "@/lib/spendingCalendar";
 import {
   EMPTY_MONTHS_TIMELINE,
   type MonthTimelineEntry,
@@ -38,12 +36,11 @@ type TimelineStatus = "loading" | "ready" | "error";
  * in one calendar year, so a category is one ribbon for the year rather than
  * twelve slices to eyeball across cards.
  */
-type OverviewMode = "compare" | "year" | "calendar";
+type OverviewMode = "compare" | "year";
 
 const OVERVIEW_MODES: { value: OverviewMode; label: string }[] = [
   { value: "compare", label: "Compare" },
-  { value: "year", label: "Year" },
-  { value: "calendar", label: "3D Calendar" }
+  { value: "year", label: "Year" }
 ];
 
 /**
@@ -69,20 +66,6 @@ export function AllMonthsView({
   const [mode, setMode] = useState<OverviewMode>("compare");
   const [selectedYear, setSelectedYear] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
-  const [calendarMonth, setCalendarMonth] = useState("");
-  const [calendarDateFilter, setCalendarDateFilter] = useState("");
-  // Actual transaction months can differ from the month a billing cycle was filed in.
-  const calendarMonths = useMemo(() => [...new Set([
-    ...timeline.months.map(entry => entry.month),
-    ...timeline.transactions.filter(row => calendarDate(row.date)).map(row => row.date.slice(0, 7)),
-    ...timeline.incomes.filter(row => calendarDate(row.date)).map(row => row.date.slice(0, 7))
-  ])].sort(), [timeline.months, timeline.transactions, timeline.incomes]);
-  const activeCalendarMonth = calendarMonths.includes(calendarMonth) ? calendarMonth : calendarMonths.at(-1);
-  const activeCalendarDateFilter = mode === "calendar" && calendarDateFilter.startsWith(`${activeCalendarMonth}-`) ? calendarDateFilter : "";
-  const calendarExpenses = useMemo(() => timeline.transactions.filter(row => row.date.startsWith(`${activeCalendarMonth}-`)), [timeline.transactions, activeCalendarMonth]);
-
-  const calendarIncomes = useMemo(() => timeline.incomes.filter(row => row.date.startsWith(`${activeCalendarMonth}-`)), [timeline.incomes, activeCalendarMonth]);
-
   /** Clicking the category that is already filtered clears the filter. */
   function toggleCategory(category: string) {
     setCategoryFilter((current) => (current === category ? "" : category));
@@ -166,10 +149,9 @@ export function AllMonthsView({
         : timeline.transactions;
 
     return scoped.filter(transaction =>
-      (!categoryFilter || transaction.category === categoryFilter) &&
-      (!activeCalendarDateFilter || transaction.date === activeCalendarDateFilter)
+      (!categoryFilter || transaction.category === categoryFilter)
     );
-  }, [activeYear, categoryFilter, mode, timeline.transactions, activeCalendarDateFilter]);
+  }, [activeYear, categoryFilter, mode, timeline.transactions]);
 
   return (
     <section className="workspace all-months" aria-label="All months">
@@ -240,22 +222,20 @@ export function AllMonthsView({
                 key={option.value}
                 type="button"
                 aria-pressed={mode === option.value}
-                onClick={() => { setMode(option.value); setCalendarDateFilter(""); }}
+                onClick={() => setMode(option.value)}
               >
                 {option.label}
               </button>
             ))}
           </div>
           <p>
-            {mode === "calendar"
-              ? "Daily spending by transaction date. Choose a month, then drag to explore its category-colored towers."
-              : mode === "year"
+            {mode === "year"
               ? "Every transaction in the year as one cash flow, the same graph the month view draws. Savings climb out of the top; overspending pours in from it."
               : "Every month's cash flow side by side. Savings climb out of the top of a month's frame; overspending pours in from the top. Click a month to open it."}
           </p>
         </div>
         <div className="graph-zoom-controls" aria-label="Graph zoom controls">
-          <span className="calendar-overview-zoom" hidden={mode === "calendar"}>
+          <span className="calendar-overview-zoom">
           <button
             className="mini-icon-button"
             type="button"
@@ -319,16 +299,6 @@ export function AllMonthsView({
         </div>
       ) : null}
 
-      {mode === "calendar" && activeCalendarMonth ? <div className="calendar-overview">
-        <label className="calendar-month-picker">Calendar month
-          <select value={activeCalendarMonth} onChange={event => { setCalendarMonth(event.target.value); setCalendarDateFilter(""); }}>
-            {calendarMonths.map(month => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
-          </select>
-        </label>
-        <SpendingCalendar month={activeCalendarMonth} expenses={calendarExpenses} incomes={calendarIncomes} currency={currency} selectedDate={activeCalendarDateFilter} onSelectDate={setCalendarDateFilter} />
-        {timeline.transactions.some(row => !calendarDate(row.date)) ? <p className="calendar-excluded">Rows without valid transaction dates remain in the table below and cannot be placed on a calendar.</p> : null}
-      </div> : null}
-
       {mode === "year" && years.length > 1 ? (
         <div className="graph-type-control all-months-years" aria-label="Year">
           {years.map((year) => (
@@ -385,8 +355,6 @@ export function AllMonthsView({
 
       {timeline.transactions.length > 0 ? (
         <TransactionsTable
-          dateFilter={activeCalendarDateFilter}
-          onClearDate={() => setCalendarDateFilter("")}
           categoryFilter={categoryFilter}
           currency={currency}
           onClearCategory={() => setCategoryFilter("")}
@@ -438,16 +406,12 @@ function describeHeading(
  * The month cell is the way in.
  */
 function TransactionsTable({
-  dateFilter,
-  onClearDate,
   categoryFilter,
   currency,
   onClearCategory,
   onSelectMonth,
   transactions
 }: {
-  dateFilter: string;
-  onClearDate: () => void;
   categoryFilter: string;
   currency: string;
   onClearCategory: () => void;
@@ -468,7 +432,6 @@ function TransactionsTable({
     <section className="all-months-transactions" aria-label="Transactions">
       <div className="all-months-transactions-heading">
         <p className="eyebrow">Transactions</p>
-        {dateFilter ? <button type="button" className="category-filter-chip" onClick={onClearDate} aria-label="Clear day filter">{dateFilter}<X size={12} aria-hidden="true" /></button> : null}
         {categoryFilter ? (
           <button
             className="category-filter-chip"
@@ -491,7 +454,7 @@ function TransactionsTable({
       </div>
       {transactions.length === 0 ? (
         <div className="empty-state">
-          No rows match the active filters. Clear a filter or choose another day.
+          No rows match the active filter. Clear it or choose another category.
         </div>
       ) : null}
       {transactions.length > 0 ? (

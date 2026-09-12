@@ -201,7 +201,10 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
 - `/` renders the upload/review/save workspace, scoped to one month at a time.
 - `.app-header` is a three-column grid (`1fr auto 1fr`): the brand lockup left, the month
   stepper (`.header-month`) centred on the page rather than on the leftover space, and the
-  upload (file picker + `Extract`) plus the theme toggle right. Under 1100px the month
+  upload (file picker + `Extract`) plus the theme toggle right. The month selector floats
+  12px from the viewport top after scrolling past its original position. Its anchor reserves
+  layout space; scroll updates its translation directly without rerendering the workspace.
+  Under 1100px the month
   control drops to its own centred second row, and under 680px the header stacks entirely.
   Every other control lives in `.side-rail`, a fixed
   full-height overlay that is hidden by default: `StatementWorkspace` tracks the pointer and
@@ -466,8 +469,8 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
 
 ### 3D spending calendar
 
-- `3D Calendar` is an additional graph option in the month panel and an overview mode in
-  `AllMonthsView`. `components/SpendingCalendar.tsx` projects stacked 3D prisms into SVG,
+- `3D Calendar` is an additional graph option beside Flow and Pie in the single-month panel.
+  All mode offers Compare and Year only. `components/SpendingCalendar.tsx` projects stacked 3D prisms into SVG,
   initially isometric, with pointer orbit, Space + drag panning, keyboard camera controls,
   zoom, and reset. Panning uses screen-aligned coordinates; Reset view resets its offset too.
 - Every day has the same tower footprint; segment height is linear in gross positive spending
@@ -483,7 +486,7 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   The overview includes dated income rows from the same tenant-scoped month documents.
   Category colors are keyed by name and use theme tokens. Selecting a day shows its breakdown;
   selecting a category highlights that category without changing the volume scale.
-  Selecting a day also filters the expense table below in both month and All views, combined
+  Selecting a day also filters the expense table below in the month view, combined
   with category filters. Click the day again, select All days, or clear the date chip to reset.
 - `lib/spendingCalendar.ts` validates actual transaction dates and aggregates charges. Invalid,
   out-of-month, zero, and negative rows are not plotted and are disclosed. Reimbursements are
