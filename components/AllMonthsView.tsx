@@ -11,6 +11,8 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import CashFlowSankey from "@/components/CashFlowSankey";
+import SpendingCalendar from "@/components/SpendingCalendar";
+import { calendarDate } from "@/lib/spendingCalendar";
 import {
   EMPTY_MONTHS_TIMELINE,
   type MonthTimelineEntry,
@@ -36,11 +38,12 @@ type TimelineStatus = "loading" | "ready" | "error";
  * in one calendar year, so a category is one ribbon for the year rather than
  * twelve slices to eyeball across cards.
  */
-type OverviewMode = "compare" | "year";
+type OverviewMode = "compare" | "year" | "calendar";
 
 const OVERVIEW_MODES: { value: OverviewMode; label: string }[] = [
   { value: "compare", label: "Compare" },
-  { value: "year", label: "Year" }
+  { value: "year", label: "Year" },
+  { value: "calendar", label: "3D Calendar" }
 ];
 
 /**
@@ -66,6 +69,14 @@ export function AllMonthsView({
   const [mode, setMode] = useState<OverviewMode>("compare");
   const [selectedYear, setSelectedYear] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [calendarMonth, setCalendarMonth] = useState("");
+  // Actual transaction months can differ from the month a billing cycle was filed in.
+  const calendarMonths = useMemo(() => [...new Set([
+    ...timeline.months.map(entry => entry.month),
+    ...timeline.transactions.filter(row => calendarDate(row.date)).map(row => row.date.slice(0, 7))
+  ])].sort(), [timeline.months, timeline.transactions]);
+  const activeCalendarMonth = calendarMonths.includes(calendarMonth) ? calendarMonth : calendarMonths.at(-1);
+  const calendarExpenses = useMemo(() => timeline.transactions.filter(row => row.date.startsWith(`${activeCalendarMonth}-`)), [timeline.transactions, activeCalendarMonth]);
 
   /** Clicking the category that is already filtered clears the filter. */
   function toggleCategory(category: string) {
@@ -232,12 +243,15 @@ export function AllMonthsView({
             ))}
           </div>
           <p>
-            {mode === "year"
+            {mode === "calendar"
+              ? "Daily spending by transaction date. Choose a month, then drag to explore its category-colored towers."
+              : mode === "year"
               ? "Every transaction in the year as one cash flow, the same graph the month view draws. Savings climb out of the top; overspending pours in from it."
               : "Every month's cash flow side by side. Savings climb out of the top of a month's frame; overspending pours in from the top. Click a month to open it."}
           </p>
         </div>
         <div className="graph-zoom-controls" aria-label="Graph zoom controls">
+          <span className="calendar-overview-zoom" hidden={mode === "calendar"}>
           <button
             className="mini-icon-button"
             type="button"
@@ -268,6 +282,7 @@ export function AllMonthsView({
           >
             <ZoomIn size={14} aria-hidden="true" />
           </button>
+          </span>
           <button
             className="icon-button"
             type="button"
@@ -299,6 +314,16 @@ export function AllMonthsView({
             : "No months filed yet. Extract a statement to start the timeline."}
         </div>
       ) : null}
+
+      {mode === "calendar" && activeCalendarMonth ? <div className="calendar-overview">
+        <label className="calendar-month-picker">Calendar month
+          <select value={activeCalendarMonth} onChange={event => setCalendarMonth(event.target.value)}>
+            {calendarMonths.map(month => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
+          </select>
+        </label>
+        <SpendingCalendar month={activeCalendarMonth} expenses={calendarExpenses} currency={currency} />
+        {timeline.transactions.some(row => !calendarDate(row.date)) ? <p className="calendar-excluded">Rows without valid transaction dates remain in the table below and cannot be placed on a calendar.</p> : null}
+      </div> : null}
 
       {mode === "year" && years.length > 1 ? (
         <div className="graph-type-control all-months-years" aria-label="Year">

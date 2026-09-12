@@ -48,6 +48,7 @@ import {
 import { AllMonthsView } from "@/components/AllMonthsView";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import CashFlowSankey from "@/components/CashFlowSankey";
+import SpendingCalendar from "@/components/SpendingCalendar";
 import {
   allocationColor,
   formatPercent,
@@ -317,7 +318,8 @@ type ExtractionOutcome = {
 
 const CASH_FLOW_GRAPH_TYPES = [
   { value: "flow", label: "Flow" },
-  { value: "pie", label: "Pie" }
+  { value: "pie", label: "Pie" },
+  { value: "calendar", label: "3D Calendar" }
 ] as const;
 
 type CashFlowGraphType = (typeof CASH_FLOW_GRAPH_TYPES)[number]["value"];
@@ -3532,6 +3534,8 @@ export function StatementWorkspace() {
                   currency={currency}
                   zoom={graphZoom}
                 />
+              ) : cashFlowGraphType === "calendar" ? (
+                activeMonth ? <SpendingCalendar month={activeMonth} expenses={items} currency={currency} /> : <p>Pick a month to see its spending calendar.</p>
               ) : (
                 <CashFlowPie summary={cashFlowSummary} currency={currency} />
               )}

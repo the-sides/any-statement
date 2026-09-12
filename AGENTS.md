@@ -464,6 +464,21 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   with no match are never created in Notion; the row saves with an empty `Category` and the save
   result returns `unmatchedCategories` so the workspace can name them in the save notice.
 
+### 3D spending calendar
+
+- `3D Calendar` is an additional graph option in the month panel and an overview mode in
+  `AllMonthsView`. `components/SpendingCalendar.tsx` projects stacked 3D prisms into SVG,
+  initially isometric, with pointer orbit, keyboard camera controls, zoom, and reset.
+- Every day has the same tower footprint; segment height is linear in gross positive spending
+  for its category. Each calendar scales against its busiest day and labels that amount.
+  Category colors are keyed by name and use theme tokens. Selecting a day shows its breakdown;
+  selecting a category highlights that category without changing the volume scale.
+- `lib/spendingCalendar.ts` validates actual transaction dates and aggregates charges. Invalid,
+  out-of-month, zero, and negative rows are not plotted and are disclosed. Reimbursements are
+  not subtracted. The single-month view uses the active document's rows; the All view groups
+  every loaded row by transaction date, including dates outside a statement's filing month.
+  These views are read-only and do not introduce a new data or persistence path.
+
 ## Important Files
 
 - `components/StatementWorkspace.tsx` - client UI state, upload, row editing, and save flow.
