@@ -40,6 +40,29 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
     const position = calendar.offset + day.day - 1;
     return { ...day, x: (position % 7 - 3.5) * 66, y: (Math.floor(position / 7) - calendar.weeks / 2) * 66 };
   }).sort((a, b) => depth(a.x, a.y) - depth(b.x, b.y));
+  // Labels are screen-aligned and painted after the geometry so another tower
+  // cannot hide an amount. Small caps use a leader; crowded labels move outward.
+  const amountLabels: { key: string; text: string; x: number; y: number; anchorX: number; anchorY: number; width: number; income: boolean; detached: boolean }[] = [];
+  for (const day of cells) {
+    for (const income of [false, true]) {
+      const amount = income ? day.incomeTotal : day.total;
+      if (amount <= 0) continue;
+      const z = income ? -6 - amount * scale : amount * scale;
+      const [anchorX, anchorY] = project([day.x + 30, day.y + 24, z]);
+      const text = money(amount);
+      const width = text.length * 6.2 + 10;
+      const cap = rectangle(day.x + 12, day.y + 6, 36, z).map(project);
+      const capWidth = Math.max(...cap.map(p => p[0])) - Math.min(...cap.map(p => p[0]));
+      const detached = income || amount * scale * view.zoom < 22 || capWidth < width + 8;
+      const direction = income ? 1 : -1;
+      let y = anchorY + (detached ? direction * 26 : 0);
+      // Keep labels readable during orbit, zoom, and volume changes.
+      while (amountLabels.some(label => Math.abs(label.x - anchorX) < (label.width + width) / 2 + 3 && Math.abs(label.y - y) < 18)) {
+        y += direction * 18;
+      }
+      amountLabels.push({ key: `${day.date}-${income ? "income" : "spend"}`, text, x: anchorX, y, anchorX, anchorY, width, income, detached: detached || y !== anchorY });
+    }
+  }
   function zoom(delta: number) {
     setView(v => ({ ...v, zoom: Math.max(0.6, Math.min(1.8, v.zoom + delta)) }));
   }
@@ -146,6 +169,13 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
             <text x={label[0]} y={label[1]} className="calendar-day-number">{day.day}{day.incomeTotal > 0 ? " ↓" : ""}</text>
           </g>;
         })}
+        <g className="calendar-amount-labels" pointerEvents="none" aria-hidden="true">
+          {amountLabels.map(label => <g key={label.key} className={label.income ? "calendar-amount income" : "calendar-amount"}>
+            {label.detached ? <line x1={label.anchorX} y1={label.anchorY} x2={label.x} y2={label.y} /> : null}
+            <rect x={label.x - label.width / 2} y={label.y - 8} width={label.width} height={16} rx={4} />
+            <text x={label.x} y={label.y} textAnchor="middle" dominantBaseline="central">{label.text}</text>
+          </g>)}
+        </g>
       </svg>
       <div className="calendar-scale">Above: spending · Below: income<br />Equal volume per dollar · largest daily total: {money(peak)}</div>
     </div>

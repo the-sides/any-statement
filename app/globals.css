@@ -2471,3 +2471,9 @@ meter {
 .calendar-income-key { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; padding-bottom: 8px; color: var(--positive); }
 .calendar-total .calendar-income-total, .calendar-detail .calendar-income-total { color: var(--positive); }
 .calendar-stage[data-has-income="true"] .calendar-tile { fill-opacity: 0.28; }
+
+.calendar-amount rect { fill: var(--panel); fill-opacity: 0.94; stroke: var(--line); stroke-width: 0.5; }
+.calendar-amount text { fill: var(--ink); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.calendar-amount line { stroke: var(--muted); stroke-width: 0.8; }
+.calendar-amount.income text { fill: var(--positive); }
+.calendar-amount.income line { stroke: var(--positive); }
