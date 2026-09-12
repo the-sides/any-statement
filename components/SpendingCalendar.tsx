@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatCurrency } from "@/lib/currency";
 import { formatMonthLabel } from "@/lib/months";
 import { calendarCategoryColor, summarizeCalendar, type CalendarExpense, type CalendarIncome } from "@/lib/spendingCalendar";
 
 const EMPTY_INCOMES: readonly CalendarIncome[] = [];
-const INITIAL_VIEW = { yaw: -Math.PI / 4, tilt: Math.atan(1 / Math.sqrt(2)), zoom: 1 };
+const INITIAL_VIEW = { yaw: -Math.PI / 4, tilt: Math.atan(1 / Math.sqrt(2)), zoom: 1, panX: 0, panY: 0 };
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 type Point = [number, number, number];
 
@@ -19,8 +19,41 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
   const [view, setView] = useState(INITIAL_VIEW);
   const [selected, setSelected] = useState("");
   const [category, setCategory] = useState("");
-  const drag = useRef<{ x: number; y: number; yaw: number; tilt: number; moved: boolean; id: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const hovering = useRef(false);
+  const spaceHeld = useRef(false);
+  const [panReady, setPanReady] = useState(false);
+  const drag = useRef<{ pan: boolean; panX: number; panY: number; unitsPerPixel: number; x: number; y: number; yaw: number; tilt: number; moved: boolean; id: number } | null>(null);
   const suppressClick = useRef(false);
+  useEffect(() => {
+    function releaseSpace() {
+      spaceHeld.current = false;
+      setPanReady(false);
+    }
+    function keyDown(event: KeyboardEvent) {
+      if (event.code !== "Space" || event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest("input, textarea, select, button, [contenteditable]:not([contenteditable='false'])")) return;
+      spaceHeld.current = true;
+      setPanReady(true);
+      if (hovering.current || (target instanceof Node && svgRef.current?.contains(target))) event.preventDefault();
+    }
+    function keyUp(event: KeyboardEvent) {
+      if (event.code === "Space") releaseSpace();
+    }
+    function blur() {
+      releaseSpace();
+      drag.current = null;
+    }
+    window.addEventListener("keydown", keyDown);
+    window.addEventListener("keyup", keyUp);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", keyDown);
+      window.removeEventListener("keyup", keyUp);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
   if (!calendar) return null;
   const money = (amount: number) => formatCurrency(amount, currency);
   const selectedDay = calendar.days.find(day => day.date === selected);
@@ -30,8 +63,8 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
   const cos = Math.cos(view.yaw), sin = Math.sin(view.yaw);
   const depth = (x: number, y: number) => x * sin + y * cos;
   function project([x, y, z]: Point): [number, number] {
-    return [470 + (x * cos - y * sin) * view.zoom,
-      320 + (depth(x, y) * Math.sin(view.tilt) - z * Math.cos(view.tilt)) * view.zoom];
+    return [470 + view.panX + (x * cos - y * sin) * view.zoom,
+      320 + view.panY + (depth(x, y) * Math.sin(view.tilt) - z * Math.cos(view.tilt)) * view.zoom];
   }
   const points = (vertices: Point[]) => vertices.map(p => project(p).map(n => n.toFixed(2)).join(",")).join(" ");
   const rectangle = (x: number, y: number, size: number, z: number): Point[] =>
@@ -72,7 +105,7 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
       <div className="calendar-total"><span className="calendar-income-total">{money(calendar.incomeTotal)} incoming</span><strong>{money(calendar.total)}</strong><span>gross spending · {hideRent ? "excluding Rent" : "including Rent"}</span></div>
     </div>
     <div className="calendar-controls" aria-label="Calendar camera controls">
-      <span>Drag to orbit · select a day to explore</span>
+      <span>Drag to orbit · hold Space + drag to pan</span>
       <div>
         <button type="button" aria-pressed={hideRent} onClick={() => setHideRent(hidden => !hidden)}>Hide Rent</button>
         <button type="button" aria-label="Rotate calendar left" onClick={() => setView(v => ({ ...v, yaw: v.yaw - Math.PI / 8 }))}>↶</button>
@@ -92,7 +125,7 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
       <button type="button" onClick={() => setVolumeScale(1)} disabled={volumeScale === 1}>Reset scale</button>
     </label>
     <div className="calendar-stage" data-has-income={calendar.incomeTotal > 0}>
-      <svg viewBox="0 0 940 590" role="group" aria-label="Interactive 3D calendar. Drag to orbit. Arrow keys rotate and tilt; plus and minus zoom; Home resets."
+      <svg ref={svgRef} data-pan-ready={panReady} viewBox="0 0 940 590" role="group" aria-label="Interactive 3D calendar. Drag to orbit; hold Space and drag to pan. Arrow keys rotate and tilt; plus and minus zoom; Home resets."
         tabIndex={0}
         onKeyDown={event => {
           if (event.target !== event.currentTarget) return;
@@ -106,7 +139,7 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
         onPointerDown={event => {
           if (!event.isPrimary || event.button !== 0) return;
           suppressClick.current = false;
-          drag.current = { x: event.clientX, y: event.clientY, yaw: view.yaw, tilt: view.tilt, moved: false, id: event.pointerId };
+          drag.current = { pan: spaceHeld.current, panX: view.panX, panY: view.panY, unitsPerPixel: 1 / (event.currentTarget.getScreenCTM()?.a || 1), x: event.clientX, y: event.clientY, yaw: view.yaw, tilt: view.tilt, moved: false, id: event.pointerId };
         }}
         onPointerMove={event => {
           const start = drag.current;
@@ -116,12 +149,17 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
           if (!start.moved) return;
           event.currentTarget.setPointerCapture(event.pointerId);
           suppressClick.current = true;
+          if (start.pan) {
+            setView(v => ({ ...v, panX: start.panX + dx * start.unitsPerPixel, panY: start.panY + dy * start.unitsPerPixel }));
+            return;
+          }
           setView(v => ({ ...v, yaw: start.yaw + dx * 0.008, tilt: Math.max(0.3, Math.min(1.35, start.tilt - dy * 0.006)) }));
         }}
         onPointerUp={() => { drag.current = null; }}
         onPointerCancel={() => { drag.current = null; }}
         onLostPointerCapture={() => { drag.current = null; }}
-        onPointerLeave={() => { if (drag.current && !drag.current.moved) drag.current = null; }}>
+        onPointerEnter={() => { hovering.current = true; }}
+        onPointerLeave={() => { hovering.current = false; if (drag.current && !drag.current.moved) drag.current = null; }}>
         <title>{formatMonthLabel(month)} daily spending, stacked by category</title>
         <polygon className="calendar-foundation" points={points([[-245, -calendar.weeks * 33 - 16, -6], [235, -calendar.weeks * 33 - 16, -6], [235, calendar.weeks * 33 + 10, -6], [-245, calendar.weeks * 33 + 10, -6]])} />
         {cells.filter(day => day.incomeTotal > 0).map(day => {
@@ -151,7 +189,7 @@ export default function SpendingCalendar({ month, expenses, currency, incomes = 
           return <g key={day.date} role="button" tabIndex={0} className="calendar-day" aria-pressed={selected === day.date}
             aria-label={`${day.date}: ${money(day.total)} spent, ${money(day.incomeTotal)} incoming, ${day.count} expenses, ${day.incomeCount} deposits`}
             onClick={() => { if (!suppressClick.current) setSelected(day.date); }}
-            onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(day.date); } }}>
+            onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); setSelected(day.date); } }}>
             <title>{`${day.date} · ${money(day.total)} spent · ${money(day.incomeTotal)} incoming${segments.map(s => `\n${s.name}: ${money(s.amount)}`).join("")}`}</title>
             <polygon className={`calendar-tile ${selected === day.date ? "selected" : ""}`} points={points(rectangle(day.x, day.y, 60, 0))} />
             {segments.map(segment => {

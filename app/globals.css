@@ -2477,3 +2477,6 @@ meter {
 .calendar-amount line { stroke: var(--muted); stroke-width: 0.8; }
 .calendar-amount.income text { fill: var(--positive); }
 .calendar-amount.income line { stroke: var(--positive); }
+
+.calendar-stage svg[data-pan-ready="true"], .calendar-stage svg[data-pan-ready="true"] .calendar-day { cursor: grab; }
+.calendar-stage svg[data-pan-ready="true"]:active, .calendar-stage svg[data-pan-ready="true"]:active .calendar-day { cursor: grabbing; }

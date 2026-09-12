@@ -468,7 +468,8 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
 
 - `3D Calendar` is an additional graph option in the month panel and an overview mode in
   `AllMonthsView`. `components/SpendingCalendar.tsx` projects stacked 3D prisms into SVG,
-  initially isometric, with pointer orbit, keyboard camera controls, zoom, and reset.
+  initially isometric, with pointer orbit, Space + drag panning, keyboard camera controls,
+  zoom, and reset. Panning uses screen-aligned coordinates; Reset view resets its offset too.
 - Every day has the same tower footprint; segment height is linear in gross positive spending
   for its category. The “Hide Rent” toggle starts enabled and excludes Rent from blocks, totals,
   and scaling (case-insensitive); turning it off restores Rent throughout the calendar.
