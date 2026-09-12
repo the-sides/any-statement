@@ -2458,3 +2458,11 @@ meter {
   .calendar-scale { font-size: 10px; left: 12px; bottom: 8px; }
   .calendar-excluded { padding-inline: 12px; }
 }
+
+.calendar-controls button[aria-pressed="true"] { background: var(--cobalt-tint); border-color: var(--cobalt); color: var(--cobalt); }
+
+.calendar-volume-control { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 0 24px 16px; color: var(--muted); font-size: 12px; }
+.calendar-volume-control input { width: 180px; max-width: 45%; accent-color: var(--cobalt); }
+.calendar-volume-control output { min-width: 38px; font-variant-numeric: tabular-nums; }
+.calendar-volume-control button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; background: var(--panel); color: var(--ink); cursor: pointer; }
+.calendar-volume-control button:disabled { opacity: 0.4; cursor: default; }

@@ -12,7 +12,9 @@ type Point = [number, number, number];
 export default function SpendingCalendar({ month, expenses, currency }: {
   month: string; expenses: readonly CalendarExpense[]; currency: string;
 }) {
-  const calendar = useMemo(() => summarizeCalendar(month, expenses), [month, expenses]);
+  const [hideRent, setHideRent] = useState(true);
+  const [volumeScale, setVolumeScale] = useState(1);
+  const calendar = useMemo(() => summarizeCalendar(month, expenses, hideRent), [month, expenses, hideRent]);
   const [view, setView] = useState(INITIAL_VIEW);
   const [selected, setSelected] = useState("");
   const [category, setCategory] = useState("");
@@ -22,7 +24,7 @@ export default function SpendingCalendar({ month, expenses, currency }: {
   const money = (amount: number) => formatCurrency(amount, currency);
   const selectedDay = calendar.days.find(day => day.date === selected);
   const activeCategory = calendar.categories.some(([name]) => name === category) ? category : "";
-  const scale = calendar.peak > 0 ? 125 / calendar.peak : 0;
+  const scale = calendar.peak > 0 ? (125 * volumeScale) / calendar.peak : 0;
   const cos = Math.cos(view.yaw), sin = Math.sin(view.yaw);
   const depth = (x: number, y: number) => x * sin + y * cos;
   function project([x, y, z]: Point): [number, number] {
@@ -42,11 +44,12 @@ export default function SpendingCalendar({ month, expenses, currency }: {
   return <section className="spending-calendar" aria-label={`3D spending calendar for ${formatMonthLabel(month)}`}>
     <div className="calendar-heading">
       <div><p className="eyebrow">Spending in three dimensions</p><h3>{formatMonthLabel(month)}</h3></div>
-      <div className="calendar-total"><strong>{money(calendar.total)}</strong><span>gross spending · excluding Rent</span></div>
+      <div className="calendar-total"><strong>{money(calendar.total)}</strong><span>gross spending · {hideRent ? "excluding Rent" : "including Rent"}</span></div>
     </div>
     <div className="calendar-controls" aria-label="Calendar camera controls">
       <span>Drag to orbit · select a day to explore</span>
       <div>
+        <button type="button" aria-pressed={hideRent} onClick={() => setHideRent(hidden => !hidden)}>Hide Rent</button>
         <button type="button" aria-label="Rotate calendar left" onClick={() => setView(v => ({ ...v, yaw: v.yaw - Math.PI / 8 }))}>↶</button>
         <button type="button" aria-label="Rotate calendar right" onClick={() => setView(v => ({ ...v, yaw: v.yaw + Math.PI / 8 }))}>↷</button>
         <button type="button" aria-label="Zoom out calendar" disabled={view.zoom <= 0.6} onClick={() => zoom(-0.2)}>−</button>
@@ -55,6 +58,14 @@ export default function SpendingCalendar({ month, expenses, currency }: {
         <button type="button" onClick={() => setView(INITIAL_VIEW)}>Reset view</button>
       </div>
     </div>
+    <label className="calendar-volume-control">
+      <span>Volume scale</span>
+      <input type="range" min="0.25" max="3" step="0.05" value={volumeScale}
+        aria-label="Calendar volume scale" aria-valuetext={`${Math.round(volumeScale * 100)} percent`}
+        onChange={event => setVolumeScale(Number(event.target.value))} />
+      <output>{Math.round(volumeScale * 100)}%</output>
+      <button type="button" onClick={() => setVolumeScale(1)} disabled={volumeScale === 1}>Reset scale</button>
+    </label>
     <div className="calendar-stage">
       <svg viewBox="0 0 940 590" role="group" aria-label="Interactive 3D calendar. Drag to orbit. Arrow keys rotate and tilt; plus and minus zoom; Home resets."
         tabIndex={0}
@@ -143,6 +154,6 @@ export default function SpendingCalendar({ month, expenses, currency }: {
         </> : <p>Pick a tile or tower to see the day’s category breakdown. Tap a category to highlight its blocks.</p>}
       </div>
     </div>
-    {calendar.excluded > 0 ? <p className="calendar-excluded">{calendar.excluded} rows outside this calendar month, without a valid date, or with non-positive amounts are not plotted. Rent is excluded. Amounts are before reimbursements.</p> : <p className="calendar-excluded">Rent is excluded. Amounts are before reimbursements. Each month scales to its own busiest day.</p>}
+    {calendar.excluded > 0 ? <p className="calendar-excluded">{calendar.excluded} rows outside this calendar month, without a valid date, or with non-positive amounts are not plotted. {hideRent ? "Rent is excluded. " : ""}Amounts are before reimbursements.</p> : <p className="calendar-excluded">{hideRent ? "Rent is excluded. " : ""}Amounts are before reimbursements. Each month scales to its own busiest day.</p>}
   </section>;
 }

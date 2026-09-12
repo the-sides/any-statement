@@ -15,6 +15,16 @@ describe("spending calendar", () => {
     expect(calendar.categories).toEqual([["Food", 25]]);
     expect(calendar.excluded).toBe(0);
   });
+  test("showing Rent restores its stacks, totals, counts, and scale", () => {
+    const calendar = summarizeCalendar("2026-08", [
+      { date: "2026-08-01", category: "Rent", amount: 2500 },
+      { date: "2026-08-01", category: "Food", amount: 25 }
+    ], false)!;
+    expect(calendar.total).toBe(2525);
+    expect(calendar.peak).toBe(2525);
+    expect(calendar.days[0].count).toBe(2);
+    expect(calendar.days[0].categories.get("Rent")).toBe(2500);
+  });
   test("stacks categories on the actual day, using gross charges", () => {
     const calendar = summarizeCalendar("2026-08", [
       { date: "2026-08-04", category: "Food", amount: 20 },

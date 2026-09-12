@@ -11,7 +11,7 @@ export function calendarDate(value: string): Date | null {
 }
 
 /** Gross positive charges, by actual transaction date. Never invent a day for undated rows. */
-export function summarizeCalendar(month: string, expenses: readonly CalendarExpense[]) {
+export function summarizeCalendar(month: string, expenses: readonly CalendarExpense[], hideRent = true) {
   const first = calendarDate(`${month}-01`);
   if (!first) return null;
   const count = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
@@ -24,7 +24,7 @@ export function summarizeCalendar(month: string, expenses: readonly CalendarExpe
   }));
   let excluded = 0;
   for (const row of expenses) {
-    if (row.category.trim().toLowerCase() === "rent") continue;
+    if (hideRent && row.category.trim().toLowerCase() === "rent") continue;
     const date = calendarDate(row.date);
     if (!date || !row.date.startsWith(`${month}-`) || !Number.isFinite(row.amount) || row.amount <= 0) {
       excluded++;
