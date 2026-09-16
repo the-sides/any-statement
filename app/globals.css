@@ -335,6 +335,96 @@ a {
   color: var(--on-ink);
 }
 
+/* Whose ledger this is, plus the way in or out of it. It sits in the brand
+   lockup, not the upload lane: `.header-month` is centred on the *page*, so it
+   already runs within ~50px of `.header-upload` and anything added on the right
+   lands underneath it. */
+.auth-status {
+  display: inline-flex;
+  /* The email gives way before the brand title does: the lockup shares a 1fr
+     column with nothing else, so an unshrinkable chip wrapped `Expense intake`
+     onto two lines at 1440px. No `min-width: 0` here on purpose - the floor is
+     the chip's min-content width, so the shrinking stops at the ellipsized
+     address and never crushes the sign-out button. */
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 3px 4px 3px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.auth-status svg {
+  flex: 0 0 auto;
+}
+
+.auth-status-name {
+  overflow: hidden;
+  min-width: 0;
+  max-width: 150px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* No trailing button in these two states, so the right padding is symmetric. */
+.auth-status[data-status="demo"],
+.auth-status[data-status="signed-out"] {
+  padding-right: 8px;
+}
+
+.auth-status-link {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.auth-status-link:hover {
+  background: var(--hover);
+}
+
+.auth-status-action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.auth-status-action:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+/* The header's left column is a `1fr` share, so the chip sheds detail in the
+   order it can afford to lose it: the address first, then the button's label,
+   then the title's one-line guarantee. Without this it simply overflowed the
+   column and sat under the upload controls between 800px and 1000px. */
+@media (max-width: 1100px) {
+  .auth-status[data-status="signed-in"] .auth-status-name {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .auth-status-action span {
+    display: none;
+  }
+
+  .auth-status-action {
+    padding: 3px 4px;
+  }
+}
+
 .brand-lockup h1,
 .workspace-top h2,
 .panel h2 {
@@ -342,10 +432,19 @@ a {
   letter-spacing: 0;
 }
 
+.brand-title {
+  /* Lets the title be the thing that gives way, so the auth chip stays inside
+     the column instead of overflowing under the upload controls. */
+  min-width: 0;
+}
+
 .brand-lockup h1 {
+  overflow: hidden;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 28px;
   line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .eyebrow {

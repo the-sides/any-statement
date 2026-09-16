@@ -49,6 +49,7 @@ import {
 } from "react";
 import { AllMonthsView } from "@/components/AllMonthsView";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { AuthStatus } from "@/components/AuthStatus";
 import CashFlowSankey from "@/components/CashFlowSankey";
 import SpendingCalendar from "@/components/SpendingCalendar";
 import {
@@ -85,6 +86,7 @@ import {
 } from "@/lib/cashFlowPlan";
 import { formatCurrency } from "@/lib/currency";
 import { MAX_CATEGORIZATION_NOTES_LENGTH } from "@/lib/userSettings";
+import type { Viewer } from "@/lib/viewer";
 import {
   readInitialUserSettingsSnapshot,
   readUserSettingsSnapshot,
@@ -646,7 +648,7 @@ function ExpenseChatEditList(props: {
   );
 }
 
-export function StatementWorkspace() {
+export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
   const [files, setFiles] = useState<File[]>([]);
   const railRef = useRef<HTMLElement | null>(null);
   // Both right-edge drawers (Income, Expense chat) reveal on hover. A click
@@ -2462,10 +2464,11 @@ export function StatementWorkspace() {
             <PanelLeft size={16} {...hydrationSafeIconProps} />
           </button>
           <div className="brand-mark">SL</div>
-          <div>
+          <div className="brand-title">
             <p className="eyebrow">Statement Ledger</p>
             <h1>Expense intake</h1>
           </div>
+          <AuthStatus viewer={viewer} />
         </div>
 
         <div className="header-month-anchor" ref={monthAnchorRef}>

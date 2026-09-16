@@ -335,6 +335,18 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   A small inline script in `app/layout.tsx` resolves it onto `<html data-theme>` before first
   paint, so there is no flash of the light theme. Every colour in `app/globals.css` comes from
   a token defined for both themes; a raw hex in a rule breaks dark mode silently.
+- Auth state is visible in both headers (`/` and `/documents`): `components/AuthStatus.tsx`
+  renders a chip in the brand lockup showing the signed-in address with a `Sign out` button,
+  `Demo tenant` in the demo build (no button - there is no session to end), or a `Sign in`
+  link when no session exists. Sign-out is a **server action** (`app/authActions.ts`), not a
+  `GET /sign-out` route: a GET would be fired by any prefetch and drop the session, and
+  `redirect()` inside a POST route handler answers 307, which replays the POST against the
+  WorkOS logout URL. The viewer fact comes from `lib/viewer.ts` `getViewer()` on the server
+  page, which is why `/` and `/documents` are now server-rendered per request rather than
+  prerendered. It lives in the *left* lockup because `.header-month` is centred on the page
+  and already runs within ~50px of `.header-upload`, so anything added on the right lands
+  underneath it; the chip then sheds the address at 1100px and the button's label at 980px,
+  and `.brand-title` truncates so the chip never spills across the upload controls.
 - `/api/extract` accepts `statementFile` as multipart form data, with legacy `statementPdf` replays still accepted.
 - `/api/extract` saves the original PDF or CSV and extraction artifacts to `/tmp/statement-ledger/uploads/<upload-id>/`.
 - OpenRouter is the primary extraction path.
@@ -543,6 +555,11 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   `schema_migrations`.
 - `lib/currentUser.ts` - `requireUserId()`, the tenant key every store call needs. In local
   demo mode it answers with the demo tenant instead of a session's user.
+- `lib/viewer.ts` - the *display* answer to "whose ledger is this": `getViewer()` plus the
+  pure `describeViewer` (demo wins over any session), covered by `lib/viewer.test.ts`. It
+  grants nothing; access stays in `proxy.ts` and the tenant key in `requireUserId()`.
+- `components/AuthStatus.tsx` / `app/authActions.ts` - the header auth chip and the
+  `signOutAction` server action behind its `Sign out` button.
 - `lib/notionConnection.ts` - per-user Notion credentials.
 - `lib/secrets.ts` - AES-256-GCM encryption for stored credentials.
 - `lib/apiErrors.ts` - shared 401/503 responses for missing sessions and unreadable credentials.

@@ -1,5 +1,6 @@
 import { StatementWorkspace } from "@/components/StatementWorkspace";
+import { getViewer } from "@/lib/viewer";
 
-export default function Page() {
-  return <StatementWorkspace />;
+export default async function Page() {
+  return <StatementWorkspace viewer={await getViewer()} />;
 }

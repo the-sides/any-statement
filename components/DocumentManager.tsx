@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { AuthStatus } from "@/components/AuthStatus";
 import { formatCurrency } from "@/lib/currency";
 import {
   EMPTY_DOCUMENTS_INDEX,
@@ -18,6 +19,7 @@ import {
   type LedgerDocument
 } from "@/lib/documents";
 import { formatMonthLabel } from "@/lib/months";
+import type { Viewer } from "@/lib/viewer";
 import { flushMonths } from "@/lib/monthsClientStore";
 
 type IndexStatus = "loading" | "ready" | "error";
@@ -27,7 +29,7 @@ type IndexStatus = "loading" | "ready" | "error";
  * months they were filed into. Read-only: the review table on `/` owns the
  * write path and the undo history, so a month chip is the way to edit.
  */
-export function DocumentManager() {
+export function DocumentManager({ viewer }: { viewer: Viewer }) {
   const [index, setIndex] = useState<DocumentsIndex>(EMPTY_DOCUMENTS_INDEX);
   const [status, setStatus] = useState<IndexStatus>("loading");
   const [error, setError] = useState("");
@@ -99,10 +101,11 @@ export function DocumentManager() {
             <ArrowLeft size={16} aria-hidden="true" />
           </Link>
           <div className="brand-mark">SL</div>
-          <div>
+          <div className="brand-title">
             <p className="eyebrow">Statement Ledger</p>
             <h1>Documents</h1>
           </div>
+          <AuthStatus viewer={viewer} />
         </div>
 
         <div className="docs-header-actions">

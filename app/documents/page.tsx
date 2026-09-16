@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import { DocumentManager } from "@/components/DocumentManager";
+import { getViewer } from "@/lib/viewer";
 
 export const metadata: Metadata = {
   title: "Documents - Statement Ledger"
 };
 
-export default function Page() {
-  return <DocumentManager />;
+export default async function Page() {
+  return <DocumentManager viewer={await getViewer()} />;
 }
