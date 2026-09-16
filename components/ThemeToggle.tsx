@@ -76,6 +76,12 @@ function choosePreference(next: ThemePreference) {
   notify();
 }
 
+/**
+ * One button, not a three-way segmented control: the theme is a background
+ * preference, and three always-visible buttons cost the header the width of
+ * the whole month stepper. It shows the current preference and cycles
+ * system -> light -> dark, which reaches every state in at most two taps.
+ */
 export function ThemeToggle() {
   const preference = useSyncExternalStore(
     subscribeToPreference,
@@ -93,21 +99,22 @@ export function ThemeToggle() {
     });
   }, [preference]);
 
+  const index = THEME_OPTIONS.findIndex(
+    (option) => option.value === preference
+  );
+  const current = THEME_OPTIONS[index === -1 ? 0 : index];
+  const next = THEME_OPTIONS[(index + 1) % THEME_OPTIONS.length];
+  const { Icon } = current;
+
   return (
-    <div className="theme-toggle" role="group" aria-label="Color theme">
-      {THEME_OPTIONS.map(({ value, label, Icon }) => (
-        <button
-          key={value}
-          type="button"
-          className={preference === value ? "active" : undefined}
-          aria-pressed={preference === value}
-          title={`${label} theme`}
-          onClick={() => choosePreference(value)}
-        >
-          <Icon size={15} aria-hidden="true" suppressHydrationWarning />
-          <span className="visually-hidden">{label} theme</span>
-        </button>
-      ))}
-    </div>
+    <button
+      className="icon-button theme-button"
+      type="button"
+      title={`${current.label} theme - switch to ${next.label.toLowerCase()}`}
+      aria-label={`Color theme: ${current.label}. Switch to ${next.label.toLowerCase()}.`}
+      onClick={() => choosePreference(next.value)}
+    >
+      <Icon size={16} aria-hidden="true" suppressHydrationWarning />
+    </button>
   );
 }

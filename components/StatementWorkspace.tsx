@@ -10,7 +10,6 @@ import {
   ChevronRight,
   ChevronUp,
   Database,
-  FileStack,
   FileText,
   Layers,
   ListChecks,
@@ -19,14 +18,12 @@ import {
   MessageCircle,
   NotebookPen,
   Pencil,
-  PieChart,
   Plug,
   Plus,
   RefreshCw,
   Save,
   Send,
   Sparkles,
-  SlidersHorizontal,
   Tags,
   Trash2,
   Undo2,
@@ -38,8 +35,8 @@ import {
   ZoomIn,
   ZoomOut
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useEffect,
   useMemo,
@@ -47,6 +44,7 @@ import {
   useSyncExternalStore
 } from "react";
 import { AllMonthsView } from "@/components/AllMonthsView";
+import { AppNav, sectionTitle, type SectionId } from "@/components/AppNav";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AuthStatus } from "@/components/AuthStatus";
 import CashFlowSankey from "@/components/CashFlowSankey";
@@ -238,103 +236,6 @@ type PendingUpload = {
   incomes: IncomeItem[];
 };
 
-/**
- * The workspace shows **one section at a time**, and the nav is the only way
- * between them. Everything used to sit on a single scrolling page with the
- * rest hidden behind chrome that appeared on its own - a rail that faded in
- * from the left edge on pointer proximity, two drawers parked off the right
- * edge - so the page was crowded and half of it was undiscoverable, and on a
- * phone it was one 4000px column with a 1600px-wide table inside it.
- *
- * A section is a place you go to: it renders alone, it is one tap away, and
- * the same nav markup is a sidebar above 900px and a bottom tab bar below it,
- * which is what makes the small-screen layout reachable with a thumb.
- *
- * Adding a section is an entry here plus one `{section === id ? … : null}`
- * branch in `.app-content`; nothing else needs to know.
- */
-type SectionId = "review" | "cashflow" | "income" | "chat" | "all" | "setup";
-
-const WORKSPACE_SECTIONS: {
-  id: SectionId;
-  label: string;
-  title: string;
-  Icon: LucideIcon;
-}[] = [
-  { id: "review", label: "Review", title: "Expense review", Icon: ListChecks },
-  { id: "cashflow", label: "Cash flow", title: "Cash flow", Icon: PieChart },
-  { id: "income", label: "Income", title: "Income", Icon: Wallet },
-  { id: "chat", label: "Chat", title: "Expense chat", Icon: MessageCircle },
-  { id: "all", label: "All months", title: "All months", Icon: Layers },
-  {
-    id: "setup",
-    label: "Setup",
-    title: "Statements and setup",
-    Icon: SlidersHorizontal
-  }
-];
-
-const SECTION_STORAGE_KEY = "statement-ledger:section";
-const SECTION_STORAGE_EVENT = "statement-ledger:section-change";
-const DEFAULT_SECTION: SectionId = "review";
-
-/** Cached so `getSnapshot` is cheap and stable across renders. */
-let sectionCache: SectionId | null = null;
-
-function isSectionId(value: string): value is SectionId {
-  return WORKSPACE_SECTIONS.some((entry) => entry.id === value);
-}
-
-function subscribeToSectionPreference(onStoreChange: () => void) {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === SECTION_STORAGE_KEY) {
-      sectionCache = null;
-      onStoreChange();
-    }
-  };
-
-  window.addEventListener("storage", onStorage);
-  window.addEventListener(SECTION_STORAGE_EVENT, onStoreChange);
-
-  return () => {
-    window.removeEventListener("storage", onStorage);
-    window.removeEventListener(SECTION_STORAGE_EVENT, onStoreChange);
-  };
-}
-
-function readSectionPreference(): SectionId {
-  if (typeof window === "undefined") {
-    return DEFAULT_SECTION;
-  }
-
-  if (sectionCache === null) {
-    try {
-      const stored = window.localStorage.getItem(SECTION_STORAGE_KEY) || "";
-      sectionCache = isSectionId(stored) ? stored : DEFAULT_SECTION;
-    } catch {
-      sectionCache = DEFAULT_SECTION;
-    }
-  }
-
-  return sectionCache;
-}
-
-function setSection(value: SectionId) {
-  sectionCache = value;
-
-  try {
-    window.localStorage.setItem(SECTION_STORAGE_KEY, value);
-  } catch {
-    // Non-fatal: the section just does not survive a reload.
-  }
-
-  window.dispatchEvent(new Event(SECTION_STORAGE_EVENT));
-}
-
 type ExtractionOutcome = {
   name: string;
   rowCount: number;
@@ -389,43 +290,29 @@ const hydrationSafeIconProps = {
   suppressHydrationWarning: true
 } as const;
 
-type SortKey =
-  | "statement"
-  | "amount"
-  | "merchant"
-  | "description"
-  | "category"
-  | "notes"
-  | "date";
+type SortKey = "date" | "merchant" | "category" | "amount" | "notes";
 
 type SortState = { key: SortKey; dir: "asc" | "desc" };
 
+/**
+ * Seven columns, in reading order. `Merchant` also carries the statement chip
+ * and the raw description, so sorting by it sorts by the merchant name; the
+ * dropped `statement` and `description` sort keys went with those columns.
+ */
 const TABLE_SORT_COLUMNS: { key: SortKey; label: string }[] = [
-  { key: "statement", label: "Statement" },
-  { key: "amount", label: "Amount" },
+  { key: "date", label: "Date" },
   { key: "merchant", label: "Merchant" },
-  { key: "description", label: "Description" },
   { key: "category", label: "Category" },
-  { key: "notes", label: "Notes" },
-  { key: "date", label: "Date" }
+  { key: "amount", label: "Amount" },
+  { key: "notes", label: "Notes" }
 ];
 
-function sortKeyValue(
-  item: ExpenseItem,
-  key: SortKey,
-  statementById: Map<string, ReviewStatement>
-): string | number {
+function sortKeyValue(item: ExpenseItem, key: SortKey): string | number {
   switch (key) {
-    case "statement":
-      return formatStatementShortLabel(
-        statementById.get(item.statementId || "")
-      );
     case "amount":
       return item.amount;
     case "merchant":
       return item.merchant;
-    case "description":
-      return item.description;
     case "category":
       return item.category;
     case "notes":
@@ -439,11 +326,10 @@ function compareBySortKey(
   a: ExpenseItem,
   b: ExpenseItem,
   key: SortKey,
-  direction: 1 | -1,
-  statementById: Map<string, ReviewStatement>
+  direction: 1 | -1
 ): number {
-  const aValue = sortKeyValue(a, key, statementById);
-  const bValue = sortKeyValue(b, key, statementById);
+  const aValue = sortKeyValue(a, key);
+  const bValue = sortKeyValue(b, key);
 
   if (typeof aValue === "number" && typeof bValue === "number") {
     return (aValue - bValue) * direction;
@@ -656,8 +542,23 @@ function ExpenseChatEditList(props: {
   );
 }
 
-export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
+/**
+ * One shell, one section. `section` comes from the route (`app/cash-flow`,
+ * `app/income`, ...) rather than from component state, so every destination
+ * has a URL, the back button works, and a page can be linked to and
+ * bookmarked. The shell itself - header bar, nav, notices, the pick-a-month
+ * prompt - is identical on every one of them.
+ */
+export function StatementWorkspace({
+  viewer,
+  section
+}: {
+  viewer: Viewer;
+  section: SectionId;
+}) {
   const [files, setFiles] = useState<File[]>([]);
+  // Picking a month in All months lands on that month's review page.
+  const router = useRouter();
   // The connection lives on the server, per user. The token is never sent back
   // to the browser, so `apiKeyDraft` is only ever a new value being typed.
   const [notionConnection, setNotionConnection] =
@@ -668,15 +569,6 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
   const [notionBusy, setNotionBusy] = useState(false);
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [graphZoom, setGraphZoom] = useState(DEFAULT_GRAPH_ZOOM);
-  // Which destination is on screen. It is browser state, so it is read through
-  // `useSyncExternalStore` like the app-category and review-history
-  // preferences: the server renders Review and the stored section arrives with
-  // hydration, with no setState-in-effect cascade.
-  const section = useSyncExternalStore(
-    subscribeToSectionPreference,
-    readSectionPreference,
-    () => DEFAULT_SECTION
-  );
   const [sort, setSort] = useState<SortState | null>(null);
   const [cashFlowGraphType, setCashFlowGraphType] =
     useState<CashFlowGraphType>("flow");
@@ -797,9 +689,9 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
 
     // Display-only ordering; the month document keeps its stored order.
     return [...filtered].sort((a, b) =>
-      compareBySortKey(a, b, sort.key, direction, statementById)
+      compareBySortKey(a, b, sort.key, direction)
     );
-  }, [categoryFilterSet, items, sort, statementById, activeCalendarDateFilter]);
+  }, [categoryFilterSet, items, sort, activeCalendarDateFilter]);
   const visibleSelectedItems = useMemo(
     () => visibleItems.filter((item) => selectedIds.has(item.id)),
     [selectedIds, visibleItems]
@@ -870,18 +762,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
     monthsNotice(monthsState) ||
     (settingsError ? { tone: "error" as const, message: settingsError } : null) ||
     notice;
-  const activeSection =
-    WORKSPACE_SECTIONS.find((entry) => entry.id === section) ||
-    WORKSPACE_SECTIONS[0];
-  // Counts ride in the nav so a section's weight is visible without opening
-  // it - the reason the old drawer tabs carried none is that they had nowhere
-  // to put one.
-  const sectionCounts: Partial<Record<SectionId, number>> = {
-    review: items.length,
-    income: incomes.length,
-    all: months.length,
-    setup: statements.length
-  };
+
   useEffect(() => {
     let active = true;
 
@@ -2122,12 +2003,13 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
     <main className="app-shell" data-section={section}>
       <header className="app-header">
         <div className="brand-lockup">
-          <div className="brand-mark">SL</div>
+          <Link className="brand-mark" href="/" title="Any Statement">
+            AS
+          </Link>
           <div className="brand-title">
-            <p className="eyebrow">Statement Ledger</p>
-            <h1>{activeSection.title}</h1>
+            <p className="eyebrow">Any Statement</p>
+            <h1>{sectionTitle(section)}</h1>
           </div>
-          <AuthStatus viewer={viewer} />
         </div>
 
                 <section className="header-month" aria-label="Active month">
@@ -2138,10 +2020,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
               title="Previous month"
               aria-label="Previous month"
               disabled={!previousMonth || monthsLoading}
-              onClick={() => {
-                setSection("review");
-                void selectMonth(previousMonth);
-              }}
+              onClick={() => void selectMonth(previousMonth)}
             >
               <ChevronLeft size={16} {...hydrationSafeIconProps} />
             </button>
@@ -2167,10 +2046,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
               title="Next month"
               aria-label="Next month"
               disabled={!nextMonth || monthsLoading}
-              onClick={() => {
-                setSection("review");
-                void selectMonth(nextMonth);
-              }}
+              onClick={() => void selectMonth(nextMonth)}
             >
               <ChevronRight size={16} {...hydrationSafeIconProps} />
             </button>
@@ -2214,33 +2090,11 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
             Extract
           </button>
           <ThemeToggle />
+          <AuthStatus viewer={viewer} />
         </div>
       </header>
 
-      {/* The only navigation: a sidebar on a desktop, a bottom tab bar on a
-          phone (same markup, `.app-nav` swaps direction at 900px). Everything
-          that used to hide behind pointer proximity or a parked drawer tab is
-          a destination here. */}
-      <nav className="app-nav" aria-label="Workspace sections">
-        {WORKSPACE_SECTIONS.map(({ id, label, Icon }) => (
-          <button
-            className={`app-nav-item ${section === id ? "active" : ""}`}
-            key={id}
-            type="button"
-            aria-current={section === id ? "page" : undefined}
-            title={label}
-            onClick={() => setSection(id)}
-          >
-            <Icon size={18} {...hydrationSafeIconProps} />
-            <span>{label}</span>
-            {sectionCounts[id] ? <em>{sectionCounts[id]}</em> : null}
-          </button>
-        ))}
-        <Link className="app-nav-item app-nav-link" href="/documents">
-          <FileStack size={18} {...hydrationSafeIconProps} />
-          <span>Files</span>
-        </Link>
-      </nav>
+      <AppNav />
 
       <div className="app-content">
         <div className={`notice ${activeNotice.tone}`} role="status">
@@ -2518,7 +2372,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={7}>
                     <div className="empty-state">
                       {monthsLoading
                         ? "Loading this month..."
@@ -2531,7 +2385,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
               ) : null}
               {items.length > 0 && visibleItems.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={7}>
                     <div className="empty-state">
                       No rows match the active filters.
                     </div>
@@ -2548,16 +2402,78 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
                       aria-label={`Select ${item.merchant || item.description}`}
                     />
                   </td>
-                  <td data-label="Statement">
-                    <button
-                      className="statement-chip"
-                      type="button"
-                      onClick={() => activateStatement(item.statementId || "")}
+                  <td data-label="Date">
+                    <input
+                      type="date"
+                      value={item.date}
+                      aria-label={`Date for ${item.merchant || item.description}`}
+                      onChange={(event) =>
+                        updateItem(item.id, { date: event.target.value })
+                      }
+                    />
+                  </td>
+                  {/* Merchant on top, then the row's provenance and the raw
+                      statement text on one quieter line: three columns folded
+                      into the width of one, which is most of what made the
+                      table 1600px wide. */}
+                  <td data-label="Merchant">
+                    <div className="row-merchant">
+                      <input
+                        className="row-merchant-name"
+                        value={item.merchant}
+                        aria-label="Merchant"
+                        onChange={(event) =>
+                          updateItem(item.id, { merchant: event.target.value })
+                        }
+                      />
+                      <div className="row-merchant-meta">
+                        <button
+                          className="statement-chip"
+                          type="button"
+                          title={`Open ${formatStatementTitle(
+                            statementById.get(item.statementId || "")
+                          )}`}
+                          onClick={() =>
+                            activateStatement(item.statementId || "")
+                          }
+                        >
+                          {formatStatementShortLabel(
+                            statementById.get(item.statementId || "")
+                          )}
+                        </button>
+                        <input
+                          className="row-merchant-description"
+                          value={item.description}
+                          aria-label="Statement description"
+                          onChange={(event) =>
+                            updateItem(item.id, {
+                              description: event.target.value
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  </td>
+                  <td data-label="Category">
+                    <select
+                      value={item.category}
+                      aria-label="Category"
+                      onChange={(event) =>
+                        updateItem(item.id, {
+                          category: event.target.value as ExpenseCategory
+                        })
+                      }
                     >
-                      {formatStatementShortLabel(
-                        statementById.get(item.statementId || "")
-                      )}
-                    </button>
+                      {categoryOptionsForItem(
+                        item.category,
+                        activeCategories
+                      ).map((category) => (
+                        <option key={category.name} value={category.name}>
+                          {category.name}
+                          {category.enabled ? "" : " (off)"}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td data-label="Amount">
                     <div className="amount-cell">
@@ -2567,6 +2483,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
                         min="0"
                         step="0.01"
                         value={item.amount}
+                        aria-label="Amount"
                         onChange={(event) =>
                           updateItem(item.id, {
                             amount: Number(event.target.value)
@@ -2605,56 +2522,12 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
                       </div>
                     </div>
                   </td>
-                  <td data-label="Merchant">
-                    <input
-                      value={item.merchant}
-                      onChange={(event) =>
-                        updateItem(item.id, { merchant: event.target.value })
-                      }
-                    />
-                  </td>
-                  <td data-label="Description">
-                    <input
-                      value={item.description}
-                      onChange={(event) =>
-                        updateItem(item.id, { description: event.target.value })
-                      }
-                    />
-                  </td>
-                  <td data-label="Category">
-                    <select
-                      value={item.category}
-                      onChange={(event) =>
-                        updateItem(item.id, {
-                          category: event.target.value as ExpenseCategory
-                        })
-                      }
-                    >
-                      {categoryOptionsForItem(
-                        item.category,
-                        activeCategories
-                      ).map((category) => (
-                        <option key={category.name} value={category.name}>
-                          {category.name}
-                          {category.enabled ? "" : " (off)"}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
                   <td data-label="Notes">
                     <input
                       value={item.notes}
+                      aria-label="Notes"
                       onChange={(event) =>
                         updateItem(item.id, { notes: event.target.value })
-                      }
-                    />
-                  </td>
-                  <td data-label="Date">
-                    <input
-                      type="date"
-                      value={item.date}
-                      onChange={(event) =>
-                        updateItem(item.id, { date: event.target.value })
                       }
                     />
                   </td>
@@ -3003,8 +2876,8 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
         {section === "all" ? (
           <AllMonthsView
             onSelectMonth={(month) => {
-              setSection("review");
               void selectMonth(month);
+              router.push("/");
             }}
           />
         ) : null}
@@ -3919,18 +3792,28 @@ function formatStatementTitle(statement?: ReviewStatement | null) {
   );
 }
 
+/**
+ * The chip names the statement a row came from and now sits inside the
+ * merchant cell, so it has to be both short and identifying: the institution's
+ * initials plus the account's last four (`AE 1007`, `WF 8842`), with the full
+ * name on the button's `title`. It used to be the first five characters of the
+ * masked account, which is `••••` and says nothing.
+ */
 function formatStatementShortLabel(statement?: ReviewStatement | null) {
   if (!statement) {
     return "Unknown";
   }
 
-  const label =
-    statement.statement.accountMask.trim() ||
-    statement.statement.institution.trim() ||
-    statement.sourceFileName.trim() ||
-    "Statement";
+  const name = formatStatementTitle(statement);
+  const initials = name
+    .split(/\s+/)
+    .map((word) => word[0] || "")
+    .join("")
+    .slice(0, 3)
+    .toUpperCase();
+  const tail = statement.statement.accountMask.replace(/\D+/g, "").slice(-4);
 
-  return label.slice(0, 5);
+  return tail ? `${initials} ${tail}` : initials;
 }
 
 function formatStatementPeriod(statement: StatementSummary) {

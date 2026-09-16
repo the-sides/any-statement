@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowLeft,
   ChevronDown,
   FileText,
   LoaderCircle,
@@ -10,6 +9,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { AppNav } from "@/components/AppNav";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AuthStatus } from "@/components/AuthStatus";
 import { formatCurrency } from "@/lib/currency";
@@ -90,22 +90,19 @@ export function DocumentManager({ viewer }: { viewer: Viewer }) {
 
   return (
     <main className="app-shell docs-shell">
+      {/* The same bar and the same nav as every other page: Files is a
+          destination in the sidebar, not a side trip off the workspace, so it
+          keeps the nav lane instead of collapsing it and losing the way back
+          to any other section. */}
       <header className="app-header docs-header">
         <div className="brand-lockup">
-          <Link
-            className="mini-icon-button docs-back"
-            href="/"
-            title="Back to the ledger"
-            aria-label="Back to the ledger"
-          >
-            <ArrowLeft size={16} aria-hidden="true" />
+          <Link className="brand-mark" href="/" title="Any Statement">
+            AS
           </Link>
-          <div className="brand-mark">SL</div>
           <div className="brand-title">
-            <p className="eyebrow">Statement Ledger</p>
+            <p className="eyebrow">Any Statement</p>
             <h1>Documents</h1>
           </div>
-          <AuthStatus viewer={viewer} />
         </div>
 
         <div className="docs-header-actions">
@@ -128,8 +125,11 @@ export function DocumentManager({ viewer }: { viewer: Viewer }) {
             )}
           </button>
           <ThemeToggle />
+          <AuthStatus viewer={viewer} />
         </div>
       </header>
+
+      <AppNav />
 
       <section className="workspace docs-workspace" aria-label="Documents">
         <div className="workspace-top">

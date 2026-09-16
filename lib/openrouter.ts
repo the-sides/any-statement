@@ -177,7 +177,7 @@ async function extractStatementWithOpenRouter(options: {
       "Content-Type": "application/json",
       "HTTP-Referer":
         process.env.OPENROUTER_HTTP_REFERER || "http://localhost:3000",
-      "X-OpenRouter-Title": "Statement Ledger"
+      "X-OpenRouter-Title": "Any Statement"
     },
     body: JSON.stringify({
       model,

@@ -1,6 +1,6 @@
-# Statement Ledger
+# Any Statement
 
-Statement Ledger is a Bun + Next.js app for turning credit card and bank statement PDFs or CSVs into editable expense rows, then saving approved rows into a Notion data source. It runs locally and deploys to Vercel, so statements can be uploaded from a phone.
+Any Statement is a Bun + Next.js app for turning credit card and bank statement PDFs or CSVs into editable expense rows, then saving approved rows into a Notion data source. It runs locally and deploys to Vercel, so statements can be uploaded from a phone.
 
 The current flow is intentionally simple:
 

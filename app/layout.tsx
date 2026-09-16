@@ -3,7 +3,7 @@ import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Statement Ledger",
+  title: "Any Statement",
   description: "Review PDF statement expenses and sync approved items to Notion.",
   formatDetection: {
     telephone: false,

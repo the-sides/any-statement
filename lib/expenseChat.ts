@@ -132,7 +132,7 @@ export async function answerExpenseQuestion(
       "Content-Type": "application/json",
       "HTTP-Referer":
         process.env.OPENROUTER_HTTP_REFERER || "http://localhost:3000",
-      "X-OpenRouter-Title": "Statement Ledger"
+      "X-OpenRouter-Title": "Any Statement"
     },
     body: JSON.stringify({
       model,
@@ -140,7 +140,7 @@ export async function answerExpenseQuestion(
         {
           role: "system",
           content:
-            "You are an expense-analysis assistant inside Statement Ledger. Use only the supplied expense rows, statement metadata, cash-flow summary, and conversation transcript. Do not invent transactions, balances, vendors, or external facts. When useful, cite exact category or merchant totals from the context. Keep advice concrete and practical, and say when the rows are insufficient. You may also propose row edits and new categories, which are suggestions a human approves or rejects; never claim either has been applied."
+            "You are an expense-analysis assistant inside Any Statement. Use only the supplied expense rows, statement metadata, cash-flow summary, and conversation transcript. Do not invent transactions, balances, vendors, or external facts. When useful, cite exact category or merchant totals from the context. Keep advice concrete and practical, and say when the rows are insufficient. You may also propose row edits and new categories, which are suggestions a human approves or rejects; never claim either has been applied."
         },
         {
           role: "user",

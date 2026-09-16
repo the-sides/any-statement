@@ -6,7 +6,7 @@ This project lives at:
 /home/jake/repos/any-statement
 ```
 
-It is a Bun + Next.js app named Statement Ledger. Uploaded statement files are saved locally so
+It is a Bun + Next.js app named Any Statement (it was called Statement Ledger until 2026-09-16; the `statement-ledger:*` localStorage keys and the `STATEMENT_LEDGER_*` environment variables keep the old prefix on purpose, since renaming them would drop every stored preference and break the Vercel project's env). Uploaded statement files are saved locally so
 agents can inspect and replay the exact statements.
 
 It is deployed at `https://any-statement.vercel.app` (Vercel project
@@ -215,24 +215,26 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   - `/?month=<YYYY-MM>` is honoured by `lib/monthsClientStore.ts` `initialize()`, which opens
     that month instead of the most recent one. An unfiled month in the link is ignored rather
     than opening a blank workspace.
-- **The workspace is one section at a time, and the nav is the only way between them.**
-  `SectionId` in `components/StatementWorkspace.tsx` is the whole model:
-  `review` (stats, filters, the transaction table), `cashflow` (the Sankey / pie / 3D
-  calendar panel), `income`, `chat`, `all` (`AllMonthsView`), `setup` (statements, the
-  active statement card, Notion, AI notes, the category catalog), plus a `Files` link to
-  `/documents`. `WORKSPACE_SECTIONS` is the nav order and carries each section's label,
-  its header title, and its icon; adding a section is an entry there plus one
-  `{section === id ? … : null}` branch in `.app-content`.
-  - The active section is browser state read through `useSyncExternalStore`
-    (`statement-ledger:section`, `subscribeToSectionPreference` / `readSectionPreference` /
-    `setSection`), the same shape as the app-category and review-history preferences. The
-    server renders `review` and the stored section arrives with hydration, so there is no
-    setState-in-effect cascade (`react-hooks/set-state-in-effect` rejects that).
+- **Every destination is a route, and the nav is the only way between them.**
+  `components/AppNav.tsx` owns the list: `WORKSPACE_SECTIONS` maps each `SectionId` to its
+  label, its header title, its icon and its `href` - `/` (review), `/cash-flow`, `/income`,
+  `/chat`, `/all-months`, `/setup`, `/documents` (Files). Each `app/<section>/page.tsx` is
+  four lines: `<StatementWorkspace viewer={await getViewer()} section="…" />`, so the shell
+  (header bar, nav, notices, the pick-a-month prompt) is identical on all of them and the
+  section prop picks the one branch of content that renders.
+  - Routes, not state: the back button, a bookmark, a middle-click and a deep link all
+    work on a section now. The previous model kept the active section in localStorage
+    (`statement-ledger:section`), which meant Back left the app and "the income table" had
+    no URL.
+  - `AppNav` is mounted by `StatementWorkspace` *and* `DocumentManager`, marks the active
+    item from `usePathname()`, and reads its counts straight from the month store
+    (`useSyncExternalStore`) rather than from props - which is what lets `/documents` show
+    the same nav without owning any month state.
   - `.app-shell` is a grid of `header / nav / content`. `.app-nav` is **the same markup in
     both layouts**: a sticky 196px column of destinations beside the content above 900px,
     and a fixed bottom tab bar (icon over label, seven thumb targets, `env(safe-area-inset-
-    bottom)`) below it. Counts ride in the nav (`sectionCounts`) so a section's weight is
-    readable without opening it; the bar hides them, since the section itself shows them.
+    bottom)`) below it. `.docs-shell` keeps the nav lane; collapsing it is what used to
+    make the sidebar vanish on Files and leave a back arrow as the only way out.
   - This replaced a single scrolling page whose other controls appeared on their own: a
     rail that faded in from 20px of the left edge on pointer proximity (plus a pin that
     turned it into a layout lane) and two drawers parked off the right edge of the table
@@ -240,19 +242,32 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
     measured lane that rewrote their `top` on every scroll frame. All of that machinery is
     gone. On a phone it was unusable - the tabs sat off-screen and the page was one 4000px
     column - which is what the bottom bar fixes.
-- `.app-header` is a three-column grid (`1fr auto 1fr`): the brand lockup with the active
-  section's title and the identity chip, the month stepper (`.header-month`) centred on the
-  page, and the upload lane (file picker, `Extract`, theme). It is `position: sticky` and
-  stays put; the month control used to translate itself down the page on scroll and drifted
-  over the table. Stepping a month also returns to `review`, because a month is what that
-  section reviews. Under 1100px the month control drops to its own centred row; under 680px
-  the header stops being sticky (three stacked rows of chrome is a third of a phone screen,
-  and the nav that matters is already fixed to the bottom).
-- **Phones get cards, not a table.** The review table is 1600px wide by design (nine
-  editable columns), so below 760px `app/globals.css` turns each `<tr>` into a card and each
-  `<td>` into a labelled line, driven by the `data-label` every cell carries - same markup,
-  no second render path. The reimbursed line drops its hover-only fade there, because a
-  touch screen has no hover. The income table follows the same rule.
+- `.app-header` is a compact three-column grid: the brand lockup (mark, `Any Statement`,
+  and the page's title), the month stepper (`.header-month`) centred on the page, and the
+  upload lane (file picker, `Extract`, theme, account). It is `position: sticky` and stays
+  put; the month control used to translate itself down the page on scroll and drifted over
+  the table. Two controls that used to sit in it permanently are now one button each:
+  - `components/ThemeToggle.tsx` is a single `.theme-button` showing the current preference
+    and cycling system -> light -> dark, not a three-way segmented control.
+  - `components/AuthStatus.tsx` is a `.user-button` opening a small menu with the address
+    and `Sign out` (still the `signOutAction` server action), closed by an outside click or
+    Escape. As a permanent chip the address ran the lockup into the month stepper on a
+    laptop and cost a whole row on a phone.
+  Under 1100px the month control drops to its own centred row; under 680px the header stops
+  being sticky (three stacked rows of chrome is a third of a phone screen, and the nav that
+  matters is already fixed to the bottom).
+- **The review table is seven columns wide, not nine.** Date leads the row, `Merchant`
+  carries the merchant name with the statement chip and the raw statement description on a
+  second quieter line, then category, amount (with the reimbursed editor) and notes. That
+  folded three columns into one and took the table's `min-width` from 1600px to 860px, so a
+  row reads on one screen; row padding, control height and font size all came down with it.
+  `TABLE_SORT_COLUMNS` lost its `statement` and `description` keys with those columns, and
+  `formatStatementShortLabel` now returns institution initials plus the account's last four
+  (`AE 1007`) instead of the first five characters of a masked account, which were `••••`.
+- **Phones get cards, not a table.** Below 760px `app/globals.css` turns each `<tr>` into a
+  card and each `<td>` into a labelled line, driven by the `data-label` every cell carries -
+  same markup, no second render path. The reimbursed line drops its hover-only fade there,
+  because a touch screen has no hover. The income table follows the same rule.
 - An uploaded statement is filed into the calendar month covering most of its period,
   falling back to its row dates, and the workspace switches to that month. There is no
   save-month action; months are derived. See `specs/month-scoped-statements.md`.
@@ -281,11 +296,11 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   cash-flow context, but nothing in the UI writes `cashFlowEntries` any more: inputs come
   from recognized income and outputs from the month's category spend, so a stored entry stays
   at whatever the `user_settings` row already holds.
-- `All months` is a nav section (`section === "all"`), not a toggle on the month stepper,
-  and it renders `AllMonthsView` in place of the review table rather than hiding it. The
+- `All months` is its own route (`/all-months`), not a toggle on the month stepper, and it
+  renders `AllMonthsView` in place of the review table. The
   view has two modes (`OverviewMode`, a segmented toggle in its toolbar): `Compare`, the
-  default, and `Year`. Clicking a month's name returns to `review` on that month, and the
-  expense chat's `view.scope` is `all` exactly while this section is open.
+  default, and `Year`. Clicking a month's name selects that month and routes to `/`, and the
+  expense chat's `view.scope` is `all` exactly while this route is open.
   - `Compare` is every filed month's cash flow as its own Sankey, plus totals
     across months. The row scrolls horizontally and each card's width *is* the
     zoom level: `MONTH_CARD_WIDTH` (1040px) times the current stop, so 100%
