@@ -18,16 +18,15 @@ import {
   LoaderCircle,
   MessageCircle,
   NotebookPen,
-  PanelLeft,
   Pencil,
-  Pin,
-  PinOff,
+  PieChart,
   Plug,
   Plus,
   RefreshCw,
   Save,
   Send,
   Sparkles,
+  SlidersHorizontal,
   Tags,
   Trash2,
   Undo2,
@@ -39,11 +38,11 @@ import {
   ZoomIn,
   ZoomOut
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import {
   useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore
 } from "react";
@@ -240,73 +239,100 @@ type PendingUpload = {
 };
 
 /**
- * The controls rail is hidden until the pointer nears the left edge: it fades in
- * from `RAIL_FADE_DISTANCE_PX` and is fully out by `RAIL_OPEN_DISTANCE_PX`.
- * Pinning bypasses the whole ramp.
+ * The workspace shows **one section at a time**, and the nav is the only way
+ * between them. Everything used to sit on a single scrolling page with the
+ * rest hidden behind chrome that appeared on its own - a rail that faded in
+ * from the left edge on pointer proximity, two drawers parked off the right
+ * edge - so the page was crowded and half of it was undiscoverable, and on a
+ * phone it was one 4000px column with a 1600px-wide table inside it.
+ *
+ * A section is a place you go to: it renders alone, it is one tap away, and
+ * the same nav markup is a sidebar above 900px and a bottom tab bar below it,
+ * which is what makes the small-screen layout reachable with a thumb.
+ *
+ * Adding a section is an entry here plus one `{section === id ? … : null}`
+ * branch in `.app-content`; nothing else needs to know.
  */
-const RAIL_FADE_DISTANCE_PX = 20;
-const RAIL_OPEN_DISTANCE_PX = 12;
-const RAIL_PIN_STORAGE_KEY = "statement-ledger:rail-pinned";
-const RAIL_PIN_STORAGE_EVENT = "statement-ledger:rail-pinned-change";
+type SectionId = "review" | "cashflow" | "income" | "chat" | "all" | "setup";
 
-/**
- * Cached so `getSnapshot` is cheap and stable, and so a browser that refuses
- * localStorage still honours the pin for the session.
- */
-let railPinnedCache: boolean | null = null;
+const WORKSPACE_SECTIONS: {
+  id: SectionId;
+  label: string;
+  title: string;
+  Icon: LucideIcon;
+}[] = [
+  { id: "review", label: "Review", title: "Expense review", Icon: ListChecks },
+  { id: "cashflow", label: "Cash flow", title: "Cash flow", Icon: PieChart },
+  { id: "income", label: "Income", title: "Income", Icon: Wallet },
+  { id: "chat", label: "Chat", title: "Expense chat", Icon: MessageCircle },
+  { id: "all", label: "All months", title: "All months", Icon: Layers },
+  {
+    id: "setup",
+    label: "Setup",
+    title: "Statements and setup",
+    Icon: SlidersHorizontal
+  }
+];
 
-function subscribeToRailPinPreference(onStoreChange: () => void) {
+const SECTION_STORAGE_KEY = "statement-ledger:section";
+const SECTION_STORAGE_EVENT = "statement-ledger:section-change";
+const DEFAULT_SECTION: SectionId = "review";
+
+/** Cached so `getSnapshot` is cheap and stable across renders. */
+let sectionCache: SectionId | null = null;
+
+function isSectionId(value: string): value is SectionId {
+  return WORKSPACE_SECTIONS.some((entry) => entry.id === value);
+}
+
+function subscribeToSectionPreference(onStoreChange: () => void) {
   if (typeof window === "undefined") {
     return () => {};
   }
 
   const onStorage = (event: StorageEvent) => {
-    if (event.key === RAIL_PIN_STORAGE_KEY) {
-      railPinnedCache = null;
+    if (event.key === SECTION_STORAGE_KEY) {
+      sectionCache = null;
       onStoreChange();
     }
   };
 
   window.addEventListener("storage", onStorage);
-  window.addEventListener(RAIL_PIN_STORAGE_EVENT, onStoreChange);
+  window.addEventListener(SECTION_STORAGE_EVENT, onStoreChange);
 
   return () => {
     window.removeEventListener("storage", onStorage);
-    window.removeEventListener(RAIL_PIN_STORAGE_EVENT, onStoreChange);
+    window.removeEventListener(SECTION_STORAGE_EVENT, onStoreChange);
   };
 }
 
-function readRailPinPreference() {
+function readSectionPreference(): SectionId {
   if (typeof window === "undefined") {
-    return false;
+    return DEFAULT_SECTION;
   }
 
-  if (railPinnedCache === null) {
+  if (sectionCache === null) {
     try {
-      railPinnedCache =
-        window.localStorage.getItem(RAIL_PIN_STORAGE_KEY) === "1";
+      const stored = window.localStorage.getItem(SECTION_STORAGE_KEY) || "";
+      sectionCache = isSectionId(stored) ? stored : DEFAULT_SECTION;
     } catch {
-      railPinnedCache = false;
+      sectionCache = DEFAULT_SECTION;
     }
   }
 
-  return railPinnedCache;
+  return sectionCache;
 }
 
-function writeRailPinPreference(value: boolean) {
-  railPinnedCache = value;
+function setSection(value: SectionId) {
+  sectionCache = value;
 
   try {
-    if (value) {
-      window.localStorage.setItem(RAIL_PIN_STORAGE_KEY, "1");
-    } else {
-      window.localStorage.removeItem(RAIL_PIN_STORAGE_KEY);
-    }
+    window.localStorage.setItem(SECTION_STORAGE_KEY, value);
   } catch {
-    // Non-fatal: the pin just does not survive a reload.
+    // Non-fatal: the section just does not survive a reload.
   }
 
-  window.dispatchEvent(new Event(RAIL_PIN_STORAGE_EVENT));
+  window.dispatchEvent(new Event(SECTION_STORAGE_EVENT));
 }
 
 type ExtractionOutcome = {
@@ -362,24 +388,6 @@ const hydrationSafeIconProps = {
   "aria-hidden": "true",
   suppressHydrationWarning: true
 } as const;
-
-// The right-edge drawers share one vertical lane, in this order. Tabs stack
-// from the top; an open drawer takes its panel's height out of the lane and
-// every tab below it slides down (animated by the `top` transition), so a
-// panel never covers a tab. Adding a drawer is: an id here, a wrapper with
-// `registerDrawer`, and a tab.
-type DrawerId = "income" | "chat";
-type DrawerHold = "none" | "temporary" | "pinned";
-const DRAWER_IDS: readonly DrawerId[] = ["income", "chat"];
-const DRAWER_TAB_HEIGHT_PX = 132;
-const DRAWER_STACK_GAP_PX = 16;
-// Gap kept between the viewport top and the lane once the page has scrolled
-// past the top of the workspace.
-const DRAWER_LANE_MARGIN_PX = 16;
-const CLOSED_DRAWER_HOLDS: Record<DrawerId, DrawerHold> = {
-  income: "none",
-  chat: "none"
-};
 
 type SortKey =
   | "statement"
@@ -650,70 +658,25 @@ function ExpenseChatEditList(props: {
 
 export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
   const [files, setFiles] = useState<File[]>([]);
-  const railRef = useRef<HTMLElement | null>(null);
-  // Both right-edge drawers (Income, Expense chat) reveal on hover. A click
-  // inside one takes a `temporary` hold: it survives mouse-leave but an
-  // outside click drops it. The pin button takes a `pinned` hold, which
-  // survives outside clicks too and is only released by clicking it again.
-  // Hover and focus are React state rather than CSS because the tab lane
-  // layout below has to know which drawers are open, not just paint them.
-  const [drawerHolds, setDrawerHolds] =
-    useState<Record<DrawerId, DrawerHold>>(CLOSED_DRAWER_HOLDS);
-  const [hoveredDrawer, setHoveredDrawer] = useState<DrawerId | null>(null);
-  const [focusedDrawer, setFocusedDrawer] = useState<DrawerId | null>(null);
-  const drawerRefs = useRef<Record<DrawerId, HTMLDivElement | null>>({
-    income: null,
-    chat: null
-  });
-  const drawerPanelRefs = useRef<Record<DrawerId, HTMLElement | null>>({
-    income: null,
-    chat: null
-  });
-  const workspaceRef = useRef<HTMLElement | null>(null);
-  const railPinned = useSyncExternalStore(
-    subscribeToRailPinPreference,
-    readRailPinPreference,
-    () => false
-  );
   // The connection lives on the server, per user. The token is never sent back
   // to the browser, so `apiKeyDraft` is only ever a new value being typed.
   const [notionConnection, setNotionConnection] =
     useState<NotionConnectionStatus>(EMPTY_NOTION_CONNECTION);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [dataSourceId, setDataSourceId] = useState("");
-  const monthAnchorRef = useRef<HTMLDivElement>(null);
-  const floatingMonthRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    let frame = 0;
-    function update() {
-      frame = 0;
-      const anchor = monthAnchorRef.current;
-      const control = floatingMonthRef.current;
-      if (!anchor || !control) return;
-      const offset = Math.max(0, 12 - anchor.getBoundingClientRect().top);
-      control.style.setProperty("--month-float-offset", `${offset}px`);
-      control.dataset.floating = String(offset > 0);
-    }
-    function schedule() {
-      if (!frame) frame = requestAnimationFrame(update);
-    }
-    const observer = new ResizeObserver(schedule);
-    if (monthAnchorRef.current) observer.observe(monthAnchorRef.current);
-    window.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", schedule);
-    update();
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      window.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
-    };
-  }, []);
   const [categoryDataSourceId, setCategoryDataSourceId] = useState("");
   const [notionBusy, setNotionBusy] = useState(false);
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [graphZoom, setGraphZoom] = useState(DEFAULT_GRAPH_ZOOM);
-  const [allView, setAllView] = useState(false);
+  // Which destination is on screen. It is browser state, so it is read through
+  // `useSyncExternalStore` like the app-category and review-history
+  // preferences: the server renders Review and the stored section arrives with
+  // hydration, with no setState-in-effect cascade.
+  const section = useSyncExternalStore(
+    subscribeToSectionPreference,
+    readSectionPreference,
+    () => DEFAULT_SECTION
+  );
   const [sort, setSort] = useState<SortState | null>(null);
   const [cashFlowGraphType, setCashFlowGraphType] =
     useState<CashFlowGraphType>("flow");
@@ -907,277 +870,18 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
     monthsNotice(monthsState) ||
     (settingsError ? { tone: "error" as const, message: settingsError } : null) ||
     notice;
-
-  // Pointer proximity drives the rail directly through a CSS variable instead
-  // of React state: a mousemove-per-frame re-render of this component would be
-  // visible jank, and nothing else needs to know where the cursor is.
-  useEffect(() => {
-    const rail = railRef.current;
-
-    if (!rail || railPinned) {
-      return;
-    }
-
-    let frame = 0;
-    let pointerX = Number.POSITIVE_INFINITY;
-    // Once the rail is fully out it takes pointer events, so hover and focus
-    // hold it open even where the cursor sits past the fade distance.
-    let hovering = false;
-    let focused = false;
-
-    function apply() {
-      frame = 0;
-
-      const reveal =
-        hovering || focused
-          ? 1
-          : pointerX <= RAIL_OPEN_DISTANCE_PX
-            ? 1
-            : pointerX >= RAIL_FADE_DISTANCE_PX
-              ? 0
-              : (RAIL_FADE_DISTANCE_PX - pointerX) /
-                (RAIL_FADE_DISTANCE_PX - RAIL_OPEN_DISTANCE_PX);
-
-      const target = railRef.current;
-
-      if (!target) {
-        return;
-      }
-
-      target.style.setProperty("--rail-reveal", reveal.toFixed(3));
-      target.dataset.railOpen = reveal >= 1 ? "true" : "false";
-    }
-
-    function schedule() {
-      if (!frame) {
-        frame = window.requestAnimationFrame(apply);
-      }
-    }
-
-    function onPointerMove(event: MouseEvent) {
-      pointerX = event.clientX;
-      schedule();
-    }
-
-    function onPointerLeaveWindow() {
-      pointerX = Number.POSITIVE_INFINITY;
-      schedule();
-    }
-
-    function onRailEnter() {
-      hovering = true;
-      schedule();
-    }
-
-    function onRailLeave() {
-      hovering = false;
-      schedule();
-    }
-
-    function onRailFocusIn() {
-      focused = true;
-      schedule();
-    }
-
-    function onRailFocusOut() {
-      focused = false;
-      schedule();
-    }
-
-    window.addEventListener("mousemove", onPointerMove);
-    document.addEventListener("mouseleave", onPointerLeaveWindow);
-    rail.addEventListener("mouseenter", onRailEnter);
-    rail.addEventListener("mouseleave", onRailLeave);
-    rail.addEventListener("focusin", onRailFocusIn);
-    rail.addEventListener("focusout", onRailFocusOut);
-    apply();
-
-    return () => {
-      window.removeEventListener("mousemove", onPointerMove);
-      document.removeEventListener("mouseleave", onPointerLeaveWindow);
-      rail.removeEventListener("mouseenter", onRailEnter);
-      rail.removeEventListener("mouseleave", onRailLeave);
-      rail.removeEventListener("focusin", onRailFocusIn);
-      rail.removeEventListener("focusout", onRailFocusOut);
-
-      if (frame) {
-        window.cancelAnimationFrame(frame);
-      }
-
-      rail.style.removeProperty("--rail-reveal");
-      delete rail.dataset.railOpen;
-    };
-  }, [railPinned]);
-
-  // One document listener owns both hold transitions, so a click can never
-  // land inside one drawer and outside another without both seeing it.
-  // `mousedown` rather than `click`: a drag that starts inside the drawer and
-  // ends on the table would otherwise read as an outside click.
-  useEffect(() => {
-    function onPointerDown(event: MouseEvent) {
-      const target = event.target as Node | null;
-
-      setDrawerHolds((current) => {
-        let next: Record<DrawerId, DrawerHold> | null = null;
-
-        for (const id of DRAWER_IDS) {
-          const element = drawerRefs.current[id];
-          const inside = Boolean(
-            element && target && element.contains(target)
-          );
-          const hold =
-            inside && current[id] === "none"
-              ? "temporary"
-              : !inside && current[id] === "temporary"
-                ? "none"
-                : current[id];
-
-          if (hold !== current[id]) {
-            next = next || { ...current };
-            next[id] = hold;
-          }
-        }
-
-        return next || current;
-      });
-    }
-
-    document.addEventListener("mousedown", onPointerDown);
-
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, []);
-
-  const drawerOpenState = {
-    income:
-      drawerHolds.income !== "none" ||
-      hoveredDrawer === "income" ||
-      focusedDrawer === "income",
-    chat:
-      drawerHolds.chat !== "none" ||
-      hoveredDrawer === "chat" ||
-      focusedDrawer === "chat"
-  } satisfies Record<DrawerId, boolean>;
-  const drawerOpenRef = useRef(drawerOpenState);
-  drawerOpenRef.current = drawerOpenState;
-  // Primitive dep: the object above is a new identity every render.
-  const drawerOpenKey = DRAWER_IDS.map((id) =>
-    drawerOpenState[id] ? "1" : "0"
-  ).join("");
-
-  // Lays the tab lane out top to bottom: a parked drawer occupies one tab, an
-  // open one occupies its whole panel, and everything below it starts after
-  // that. The whole lane is then offset so it stays inside the viewport while
-  // the page scrolls - the workspace is taller than the screen, so a lane
-  // pinned to its top would scroll away and leave no way to reach a drawer.
-  // `top` is written to the DOM rather than held in state because the heights
-  // come from measurement, a scroll-per-frame re-render of this component
-  // would be visible jank, and the CSS transition on `top` is what makes a tab
-  // slide instead of jump. A ResizeObserver covers a panel that grows while it
-  // is open, e.g. an income row being added.
-  useEffect(() => {
-    const open = drawerOpenRef.current;
-    let frame = 0;
-
-    function layout() {
-      // Below the breakpoint the drawers are ordinary stacked panels, and an
-      // inline `top`/`margin-top` would offset them inside the flow.
-      const stacked = window.matchMedia("(max-width: 980px)").matches;
-
-      if (stacked) {
-        for (const id of DRAWER_IDS) {
-          const element = drawerRefs.current[id];
-
-          if (element) {
-            element.style.removeProperty("top");
-            element.style.removeProperty("margin-top");
-          }
-        }
-
-        return;
-      }
-
-      const occupied = DRAWER_IDS.map((id) => {
-        const panel = drawerPanelRefs.current[id];
-
-        return open[id] && panel ? panel.offsetHeight : DRAWER_TAB_HEIGHT_PX;
-      });
-      const laneHeight =
-        occupied.reduce((total, height) => total + height, 0) +
-        (occupied.length - 1) * DRAWER_STACK_GAP_PX;
-      const workspace = workspaceRef.current;
-      let offset = 0;
-
-      if (workspace) {
-        // How far the workspace top has scrolled past the viewport top, capped
-        // so the lane never runs out of the workspace's clipped box.
-        offset = Math.min(
-          Math.max(0, DRAWER_LANE_MARGIN_PX - workspace.getBoundingClientRect().top),
-          Math.max(0, workspace.clientHeight - laneHeight - DRAWER_LANE_MARGIN_PX)
-        );
-      }
-
-      let cursor = 0;
-
-      DRAWER_IDS.forEach((id, index) => {
-        const element = drawerRefs.current[id];
-
-        if (!element) {
-          return;
-        }
-
-        const lane = index * (DRAWER_TAB_HEIGHT_PX + DRAWER_STACK_GAP_PX);
-        const top = Math.max(lane, cursor);
-
-        // `top` carries the stack position and is transitioned; the scroll
-        // offset rides on `margin-top`, which is not, so the lane tracks the
-        // scroll frame for frame instead of easing along behind it.
-        element.style.top = `${top}px`;
-        element.style.marginTop = `${offset}px`;
-        cursor = top + occupied[index] + DRAWER_STACK_GAP_PX;
-      });
-    }
-
-    function onScroll() {
-      if (frame) {
-        return;
-      }
-
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        layout();
-      });
-    }
-
-    layout();
-
-    const observer = new ResizeObserver(layout);
-
-    for (const id of DRAWER_IDS) {
-      const panel = drawerPanelRefs.current[id];
-
-      if (panel) {
-        observer.observe(panel);
-      }
-    }
-
-    window.addEventListener("resize", layout);
-    window.addEventListener("scroll", onScroll, { passive: true });
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", layout);
-      window.removeEventListener("scroll", onScroll);
-
-      if (frame) {
-        window.cancelAnimationFrame(frame);
-      }
-    };
-    // `allView` hides the workspace, so every panel measures 0 while it is up;
-    // coming back has to lay the lane out again.
-  }, [allView, drawerOpenKey]);
-
+  const activeSection =
+    WORKSPACE_SECTIONS.find((entry) => entry.id === section) ||
+    WORKSPACE_SECTIONS[0];
+  // Counts ride in the nav so a section's weight is visible without opening
+  // it - the reason the old drawer tabs carried none is that they had nowhere
+  // to put one.
+  const sectionCounts: Partial<Record<SectionId, number>> = {
+    review: items.length,
+    income: incomes.length,
+    all: months.length,
+    setup: statements.length
+  };
   useEffect(() => {
     let active = true;
 
@@ -1323,41 +1027,6 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
     } finally {
       setNotionBusy(false);
     }
-  }
-
-  // Every drawer wrapper gets the same wiring: identity for the outside-click
-  // handler and the lane layout, plus the hover/focus tracking that decides
-  // whether it counts as open.
-  function drawerProps(id: DrawerId) {
-    return {
-      className: `side-drawer ${id}-drawer`,
-      "data-hold": drawerHolds[id],
-      "data-open": drawerOpenState[id] ? "true" : "false",
-      ref: (element: HTMLDivElement | null) => {
-        drawerRefs.current[id] = element;
-      },
-      onMouseEnter: () => setHoveredDrawer(id),
-      onMouseLeave: () =>
-        setHoveredDrawer((current) => (current === id ? null : current)),
-      onFocus: () => setFocusedDrawer(id),
-      onBlur: () =>
-        setFocusedDrawer((current) => (current === id ? null : current))
-    };
-  }
-
-  function registerDrawerPanel(id: DrawerId) {
-    return (element: HTMLElement | null) => {
-      drawerPanelRefs.current[id] = element;
-    };
-  }
-
-  function toggleDrawerPin(id: DrawerId) {
-    setDrawerHolds((current) => ({
-      ...current,
-      // Unpinning drops the hold outright rather than falling back to
-      // `temporary`, so the drawer collapses as soon as the cursor leaves.
-      [id]: current[id] === "pinned" ? "none" : "pinned"
-    }));
   }
 
   async function extractStatement() {
@@ -1561,7 +1230,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
           selectedExpenseIds: [...selectedIds],
           history,
           view: {
-            scope: allView ? "all" : "month",
+            scope: section === "all" ? "all" : "month",
             activeMonth
           },
           includeAppCategories
@@ -2450,29 +2119,18 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
   }
 
   return (
-    <main className="app-shell" data-rail-pinned={railPinned ? "true" : "false"}>
+    <main className="app-shell" data-section={section}>
       <header className="app-header">
         <div className="brand-lockup">
-          <button
-            className="mini-icon-button rail-handle"
-            type="button"
-            aria-pressed={railPinned}
-            title={railPinned ? "Unpin controls" : "Pin controls open"}
-            aria-label={railPinned ? "Unpin controls" : "Pin controls open"}
-            onClick={() => writeRailPinPreference(!railPinned)}
-          >
-            <PanelLeft size={16} {...hydrationSafeIconProps} />
-          </button>
           <div className="brand-mark">SL</div>
           <div className="brand-title">
             <p className="eyebrow">Statement Ledger</p>
-            <h1>Expense intake</h1>
+            <h1>{activeSection.title}</h1>
           </div>
           <AuthStatus viewer={viewer} />
         </div>
 
-        <div className="header-month-anchor" ref={monthAnchorRef}>
-        <section className="header-month" ref={floatingMonthRef} aria-label="Active month">
+                <section className="header-month" aria-label="Active month">
           <div className="month-stepper">
             <button
               className="mini-icon-button"
@@ -2481,7 +2139,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
               aria-label="Previous month"
               disabled={!previousMonth || monthsLoading}
               onClick={() => {
-                setAllView(false);
+                setSection("review");
                 void selectMonth(previousMonth);
               }}
             >
@@ -2489,20 +2147,14 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
             </button>
             <div className="month-stepper-label">
               <strong>
-                {allView
-                  ? "All months"
-                  : activeMonth
+                {activeMonth
                     ? formatMonthLabel(activeMonth)
                     : monthsLoading
                       ? "Loading months"
                       : "No months yet"}
               </strong>
               <small>
-                {allView
-                  ? `${months.length} ${
-                      months.length === 1 ? "month" : "months"
-                    } combined`
-                  : activeMonth
+                {activeMonth
                     ? `${statements.length} ${
                         statements.length === 1 ? "statement" : "statements"
                       } / ${items.length} rows`
@@ -2516,26 +2168,14 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
               aria-label="Next month"
               disabled={!nextMonth || monthsLoading}
               onClick={() => {
-                setAllView(false);
+                setSection("review");
                 void selectMonth(nextMonth);
               }}
             >
               <ChevronRight size={16} {...hydrationSafeIconProps} />
             </button>
           </div>
-          <button
-            className={`month-view-toggle ${allView ? "active" : ""}`}
-            type="button"
-            title={allView ? "Back to this month" : "Combine every month"}
-            aria-pressed={allView}
-            onClick={() => setAllView((current) => !current)}
-          >
-            <Layers size={14} {...hydrationSafeIconProps} />
-            All
-          </button>
         </section>
-
-        </div>
 
         <div className="header-upload">
           <label className="header-file" htmlFor="statement-upload">
@@ -2573,45 +2213,988 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
             )}
             Extract
           </button>
-          <Link
-            className="mini-icon-button header-documents"
-            href="/documents"
-            title="Statement documents"
-            aria-label="Statement documents"
-          >
-            <FileStack size={16} {...hydrationSafeIconProps} />
-          </Link>
           <ThemeToggle />
         </div>
       </header>
 
-      {/* Hidden by default: pointer proximity (see the rail effect above) or
-          the pin slides it over the workspace. */}
-      <aside
-        className="side-rail"
-        ref={railRef}
-        aria-label="Statement controls"
-        data-rail-pinned={railPinned ? "true" : "false"}
-      >
-        <div className="rail-top">
-          <p className="eyebrow">Controls</p>
+      {/* The only navigation: a sidebar on a desktop, a bottom tab bar on a
+          phone (same markup, `.app-nav` swaps direction at 900px). Everything
+          that used to hide behind pointer proximity or a parked drawer tab is
+          a destination here. */}
+      <nav className="app-nav" aria-label="Workspace sections">
+        {WORKSPACE_SECTIONS.map(({ id, label, Icon }) => (
           <button
-            className="mini-icon-button"
+            className={`app-nav-item ${section === id ? "active" : ""}`}
+            key={id}
             type="button"
-            aria-pressed={railPinned}
-            title={railPinned ? "Unpin controls" : "Pin controls open"}
-            aria-label={railPinned ? "Unpin controls" : "Pin controls open"}
-            onClick={() => writeRailPinPreference(!railPinned)}
+            aria-current={section === id ? "page" : undefined}
+            title={label}
+            onClick={() => setSection(id)}
           >
-            {railPinned ? (
-              <Pin size={16} {...hydrationSafeIconProps} />
-            ) : (
-              <PinOff size={16} {...hydrationSafeIconProps} />
-            )}
+            <Icon size={18} {...hydrationSafeIconProps} />
+            <span>{label}</span>
+            {sectionCounts[id] ? <em>{sectionCounts[id]}</em> : null}
           </button>
+        ))}
+        <Link className="app-nav-item app-nav-link" href="/documents">
+          <FileStack size={18} {...hydrationSafeIconProps} />
+          <span>Files</span>
+        </Link>
+      </nav>
+
+      <div className="app-content">
+        <div className={`notice ${activeNotice.tone}`} role="status">
+          {activeNotice.tone === "error" ? (
+            <AlertTriangle size={16} {...hydrationSafeIconProps} />
+          ) : activeNotice.tone === "success" ? (
+            <Check size={16} {...hydrationSafeIconProps} />
+          ) : (
+            <FileText size={16} {...hydrationSafeIconProps} />
+          )}
+          <span>{activeNotice.message}</span>
+          {lastSave?.pages[0]?.url ? (
+            <a href={lastSave.pages[0].url} target="_blank" rel="noreferrer">
+              Open first page
+            </a>
+          ) : null}
         </div>
 
-        <section className="panel">
+        {/* Filing an undated statement blocks everything downstream, so this
+            panel follows the reviewer into whichever section they are in. */}
+        {firstPendingUpload ? (
+          <section className="panel month-prompt-panel">
+            <div className="panel-heading">
+              <CalendarRange size={18} {...hydrationSafeIconProps} />
+              <h2>
+                Pick a month
+                {pendingUploads.length > 1
+                  ? ` (${pendingUploads.length} left)`
+                  : ""}
+              </h2>
+            </div>
+            <p className="month-prompt-copy">
+              {formatStatementTitle(firstPendingUpload.statement)} has no
+              usable statement period and no usable row dates. Choose the
+              month it belongs to.
+            </p>
+            <label className="field">
+              <span>Month</span>
+              <input
+                type="month"
+                value={pendingMonth}
+                onChange={(event) => setPendingUploadMonth(event.target.value)}
+              />
+            </label>
+            <button
+              className="secondary-button"
+              type="button"
+              title="File this statement"
+              disabled={!isMonthKey(pendingMonth)}
+              onClick={() => void filePendingUpload()}
+            >
+              <CalendarRange size={18} {...hydrationSafeIconProps} />
+              File statement
+            </button>
+            <button
+              className="filter-clear-button"
+              type="button"
+              onClick={discardPendingUpload}
+            >
+              Discard
+            </button>
+          </section>
+        ) : null}
+
+        {section === "review" ? (
+          <section className="workspace" aria-label="Expense review table">
+            <div className="workspace-top">
+          <div>
+            <p className="eyebrow">
+              {activeMonth ? formatMonthLabel(activeMonth) : "Review queue"}
+            </p>
+            <h2>
+              {statements.length > 1
+                ? "Combined review"
+                : activeStatementSummary.institution || "Review queue"}
+            </h2>
+          </div>
+
+          <div className="stats-strip">
+            <Stat
+              label="Rows"
+              value={
+                categoryFilters.length > 0
+                  ? `${visibleItems.length}/${items.length}`
+                  : String(items.length)
+              }
+            />
+            <Stat label="Statements" value={String(statements.length)} />
+            <Stat label="Selected" value={String(selectedItems.length)} />
+            <Stat label="Amount" value={formatCurrency(totalAmount, currency)} />
+            <Stat
+              label="Net"
+              value={formatCurrency(totalNetAmount, currency)}
+            />
+            <Stat
+              label="Income"
+              value={formatCurrency(incomeTotal, currency)}
+            />
+          </div>
+        </div>
+
+            <div className="table-actions">
+          <button
+            className="icon-button"
+            type="button"
+            title={
+              allVisibleSelected
+                ? "Clear visible selection"
+                : "Select visible rows"
+            }
+            disabled={visibleItems.length === 0}
+            onClick={toggleAll}
+          >
+            <Check size={18} {...hydrationSafeIconProps} />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            title="Add expense"
+            onClick={addRow}
+          >
+            <Plus size={18} {...hydrationSafeIconProps} />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            title={
+              lastReviewHistoryEvent
+                ? `Undo: ${lastReviewHistoryEvent.label}`
+                : "Nothing to undo"
+            }
+            aria-label={
+              lastReviewHistoryEvent
+                ? `Undo ${lastReviewHistoryEvent.label}`
+                : "Nothing to undo"
+            }
+            disabled={!lastReviewHistoryEvent || controlsDisabled}
+            onClick={undoLastItemChange}
+          >
+            <Undo2 size={18} {...hydrationSafeIconProps} />
+          </button>
+          <label className="bulk-category-control">
+            <Tags size={16} {...hydrationSafeIconProps} />
+            <select
+              value=""
+              aria-label="Category for visible selected rows"
+              disabled={visibleSelectedItems.length === 0 || controlsDisabled}
+              onChange={(event) => {
+                const category = event.target.value as ExpenseCategory;
+
+                if (category) {
+                  recategorizeSelected(category);
+                }
+              }}
+            >
+              <option value="">Set category</option>
+              {bulkCategoryOptions.map((category) => (
+                <option
+                  key={`${category.source}-${category.sourceId || category.name}`}
+                  value={category.name}
+                >
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="category-filter-control">
+            <ListFilter size={16} {...hydrationSafeIconProps} />
+            <select
+              value=""
+              aria-label="Filter rows by category"
+              disabled={items.length === 0}
+              onChange={(event) => addCategoryFilter(event.target.value)}
+            >
+              <option value="">Filter category</option>
+              {categoryFilterOptions.map((category) => (
+                <option
+                  key={category.name}
+                  value={category.name}
+                  disabled={categoryFilterSet.has(category.name)}
+                >
+                  {category.name} ({category.count})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="statement-scope-control">
+            <Layers size={16} {...hydrationSafeIconProps} />
+            <select
+              value={activeStatementId}
+              aria-label="Active statement"
+              disabled={statements.length === 0 || controlsDisabled}
+              onChange={(event) => activateStatement(event.target.value)}
+            >
+              {statements.map((statement) => (
+                <option key={statement.id} value={statement.id}>
+                  {formatStatementTitle(statement)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {activeCalendarDateFilter ? <button type="button" className="category-filter-chip" onClick={() => setCalendarDateFilter("")} aria-label="Clear day filter">
+            {activeCalendarDateFilter}<X size={13} {...hydrationSafeIconProps} />
+          </button> : null}
+          {categoryFilters.length > 0 ? (
+            <div className="category-filter-chips" aria-label="Active filters">
+              {categoryFilters.map((category) => (
+                <button
+                  className="category-filter-chip"
+                  type="button"
+                  key={category}
+                  title={`Remove ${category} filter`}
+                  onClick={() => removeCategoryFilter(category)}
+                >
+                  <span>{category}</span>
+                  <X size={13} {...hydrationSafeIconProps} />
+                </button>
+              ))}
+              <button
+                className="filter-clear-button"
+                type="button"
+                title="Clear category filters"
+                onClick={clearCategoryFilters}
+              >
+                Clear
+              </button>
+            </div>
+          ) : null}
+          <span>{currencyNames.of(currency) || currency}</span>
+        </div>
+
+            <div className="table-frame">
+          <table>
+            <thead>
+              <tr>
+                <th aria-label="Selected" />
+                {TABLE_SORT_COLUMNS.map((column) => {
+                  const activeSort =
+                    sort && sort.key === column.key ? sort : null;
+
+                  return (
+                    <th
+                      key={column.key}
+                      aria-sort={
+                        activeSort
+                          ? activeSort.dir === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : undefined
+                      }
+                    >
+                      <button
+                        className="sort-header"
+                        type="button"
+                        onClick={() => toggleSort(column.key)}
+                      >
+                        {column.label}
+                        {activeSort ? (
+                          activeSort.dir === "asc" ? (
+                            <ChevronUp size={13} {...hydrationSafeIconProps} />
+                          ) : (
+                            <ChevronDown
+                              size={13}
+                              {...hydrationSafeIconProps}
+                            />
+                          )
+                        ) : null}
+                      </button>
+                    </th>
+                  );
+                })}
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {items.length === 0 ? (
+                <tr>
+                  <td colSpan={9}>
+                    <div className="empty-state">
+                      {monthsLoading
+                        ? "Loading this month..."
+                        : months.length === 0
+                          ? "No months yet. Upload a statement and it is filed into the month it covers."
+                          : "No expense rows in this month. Re-upload the statement file and inspect the saved artifact directory shown above."}
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+              {items.length > 0 && visibleItems.length === 0 ? (
+                <tr>
+                  <td colSpan={9}>
+                    <div className="empty-state">
+                      No rows match the active filters.
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+              {visibleItems.map((item) => (
+                <tr key={item.id}>
+                  <td data-label="Selected">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onChange={() => toggleItem(item.id)}
+                      aria-label={`Select ${item.merchant || item.description}`}
+                    />
+                  </td>
+                  <td data-label="Statement">
+                    <button
+                      className="statement-chip"
+                      type="button"
+                      onClick={() => activateStatement(item.statementId || "")}
+                    >
+                      {formatStatementShortLabel(
+                        statementById.get(item.statementId || "")
+                      )}
+                    </button>
+                  </td>
+                  <td data-label="Amount">
+                    <div className="amount-cell">
+                      <input
+                        className="amount-input"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={item.amount}
+                        onChange={(event) =>
+                          updateItem(item.id, {
+                            amount: Number(event.target.value)
+                          })
+                        }
+                      />
+                      <div
+                        className="amount-reimbursed"
+                        data-active={item.reimbursedAmount > 0 ? "true" : "false"}
+                      >
+                        <label className="reimbursed-field">
+                          <span>reimb</span>
+                          <input
+                            className="reimbursed-input"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.reimbursedAmount}
+                            aria-label={`Reimbursed for ${item.merchant || item.description}`}
+                            onChange={(event) =>
+                              updateItem(item.id, {
+                                reimbursedAmount: Number(event.target.value)
+                              })
+                            }
+                          />
+                        </label>
+                        {item.reimbursedAmount > 0 ? (
+                          <span className="net-amount">
+                            net{" "}
+                            {formatCurrency(
+                              item.amount - item.reimbursedAmount,
+                              currency
+                            )}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </td>
+                  <td data-label="Merchant">
+                    <input
+                      value={item.merchant}
+                      onChange={(event) =>
+                        updateItem(item.id, { merchant: event.target.value })
+                      }
+                    />
+                  </td>
+                  <td data-label="Description">
+                    <input
+                      value={item.description}
+                      onChange={(event) =>
+                        updateItem(item.id, { description: event.target.value })
+                      }
+                    />
+                  </td>
+                  <td data-label="Category">
+                    <select
+                      value={item.category}
+                      onChange={(event) =>
+                        updateItem(item.id, {
+                          category: event.target.value as ExpenseCategory
+                        })
+                      }
+                    >
+                      {categoryOptionsForItem(
+                        item.category,
+                        activeCategories
+                      ).map((category) => (
+                        <option key={category.name} value={category.name}>
+                          {category.name}
+                          {category.enabled ? "" : " (off)"}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td data-label="Notes">
+                    <input
+                      value={item.notes}
+                      onChange={(event) =>
+                        updateItem(item.id, { notes: event.target.value })
+                      }
+                    />
+                  </td>
+                  <td data-label="Date">
+                    <input
+                      type="date"
+                      value={item.date}
+                      onChange={(event) =>
+                        updateItem(item.id, { date: event.target.value })
+                      }
+                    />
+                  </td>
+                  <td data-label="Actions">
+                    <button
+                      className="icon-button danger"
+                      type="button"
+                      title="Remove row"
+                      onClick={() => removeRow(item.id)}
+                    >
+                      <Trash2 size={16} {...hydrationSafeIconProps} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+          </section>
+        ) : null}
+
+        {section === "cashflow" ? (
+          <section className="cash-flow-panel" aria-label="Cash flow">
+          <div className="cash-flow-heading">
+            <div>
+              <p className="eyebrow">Cash flow</p>
+              <h3>Where it went</h3>
+            </div>
+            <div
+              className={`cash-flow-balance ${
+                cashFlowSummary.savedAmount < 0 ? "negative" : ""
+              }`}
+            >
+              <span>
+                {cashFlowSummary.savedAmount < 0 ? "Overspent" : "Saved"}
+              </span>
+              <strong>
+                {formatCurrency(
+                  Math.abs(cashFlowSummary.savedAmount),
+                  currency
+                )}
+              </strong>
+            </div>
+          </div>
+
+          <div className="cash-flow-body">
+            <div className="flow-visual" aria-label="Cash flow visualization">
+              <div className="flow-visual-toolbar">
+                <div className="graph-type-control" aria-label="Graph type">
+                  {CASH_FLOW_GRAPH_TYPES.map((graphType) => (
+                    <button
+                      className={
+                        cashFlowGraphType === graphType.value ? "active" : ""
+                      }
+                      key={graphType.value}
+                      type="button"
+                      aria-pressed={cashFlowGraphType === graphType.value}
+                      onClick={() => { setCashFlowGraphType(graphType.value); setCalendarDateFilter(""); }}
+                    >
+                      {graphType.label}
+                    </button>
+                  ))}
+                </div>
+                {cashFlowGraphType === "flow" ? (
+                  <div
+                    className="graph-zoom-controls"
+                    aria-label="Graph zoom controls"
+                  >
+                    <button
+                      className="mini-icon-button"
+                      type="button"
+                      title="Zoom out"
+                      aria-label="Zoom out graph"
+                      disabled={graphZoom <= MIN_GRAPH_ZOOM}
+                      onClick={() => updateGraphZoom("out")}
+                    >
+                      <ZoomOut size={14} {...hydrationSafeIconProps} />
+                    </button>
+                    <button
+                      className="graph-zoom-reset"
+                      type="button"
+                      title="Reset graph zoom"
+                      aria-label="Reset graph zoom"
+                      disabled={graphZoom === DEFAULT_GRAPH_ZOOM}
+                      onClick={resetGraphZoom}
+                    >
+                      {Math.round(graphZoom * 100)}%
+                    </button>
+                    <button
+                      className="mini-icon-button"
+                      type="button"
+                      title="Zoom in"
+                      aria-label="Zoom in graph"
+                      disabled={graphZoom >= MAX_GRAPH_ZOOM}
+                      onClick={() => updateGraphZoom("in")}
+                    >
+                      <ZoomIn size={14} {...hydrationSafeIconProps} />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              {cashFlowGraphType === "flow" ? (
+                <CashFlowSankey
+                  summary={cashFlowSummary}
+                  currency={currency}
+                  zoom={graphZoom}
+                />
+              ) : cashFlowGraphType === "calendar" ? (
+                activeMonth ? <SpendingCalendar month={activeMonth} expenses={items} incomes={incomes} currency={currency} selectedDate={activeCalendarDateFilter} onSelectDate={setCalendarDateFilter} /> : <p>Pick a month to see its spending calendar.</p>
+              ) : (
+                <CashFlowPie summary={cashFlowSummary} currency={currency} />
+              )}
+            </div>
+          </div>
+        </section>
+        ) : null}
+
+        {section === "income" ? (
+          <section
+            className="panel income-panel"
+            aria-label="Income"
+          >
+            <div className="panel-heading panel-heading-split">
+              <div className="panel-heading-title">
+                <Wallet size={18} {...hydrationSafeIconProps} />
+                <h2>Income</h2>
+              </div>
+              <div className="panel-heading-actions">
+                <button
+                  className="icon-button"
+                  type="button"
+                  title="Add income row"
+                  onClick={addIncome}
+                >
+                  <Plus size={18} {...hydrationSafeIconProps} />
+                </button>
+              </div>
+            </div>
+            <div className="table-frame income-frame">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Source</th>
+                    <th>Amount</th>
+                    <th>Kind</th>
+                    <th>Notes</th>
+                    <th aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {incomes.length === 0 ? (
+                    <tr>
+                      <td colSpan={6}>
+                        <div className="empty-state">
+                          No income recognized this month. Bank statement
+                          deposits such as payroll land here; add rows for
+                          anything missing.
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                  {incomes.map((income) => (
+                    <tr key={income.id}>
+                      <td data-label="Date">
+                        <input
+                          type="date"
+                          value={income.date}
+                          onChange={(event) =>
+                            updateIncome(income.id, {
+                              date: event.target.value
+                            })
+                          }
+                        />
+                      </td>
+                      <td data-label="Source">
+                        <input
+                          value={income.source}
+                          onChange={(event) =>
+                            updateIncome(income.id, {
+                              source: event.target.value
+                            })
+                          }
+                        />
+                      </td>
+                      <td data-label="Amount">
+                        <input
+                          className="amount-input"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={income.amount}
+                          onChange={(event) =>
+                            updateIncome(income.id, {
+                              amount: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </td>
+                      <td data-label="Kind">
+                        <select
+                          value={income.kind}
+                          onChange={(event) =>
+                            updateIncome(income.id, {
+                              kind: event.target.value as IncomeItem["kind"]
+                            })
+                          }
+                        >
+                          {INCOME_KINDS.map((kind) => (
+                            <option key={kind} value={kind}>
+                              {kind}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td data-label="Notes">
+                        <input
+                          value={income.notes}
+                          onChange={(event) =>
+                            updateIncome(income.id, {
+                              notes: event.target.value
+                            })
+                          }
+                        />
+                      </td>
+                      <td data-label="Actions">
+                        <button
+                          className="icon-button danger"
+                          type="button"
+                          title="Remove income row"
+                          onClick={() => removeIncome(income.id)}
+                        >
+                          <Trash2 size={16} {...hydrationSafeIconProps} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+
+        {section === "chat" ? (
+          <section
+            className="expense-chat-panel"
+            aria-label="Expense chat"
+          >
+            <div className="expense-chat-heading">
+              <div className="panel-heading-title">
+                <MessageCircle size={18} {...hydrationSafeIconProps} />
+                <h3>Expense chat</h3>
+              </div>
+              <div className="panel-heading-actions">
+                <span className="panel-count">
+                  {selectedItems.length > 0
+                    ? `${selectedItems.length} selected`
+                    : `${items.length} rows`}
+                </span>
+              </div>
+            </div>
+
+            <div className="expense-chat-log" aria-live="polite">
+              {chatMessages.length === 0 ? (
+                <div className="expense-chat-suggestions">
+                  {EXPENSE_CHAT_PROMPTS.map((prompt) => (
+                    <button
+                      className="expense-chat-suggestion"
+                      type="button"
+                      key={prompt}
+                      disabled={chatBusy || months.length === 0}
+                      onClick={() => void askExpenseChat(prompt)}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {chatMessages.map((message) => (
+                <div
+                  className={`expense-chat-message ${message.role}`}
+                  key={message.id}
+                >
+                  <span className="expense-chat-avatar">
+                    {message.role === "assistant" ? (
+                      <Bot size={16} {...hydrationSafeIconProps} />
+                    ) : (
+                      <UserRound size={16} {...hydrationSafeIconProps} />
+                    )}
+                  </span>
+                  <p>{message.content}</p>
+                  <ExpenseChatEditList
+                    message={message}
+                    busy={chatBusy}
+                    onApprove={approveChatProposals}
+                    onDismiss={dismissChatProposals}
+                  />
+                </div>
+              ))}
+
+              {chatBusy ? (
+                <div className="expense-chat-message assistant">
+                  <span className="expense-chat-avatar">
+                    <Bot size={16} {...hydrationSafeIconProps} />
+                  </span>
+                  <p>Thinking...</p>
+                </div>
+              ) : null}
+            </div>
+
+            <form
+              className="expense-chat-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void askExpenseChat();
+              }}
+            >
+              <input
+                value={chatInput}
+                disabled={chatBusy || months.length === 0}
+                onChange={(event) => setChatInput(event.target.value)}
+                placeholder="How could I minimize food costs?"
+                aria-label="Expense question"
+              />
+              <button
+                className="icon-button expense-chat-send"
+                type="submit"
+                title="Send question"
+                disabled={chatBusy || months.length === 0 || !chatInput.trim()}
+              >
+                {chatBusy ? (
+                  <LoaderCircle
+                    className="spin"
+                    size={16}
+                    {...hydrationSafeIconProps}
+                  />
+                ) : (
+                  <Send size={16} {...hydrationSafeIconProps} />
+                )}
+              </button>
+            </form>
+          </section>
+        ) : null}
+
+        {section === "all" ? (
+          <AllMonthsView
+            onSelectMonth={(month) => {
+              setSection("review");
+              void selectMonth(month);
+            }}
+          />
+        ) : null}
+
+        {section === "setup" ? (
+          <div className="setup-grid">
+            <section className="panel statement-list-panel">
+          <div className="panel-heading panel-heading-split">
+            <div className="panel-heading-title">
+              <Layers size={18} {...hydrationSafeIconProps} />
+              <h2>Statements</h2>
+            </div>
+            <span className="panel-count">{statements.length}</span>
+          </div>
+
+          <div className="statement-list">
+            {statementSummaries.length === 0 ? (
+              <div className="statement-empty">
+                {monthsLoading
+                  ? "Loading months"
+                  : months.length === 0
+                    ? "Upload a statement to start a month"
+                    : "No statements"}
+              </div>
+            ) : null}
+            {statementSummaries.map(
+              ({
+                statement,
+                items: statementItems,
+                selectedItems: selected,
+                amount
+              }) => (
+                <div
+                  className={`statement-source ${
+                    statement.id === activeStatementId ? "active" : ""
+                  }`}
+                  key={statement.id}
+                >
+                  <button
+                    className="statement-source-main"
+                    type="button"
+                    onClick={() => activateStatement(statement.id)}
+                  >
+                    <strong>{formatStatementTitle(statement)}</strong>
+                    <small>
+                      {statement.sourceFileName ||
+                        formatStatementPeriod(statement.statement) ||
+                        "Manual rows"}
+                    </small>
+                    <span>
+                      {statementItems.length} rows / {selected.length} selected
+                    </span>
+                    <span>
+                      {formatCurrency(
+                        amount,
+                        statement.statement.currency || currency
+                      )}
+                    </span>
+                  </button>
+
+                  <div className="statement-source-actions">
+                    <button
+                      className="mini-icon-button"
+                      type="button"
+                      title="Select statement rows"
+                      onClick={() => selectStatementRows(statement.id)}
+                    >
+                      <ListChecks size={14} {...hydrationSafeIconProps} />
+                    </button>
+                    <button
+                      className="mini-icon-button"
+                      type="button"
+                      title="Clear statement selection"
+                      onClick={() => clearStatementRows(statement.id)}
+                    >
+                      <X size={14} {...hydrationSafeIconProps} />
+                    </button>
+                    <button
+                      className="mini-icon-button danger"
+                      type="button"
+                      title="Remove statement"
+                      onClick={() => removeStatement(statement.id)}
+                    >
+                      <Trash2 size={14} {...hydrationSafeIconProps} />
+                    </button>
+                  </div>
+
+                  <label
+                    className="statement-source-month"
+                    title={
+                      statement.monthSource === "rows"
+                        ? "Month came from the row dates, not the statement period."
+                        : "Month this statement is filed under."
+                    }
+                  >
+                    <span>
+                      Month{statement.monthSource === "rows" ? " (guessed)" : ""}
+                    </span>
+                    <input
+                      type="month"
+                      value={activeMonth}
+                      disabled={monthsLoading}
+                      onChange={(event) =>
+                        void changeStatementMonth(
+                          statement.id,
+                          event.target.value
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+              )
+            )}
+          </div>
+        </section>
+
+            <section className="panel statement-card">
+          <h2>Active statement</h2>
+          <label className="field">
+            <span>Institution</span>
+            <input
+              value={activeStatementSummary.institution}
+              onChange={(event) =>
+                updateStatement("institution", event.target.value)
+              }
+            />
+          </label>
+          <div className="field-grid">
+            <label className="field">
+              <span>Type</span>
+              <select
+                value={activeStatementSummary.statementType}
+                onChange={(event) =>
+                  updateStatement(
+                    "statementType",
+                    event.target.value as StatementType
+                  )
+                }
+              >
+                {STATEMENT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type.replace("_", " ")}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Account</span>
+              <input
+                value={activeStatementSummary.accountMask}
+                onChange={(event) =>
+                  updateStatement("accountMask", event.target.value)
+                }
+              />
+            </label>
+          </div>
+          <div className="field-grid">
+            <label className="field">
+              <span>Start</span>
+              <input
+                type="date"
+                value={activeStatementSummary.periodStart}
+                onChange={(event) =>
+                  updateStatement("periodStart", event.target.value)
+                }
+              />
+            </label>
+            <label className="field">
+              <span>End</span>
+              <input
+                type="date"
+                value={activeStatementSummary.periodEnd}
+                onChange={(event) =>
+                  updateStatement("periodEnd", event.target.value)
+                }
+              />
+            </label>
+          </div>
+          <label className="field">
+            <span>Currency</span>
+            <input
+              value={activeStatementSummary.currency}
+              onChange={(event) =>
+                updateStatement("currency", event.target.value.toUpperCase())
+              }
+            />
+          </label>
+        </section>
+
+            <section className="panel">
           <div className="panel-heading panel-heading-split">
             <div className="panel-heading-title">
               <Database size={18} {...hydrationSafeIconProps} />
@@ -2711,7 +3294,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
           </button>
         </section>
 
-        <section className="panel note-panel">
+            <section className="panel note-panel">
           <div className="panel-heading panel-heading-split">
             <div className="panel-heading-title">
               <NotebookPen size={18} {...hydrationSafeIconProps} />
@@ -2744,7 +3327,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
           </div>
         </section>
 
-        <section className="panel category-panel">
+            <section className="panel category-panel">
           <div className="panel-heading panel-heading-split">
             <div className="panel-heading-title">
               <Tags size={18} {...hydrationSafeIconProps} />
@@ -2922,1005 +3505,9 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
             ))}
           </div>
         </section>
-
-        {firstPendingUpload ? (
-          <section className="panel month-prompt-panel">
-            <div className="panel-heading">
-              <CalendarRange size={18} {...hydrationSafeIconProps} />
-              <h2>
-                Pick a month
-                {pendingUploads.length > 1
-                  ? ` (${pendingUploads.length} left)`
-                  : ""}
-              </h2>
-            </div>
-            <p className="month-prompt-copy">
-              {formatStatementTitle(firstPendingUpload.statement)} has no
-              usable statement period and no usable row dates. Choose the
-              month it belongs to.
-            </p>
-            <label className="field">
-              <span>Month</span>
-              <input
-                type="month"
-                value={pendingMonth}
-                onChange={(event) => setPendingUploadMonth(event.target.value)}
-              />
-            </label>
-            <button
-              className="secondary-button"
-              type="button"
-              title="File this statement"
-              disabled={!isMonthKey(pendingMonth)}
-              onClick={() => void filePendingUpload()}
-            >
-              <CalendarRange size={18} {...hydrationSafeIconProps} />
-              File statement
-            </button>
-            <button
-              className="filter-clear-button"
-              type="button"
-              onClick={discardPendingUpload}
-            >
-              Discard
-            </button>
-          </section>
+          </div>
         ) : null}
-
-        <section className="panel statement-list-panel">
-          <div className="panel-heading panel-heading-split">
-            <div className="panel-heading-title">
-              <Layers size={18} {...hydrationSafeIconProps} />
-              <h2>Statements</h2>
-            </div>
-            <span className="panel-count">{statements.length}</span>
-          </div>
-
-          <div className="statement-list">
-            {statementSummaries.length === 0 ? (
-              <div className="statement-empty">
-                {monthsLoading
-                  ? "Loading months"
-                  : months.length === 0
-                    ? "Upload a statement to start a month"
-                    : "No statements"}
-              </div>
-            ) : null}
-            {statementSummaries.map(
-              ({
-                statement,
-                items: statementItems,
-                selectedItems: selected,
-                amount
-              }) => (
-                <div
-                  className={`statement-source ${
-                    statement.id === activeStatementId ? "active" : ""
-                  }`}
-                  key={statement.id}
-                >
-                  <button
-                    className="statement-source-main"
-                    type="button"
-                    onClick={() => activateStatement(statement.id)}
-                  >
-                    <strong>{formatStatementTitle(statement)}</strong>
-                    <small>
-                      {statement.sourceFileName ||
-                        formatStatementPeriod(statement.statement) ||
-                        "Manual rows"}
-                    </small>
-                    <span>
-                      {statementItems.length} rows / {selected.length} selected
-                    </span>
-                    <span>
-                      {formatCurrency(
-                        amount,
-                        statement.statement.currency || currency
-                      )}
-                    </span>
-                  </button>
-
-                  <div className="statement-source-actions">
-                    <button
-                      className="mini-icon-button"
-                      type="button"
-                      title="Select statement rows"
-                      onClick={() => selectStatementRows(statement.id)}
-                    >
-                      <ListChecks size={14} {...hydrationSafeIconProps} />
-                    </button>
-                    <button
-                      className="mini-icon-button"
-                      type="button"
-                      title="Clear statement selection"
-                      onClick={() => clearStatementRows(statement.id)}
-                    >
-                      <X size={14} {...hydrationSafeIconProps} />
-                    </button>
-                    <button
-                      className="mini-icon-button danger"
-                      type="button"
-                      title="Remove statement"
-                      onClick={() => removeStatement(statement.id)}
-                    >
-                      <Trash2 size={14} {...hydrationSafeIconProps} />
-                    </button>
-                  </div>
-
-                  <label
-                    className="statement-source-month"
-                    title={
-                      statement.monthSource === "rows"
-                        ? "Month came from the row dates, not the statement period."
-                        : "Month this statement is filed under."
-                    }
-                  >
-                    <span>
-                      Month{statement.monthSource === "rows" ? " (guessed)" : ""}
-                    </span>
-                    <input
-                      type="month"
-                      value={activeMonth}
-                      disabled={monthsLoading}
-                      onChange={(event) =>
-                        void changeStatementMonth(
-                          statement.id,
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-              )
-            )}
-          </div>
-        </section>
-
-        <section className="panel statement-card">
-          <h2>Active statement</h2>
-          <label className="field">
-            <span>Institution</span>
-            <input
-              value={activeStatementSummary.institution}
-              onChange={(event) =>
-                updateStatement("institution", event.target.value)
-              }
-            />
-          </label>
-          <div className="field-grid">
-            <label className="field">
-              <span>Type</span>
-              <select
-                value={activeStatementSummary.statementType}
-                onChange={(event) =>
-                  updateStatement(
-                    "statementType",
-                    event.target.value as StatementType
-                  )
-                }
-              >
-                {STATEMENT_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type.replace("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Account</span>
-              <input
-                value={activeStatementSummary.accountMask}
-                onChange={(event) =>
-                  updateStatement("accountMask", event.target.value)
-                }
-              />
-            </label>
-          </div>
-          <div className="field-grid">
-            <label className="field">
-              <span>Start</span>
-              <input
-                type="date"
-                value={activeStatementSummary.periodStart}
-                onChange={(event) =>
-                  updateStatement("periodStart", event.target.value)
-                }
-              />
-            </label>
-            <label className="field">
-              <span>End</span>
-              <input
-                type="date"
-                value={activeStatementSummary.periodEnd}
-                onChange={(event) =>
-                  updateStatement("periodEnd", event.target.value)
-                }
-              />
-            </label>
-          </div>
-          <label className="field">
-            <span>Currency</span>
-            <input
-              value={activeStatementSummary.currency}
-              onChange={(event) =>
-                updateStatement("currency", event.target.value.toUpperCase())
-              }
-            />
-          </label>
-        </section>
-      </aside>
-
-      {allView ? (
-        <AllMonthsView
-          onSelectMonth={(month) => {
-            setAllView(false);
-            void selectMonth(month);
-          }}
-        />
-      ) : null}
-
-      {/* Hidden rather than unmounted while the all-months view is up: the
-          drawer lane measures these panels, and remounting them would drop
-          scroll position and re-run every drawer layout write. */}
-      <section
-        className="workspace"
-        aria-label="Expense review table"
-        hidden={allView}
-        ref={workspaceRef}
-      >
-        {/* Off-screen by default: the drawer parks in the lane at the right of
-            the table and slides over it on hover, on a click-taken temporary
-            hold, or while pinned. */}
-        <div {...drawerProps("income")}>
-          <section
-            className="panel income-panel"
-            aria-label="Income"
-            ref={registerDrawerPanel("income")}
-          >
-            <div className="panel-heading panel-heading-split">
-              <div className="panel-heading-title">
-                <Wallet size={18} {...hydrationSafeIconProps} />
-                <h2>Income</h2>
-              </div>
-              <div className="panel-heading-actions">
-                <button
-                  className="icon-button"
-                  type="button"
-                  title="Add income row"
-                  onClick={addIncome}
-                >
-                  <Plus size={18} {...hydrationSafeIconProps} />
-                </button>
-                <button
-                  className="icon-button drawer-pin"
-                  type="button"
-                  title={
-                    drawerHolds.income === "pinned"
-                      ? "Unpin income"
-                      : "Pin income open"
-                  }
-                  aria-pressed={drawerHolds.income === "pinned"}
-                  onClick={() => toggleDrawerPin("income")}
-                >
-                  {drawerHolds.income === "pinned" ? (
-                    <Pin size={16} {...hydrationSafeIconProps} />
-                  ) : (
-                    <PinOff size={16} {...hydrationSafeIconProps} />
-                  )}
-                </button>
-              </div>
-            </div>
-            <div className="table-frame income-frame">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Source</th>
-                    <th>Amount</th>
-                    <th>Kind</th>
-                    <th>Notes</th>
-                    <th aria-label="Actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {incomes.length === 0 ? (
-                    <tr>
-                      <td colSpan={6}>
-                        <div className="empty-state">
-                          No income recognized this month. Bank statement
-                          deposits such as payroll land here; add rows for
-                          anything missing.
-                        </div>
-                      </td>
-                    </tr>
-                  ) : null}
-                  {incomes.map((income) => (
-                    <tr key={income.id}>
-                      <td>
-                        <input
-                          type="date"
-                          value={income.date}
-                          onChange={(event) =>
-                            updateIncome(income.id, {
-                              date: event.target.value
-                            })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={income.source}
-                          onChange={(event) =>
-                            updateIncome(income.id, {
-                              source: event.target.value
-                            })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="amount-input"
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={income.amount}
-                          onChange={(event) =>
-                            updateIncome(income.id, {
-                              amount: Number(event.target.value)
-                            })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <select
-                          value={income.kind}
-                          onChange={(event) =>
-                            updateIncome(income.id, {
-                              kind: event.target.value as IncomeItem["kind"]
-                            })
-                          }
-                        >
-                          {INCOME_KINDS.map((kind) => (
-                            <option key={kind} value={kind}>
-                              {kind}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          value={income.notes}
-                          onChange={(event) =>
-                            updateIncome(income.id, {
-                              notes: event.target.value
-                            })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <button
-                          className="icon-button danger"
-                          type="button"
-                          title="Remove income row"
-                          onClick={() => removeIncome(income.id)}
-                        >
-                          <Trash2 size={16} {...hydrationSafeIconProps} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-          <span className="side-drawer-tab">
-            <Wallet size={14} {...hydrationSafeIconProps} />
-            Income
-          </span>
-        </div>
-        <div className="workspace-top">
-          <div>
-            <p className="eyebrow">
-              {activeMonth ? formatMonthLabel(activeMonth) : "Review queue"}
-            </p>
-            <h2>
-              {statements.length > 1
-                ? "Combined review"
-                : activeStatementSummary.institution || "Review queue"}
-            </h2>
-          </div>
-
-          <div className="stats-strip">
-            <Stat
-              label="Rows"
-              value={
-                categoryFilters.length > 0
-                  ? `${visibleItems.length}/${items.length}`
-                  : String(items.length)
-              }
-            />
-            <Stat label="Statements" value={String(statements.length)} />
-            <Stat label="Selected" value={String(selectedItems.length)} />
-            <Stat label="Amount" value={formatCurrency(totalAmount, currency)} />
-            <Stat
-              label="Net"
-              value={formatCurrency(totalNetAmount, currency)}
-            />
-            <Stat
-              label="Income"
-              value={formatCurrency(incomeTotal, currency)}
-            />
-          </div>
-        </div>
-
-        <div className={`notice ${activeNotice.tone}`} role="status">
-          {activeNotice.tone === "error" ? (
-            <AlertTriangle size={16} {...hydrationSafeIconProps} />
-          ) : activeNotice.tone === "success" ? (
-            <Check size={16} {...hydrationSafeIconProps} />
-          ) : (
-            <FileText size={16} {...hydrationSafeIconProps} />
-          )}
-          <span>{activeNotice.message}</span>
-          {lastSave?.pages[0]?.url ? (
-            <a href={lastSave.pages[0].url} target="_blank" rel="noreferrer">
-              Open first page
-            </a>
-          ) : null}
-        </div>
-
-        {/* Same parked-drawer treatment as Income, one tab lower. */}
-        <div {...drawerProps("chat")}>
-          <section
-            className="expense-chat-panel"
-            aria-label="Expense chat"
-            ref={registerDrawerPanel("chat")}
-          >
-            <div className="expense-chat-heading">
-              <div className="panel-heading-title">
-                <MessageCircle size={18} {...hydrationSafeIconProps} />
-                <h3>Expense chat</h3>
-              </div>
-              <div className="panel-heading-actions">
-                <span className="panel-count">
-                  {selectedItems.length > 0
-                    ? `${selectedItems.length} selected`
-                    : `${items.length} rows`}
-                </span>
-                <button
-                  className="icon-button drawer-pin"
-                  type="button"
-                  title={
-                    drawerHolds.chat === "pinned"
-                      ? "Unpin expense chat"
-                      : "Pin expense chat open"
-                  }
-                  aria-pressed={drawerHolds.chat === "pinned"}
-                  onClick={() => toggleDrawerPin("chat")}
-                >
-                  {drawerHolds.chat === "pinned" ? (
-                    <Pin size={16} {...hydrationSafeIconProps} />
-                  ) : (
-                    <PinOff size={16} {...hydrationSafeIconProps} />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div className="expense-chat-log" aria-live="polite">
-              {chatMessages.length === 0 ? (
-                <div className="expense-chat-suggestions">
-                  {EXPENSE_CHAT_PROMPTS.map((prompt) => (
-                    <button
-                      className="expense-chat-suggestion"
-                      type="button"
-                      key={prompt}
-                      disabled={chatBusy || months.length === 0}
-                      onClick={() => void askExpenseChat(prompt)}
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              {chatMessages.map((message) => (
-                <div
-                  className={`expense-chat-message ${message.role}`}
-                  key={message.id}
-                >
-                  <span className="expense-chat-avatar">
-                    {message.role === "assistant" ? (
-                      <Bot size={16} {...hydrationSafeIconProps} />
-                    ) : (
-                      <UserRound size={16} {...hydrationSafeIconProps} />
-                    )}
-                  </span>
-                  <p>{message.content}</p>
-                  <ExpenseChatEditList
-                    message={message}
-                    busy={chatBusy}
-                    onApprove={approveChatProposals}
-                    onDismiss={dismissChatProposals}
-                  />
-                </div>
-              ))}
-
-              {chatBusy ? (
-                <div className="expense-chat-message assistant">
-                  <span className="expense-chat-avatar">
-                    <Bot size={16} {...hydrationSafeIconProps} />
-                  </span>
-                  <p>Thinking...</p>
-                </div>
-              ) : null}
-            </div>
-
-            <form
-              className="expense-chat-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void askExpenseChat();
-              }}
-            >
-              <input
-                value={chatInput}
-                disabled={chatBusy || months.length === 0}
-                onChange={(event) => setChatInput(event.target.value)}
-                placeholder="How could I minimize food costs?"
-                aria-label="Expense question"
-              />
-              <button
-                className="icon-button expense-chat-send"
-                type="submit"
-                title="Send question"
-                disabled={chatBusy || months.length === 0 || !chatInput.trim()}
-              >
-                {chatBusy ? (
-                  <LoaderCircle
-                    className="spin"
-                    size={16}
-                    {...hydrationSafeIconProps}
-                  />
-                ) : (
-                  <Send size={16} {...hydrationSafeIconProps} />
-                )}
-              </button>
-            </form>
-          </section>
-          <span className="side-drawer-tab">
-            <MessageCircle size={14} {...hydrationSafeIconProps} />
-            Chat
-          </span>
-        </div>
-
-        <section className="cash-flow-panel" aria-label="Cash flow">
-          <div className="cash-flow-heading">
-            <div>
-              <p className="eyebrow">Cash flow</p>
-              <h3>Where it went</h3>
-            </div>
-            <div
-              className={`cash-flow-balance ${
-                cashFlowSummary.savedAmount < 0 ? "negative" : ""
-              }`}
-            >
-              <span>
-                {cashFlowSummary.savedAmount < 0 ? "Overspent" : "Saved"}
-              </span>
-              <strong>
-                {formatCurrency(
-                  Math.abs(cashFlowSummary.savedAmount),
-                  currency
-                )}
-              </strong>
-            </div>
-          </div>
-
-          <div className="cash-flow-body">
-            <div className="flow-visual" aria-label="Cash flow visualization">
-              <div className="flow-visual-toolbar">
-                <div className="graph-type-control" aria-label="Graph type">
-                  {CASH_FLOW_GRAPH_TYPES.map((graphType) => (
-                    <button
-                      className={
-                        cashFlowGraphType === graphType.value ? "active" : ""
-                      }
-                      key={graphType.value}
-                      type="button"
-                      aria-pressed={cashFlowGraphType === graphType.value}
-                      onClick={() => { setCashFlowGraphType(graphType.value); setCalendarDateFilter(""); }}
-                    >
-                      {graphType.label}
-                    </button>
-                  ))}
-                </div>
-                {cashFlowGraphType === "flow" ? (
-                  <div
-                    className="graph-zoom-controls"
-                    aria-label="Graph zoom controls"
-                  >
-                    <button
-                      className="mini-icon-button"
-                      type="button"
-                      title="Zoom out"
-                      aria-label="Zoom out graph"
-                      disabled={graphZoom <= MIN_GRAPH_ZOOM}
-                      onClick={() => updateGraphZoom("out")}
-                    >
-                      <ZoomOut size={14} {...hydrationSafeIconProps} />
-                    </button>
-                    <button
-                      className="graph-zoom-reset"
-                      type="button"
-                      title="Reset graph zoom"
-                      aria-label="Reset graph zoom"
-                      disabled={graphZoom === DEFAULT_GRAPH_ZOOM}
-                      onClick={resetGraphZoom}
-                    >
-                      {Math.round(graphZoom * 100)}%
-                    </button>
-                    <button
-                      className="mini-icon-button"
-                      type="button"
-                      title="Zoom in"
-                      aria-label="Zoom in graph"
-                      disabled={graphZoom >= MAX_GRAPH_ZOOM}
-                      onClick={() => updateGraphZoom("in")}
-                    >
-                      <ZoomIn size={14} {...hydrationSafeIconProps} />
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-              {cashFlowGraphType === "flow" ? (
-                <CashFlowSankey
-                  summary={cashFlowSummary}
-                  currency={currency}
-                  zoom={graphZoom}
-                />
-              ) : cashFlowGraphType === "calendar" ? (
-                activeMonth ? <SpendingCalendar month={activeMonth} expenses={items} incomes={incomes} currency={currency} selectedDate={activeCalendarDateFilter} onSelectDate={setCalendarDateFilter} /> : <p>Pick a month to see its spending calendar.</p>
-              ) : (
-                <CashFlowPie summary={cashFlowSummary} currency={currency} />
-              )}
-            </div>
-          </div>
-        </section>
-
-        <div className="table-actions">
-          <button
-            className="icon-button"
-            type="button"
-            title={
-              allVisibleSelected
-                ? "Clear visible selection"
-                : "Select visible rows"
-            }
-            disabled={visibleItems.length === 0}
-            onClick={toggleAll}
-          >
-            <Check size={18} {...hydrationSafeIconProps} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            title="Add expense"
-            onClick={addRow}
-          >
-            <Plus size={18} {...hydrationSafeIconProps} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            title={
-              lastReviewHistoryEvent
-                ? `Undo: ${lastReviewHistoryEvent.label}`
-                : "Nothing to undo"
-            }
-            aria-label={
-              lastReviewHistoryEvent
-                ? `Undo ${lastReviewHistoryEvent.label}`
-                : "Nothing to undo"
-            }
-            disabled={!lastReviewHistoryEvent || controlsDisabled}
-            onClick={undoLastItemChange}
-          >
-            <Undo2 size={18} {...hydrationSafeIconProps} />
-          </button>
-          <label className="bulk-category-control">
-            <Tags size={16} {...hydrationSafeIconProps} />
-            <select
-              value=""
-              aria-label="Category for visible selected rows"
-              disabled={visibleSelectedItems.length === 0 || controlsDisabled}
-              onChange={(event) => {
-                const category = event.target.value as ExpenseCategory;
-
-                if (category) {
-                  recategorizeSelected(category);
-                }
-              }}
-            >
-              <option value="">Set category</option>
-              {bulkCategoryOptions.map((category) => (
-                <option
-                  key={`${category.source}-${category.sourceId || category.name}`}
-                  value={category.name}
-                >
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="category-filter-control">
-            <ListFilter size={16} {...hydrationSafeIconProps} />
-            <select
-              value=""
-              aria-label="Filter rows by category"
-              disabled={items.length === 0}
-              onChange={(event) => addCategoryFilter(event.target.value)}
-            >
-              <option value="">Filter category</option>
-              {categoryFilterOptions.map((category) => (
-                <option
-                  key={category.name}
-                  value={category.name}
-                  disabled={categoryFilterSet.has(category.name)}
-                >
-                  {category.name} ({category.count})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="statement-scope-control">
-            <Layers size={16} {...hydrationSafeIconProps} />
-            <select
-              value={activeStatementId}
-              aria-label="Active statement"
-              disabled={statements.length === 0 || controlsDisabled}
-              onChange={(event) => activateStatement(event.target.value)}
-            >
-              {statements.map((statement) => (
-                <option key={statement.id} value={statement.id}>
-                  {formatStatementTitle(statement)}
-                </option>
-              ))}
-            </select>
-          </label>
-          {activeCalendarDateFilter ? <button type="button" className="category-filter-chip" onClick={() => setCalendarDateFilter("")} aria-label="Clear day filter">
-            {activeCalendarDateFilter}<X size={13} {...hydrationSafeIconProps} />
-          </button> : null}
-          {categoryFilters.length > 0 ? (
-            <div className="category-filter-chips" aria-label="Active filters">
-              {categoryFilters.map((category) => (
-                <button
-                  className="category-filter-chip"
-                  type="button"
-                  key={category}
-                  title={`Remove ${category} filter`}
-                  onClick={() => removeCategoryFilter(category)}
-                >
-                  <span>{category}</span>
-                  <X size={13} {...hydrationSafeIconProps} />
-                </button>
-              ))}
-              <button
-                className="filter-clear-button"
-                type="button"
-                title="Clear category filters"
-                onClick={clearCategoryFilters}
-              >
-                Clear
-              </button>
-            </div>
-          ) : null}
-          <span>{currencyNames.of(currency) || currency}</span>
-        </div>
-
-        <div className="table-frame">
-          <table>
-            <thead>
-              <tr>
-                <th aria-label="Selected" />
-                {TABLE_SORT_COLUMNS.map((column) => {
-                  const activeSort =
-                    sort && sort.key === column.key ? sort : null;
-
-                  return (
-                    <th
-                      key={column.key}
-                      aria-sort={
-                        activeSort
-                          ? activeSort.dir === "asc"
-                            ? "ascending"
-                            : "descending"
-                          : undefined
-                      }
-                    >
-                      <button
-                        className="sort-header"
-                        type="button"
-                        onClick={() => toggleSort(column.key)}
-                      >
-                        {column.label}
-                        {activeSort ? (
-                          activeSort.dir === "asc" ? (
-                            <ChevronUp size={13} {...hydrationSafeIconProps} />
-                          ) : (
-                            <ChevronDown
-                              size={13}
-                              {...hydrationSafeIconProps}
-                            />
-                          )
-                        ) : null}
-                      </button>
-                    </th>
-                  );
-                })}
-                <th aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {items.length === 0 ? (
-                <tr>
-                  <td colSpan={9}>
-                    <div className="empty-state">
-                      {monthsLoading
-                        ? "Loading this month..."
-                        : months.length === 0
-                          ? "No months yet. Upload a statement and it is filed into the month it covers."
-                          : "No expense rows in this month. Re-upload the statement file and inspect the saved artifact directory shown above."}
-                    </div>
-                  </td>
-                </tr>
-              ) : null}
-              {items.length > 0 && visibleItems.length === 0 ? (
-                <tr>
-                  <td colSpan={9}>
-                    <div className="empty-state">
-                      No rows match the active filters.
-                    </div>
-                  </td>
-                </tr>
-              ) : null}
-              {visibleItems.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(item.id)}
-                      onChange={() => toggleItem(item.id)}
-                      aria-label={`Select ${item.merchant || item.description}`}
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="statement-chip"
-                      type="button"
-                      onClick={() => activateStatement(item.statementId || "")}
-                    >
-                      {formatStatementShortLabel(
-                        statementById.get(item.statementId || "")
-                      )}
-                    </button>
-                  </td>
-                  <td>
-                    <div className="amount-cell">
-                      <input
-                        className="amount-input"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.amount}
-                        onChange={(event) =>
-                          updateItem(item.id, {
-                            amount: Number(event.target.value)
-                          })
-                        }
-                      />
-                      <div
-                        className="amount-reimbursed"
-                        data-active={item.reimbursedAmount > 0 ? "true" : "false"}
-                      >
-                        <label className="reimbursed-field">
-                          <span>reimb</span>
-                          <input
-                            className="reimbursed-input"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={item.reimbursedAmount}
-                            aria-label={`Reimbursed for ${item.merchant || item.description}`}
-                            onChange={(event) =>
-                              updateItem(item.id, {
-                                reimbursedAmount: Number(event.target.value)
-                              })
-                            }
-                          />
-                        </label>
-                        {item.reimbursedAmount > 0 ? (
-                          <span className="net-amount">
-                            net{" "}
-                            {formatCurrency(
-                              item.amount - item.reimbursedAmount,
-                              currency
-                            )}
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <input
-                      value={item.merchant}
-                      onChange={(event) =>
-                        updateItem(item.id, { merchant: event.target.value })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      value={item.description}
-                      onChange={(event) =>
-                        updateItem(item.id, { description: event.target.value })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <select
-                      value={item.category}
-                      onChange={(event) =>
-                        updateItem(item.id, {
-                          category: event.target.value as ExpenseCategory
-                        })
-                      }
-                    >
-                      {categoryOptionsForItem(
-                        item.category,
-                        activeCategories
-                      ).map((category) => (
-                        <option key={category.name} value={category.name}>
-                          {category.name}
-                          {category.enabled ? "" : " (off)"}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      value={item.notes}
-                      onChange={(event) =>
-                        updateItem(item.id, { notes: event.target.value })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="date"
-                      value={item.date}
-                      onChange={(event) =>
-                        updateItem(item.id, { date: event.target.value })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="icon-button danger"
-                      type="button"
-                      title="Remove row"
-                      onClick={() => removeRow(item.id)}
-                    >
-                      <Trash2 size={16} {...hydrationSafeIconProps} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      </div>
     </main>
   );
 }

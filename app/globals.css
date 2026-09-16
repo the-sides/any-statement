@@ -188,95 +188,141 @@ a {
   text-decoration: none;
 }
 
+/*
+ * Page frame: a sticky bar across the top, a nav lane, and one section's
+ * content. `--nav-width` is the lane the nav occupies above 900px; below that
+ * the nav becomes a fixed bottom tab bar and the lane collapses, which is why
+ * the content reserves `--nav-bar-height` of bottom padding there.
+ */
 .app-shell {
-  --rail-width: 340px;
+  --nav-width: 196px;
+  --nav-bar-height: 66px;
 
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: var(--nav-width) minmax(0, 1fr);
+  grid-template-areas:
+    "header header"
+    "nav content";
+  align-content: start;
+  gap: 14px 16px;
   min-height: 100vh;
   padding: 18px;
-  transition: padding-left 0.18s ease;
 }
 
-/* Pinned, the rail is part of the layout again, so the shell yields the lane
-   it occupies instead of letting it cover the workspace. */
-.app-shell[data-rail-pinned="true"] {
-  padding-left: calc(var(--rail-width) + 18px);
-}
-
-/* Three columns so the month stepper is centred on the page itself, not on
-   whatever space the brand lockup and the upload controls leave over. */
+/* One bar, always in the same place, and it stays put: the month control used
+   to translate itself down the page on scroll and drifted over the table. */
 .app-header {
   display: grid;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  grid-area: header;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 16px;
-  padding: 0 2px;
+  margin: -18px -18px 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-glass-strong);
+  backdrop-filter: blur(16px);
+  padding: 8px 18px;
 }
 
-/* The rail overlays the workspace: it is fixed, full height, and driven by
-   `--rail-reveal` (0 = hidden, 1 = fully out) which the workspace component
-   sets from pointer distance to the left edge. */
-.side-rail {
-  --rail-reveal: 0;
-
+/*
+ * The only navigation. Same markup in both layouts: a sticky column of
+ * destinations beside the content on a desktop, a fixed bottom tab bar on a
+ * phone. It replaced a pointer-proximity rail on the left and two drawer tabs
+ * parked off the right edge, so nothing in the app appears on its own any
+ * more and every destination is one tap away.
+ */
+.app-nav {
   display: flex;
-  position: fixed;
-  top: 0;
-  left: 0;
-  z-index: 40;
-  width: min(var(--rail-width), 92vw);
-  height: 100vh;
+  position: sticky;
+  top: 74px;
+  grid-area: nav;
   flex-direction: column;
-  gap: 12px;
+  align-self: start;
+  gap: 4px;
+  max-height: calc(100vh - 92px);
   overflow-y: auto;
-  border-right: 1px solid var(--line);
-  background: var(--panel);
-  box-shadow: var(--shadow);
-  padding: 14px;
-  opacity: var(--rail-reveal);
-  /* Fades and creeps out together, then lands flush once reveal hits 1. */
-  transform: translateX(calc((var(--rail-reveal) - 1) * 88%));
-  transition:
-    transform 0.14s ease-out,
-    opacity 0.14s ease-out;
-  /* Untouchable until fully out, so a half-faded rail never eats clicks meant
-     for the table underneath. */
-  pointer-events: none;
 }
 
-.side-rail[data-rail-open="true"],
-.side-rail[data-rail-pinned="true"] {
-  pointer-events: auto;
-}
-
-.side-rail[data-rail-pinned="true"] {
-  opacity: 1;
-  transform: none;
-}
-
-.rail-top {
+.app-nav-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: left;
 }
 
-.rail-top .eyebrow {
-  margin: 0;
+.app-nav-item svg {
+  flex: 0 0 auto;
 }
 
-.side-rail[data-rail-pinned="true"] .rail-top .mini-icon-button,
-.app-shell[data-rail-pinned="true"] .rail-handle {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--on-ink);
+.app-nav-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The count rides in the nav so a section's weight is readable without
+   opening it. */
+.app-nav-item em {
+  margin-left: auto;
+  color: var(--quiet);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-nav-item:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.app-nav-item.active {
+  border-color: var(--line);
+  background: var(--panel);
+  box-shadow: 0 1px 0 var(--panel-glass) inset;
+  color: var(--ink);
+}
+
+.app-nav-item.active em {
+  color: var(--accent);
+}
+
+.app-nav-link {
+  text-decoration: none;
+}
+
+.app-content {
+  display: flex;
+  grid-area: content;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Setup is the one section with several independent panels, so it is the one
+   place that still tiles: statements and their card first, then the
+   integrations and the catalog. */
+.setup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  align-items: start;
+  gap: 14px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .app-shell,
-  .side-rail {
+  .app-shell {
     transition: none;
   }
 }
@@ -837,28 +883,20 @@ button:focus-visible,
   text-transform: uppercase;
 }
 
+/* The review section's frame. Even padding now that nothing parks off its
+   right edge - Income and Expense chat are sections, not drawers. */
 .workspace {
   display: flex;
   position: relative;
   min-width: 0;
   flex-direction: column;
   gap: 12px;
-  /* The parked income drawer hangs off the right edge; clipping here is what
-     keeps it hidden, and the wide right padding is the lane its tab sits in.
-     It lives on the right because the left edge now belongs to the controls
-     rail, which would slide over the tab before it could be reached. */
   overflow: hidden;
   border: 1px solid var(--line-mild);
   border-radius: 8px;
   background: var(--panel-glass);
   box-shadow: var(--shadow);
-  padding: 14px 46px 14px 14px;
-}
-
-/* `display: flex` above beats the UA `[hidden]` rule, so the all-months view
-   would otherwise render on top of a still-visible review table. */
-.workspace[hidden] {
-  display: none;
+  padding: 14px;
 }
 
 /* The all-months view owns the same frame as the review table, but nothing
@@ -1063,9 +1101,11 @@ button:focus-visible,
   line-height: 1.05;
 }
 
+/* Six stats, six tracks. Not `auto-fit`: this is a flex item with no definite
+   width, so an `auto-fit` track collapses to a single column. */
 .stats-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(92px, 1fr));
+  grid-template-columns: repeat(6, minmax(76px, auto));
   gap: 8px;
 }
 
@@ -1471,120 +1511,16 @@ button:focus-visible,
   background: var(--surface-sunken);
 }
 
-/* The income table and the expense chat park off the right edge of the review
-   table, showing only the tab that sits in the lane at the right of the
-   transactions, and slide over the transactions when open. They are
-   right-parked because the left edge belongs to the proximity-revealed
-   controls rail, which would slide over a left tab before it could be reached.
-
-   StatementWorkspace writes both attributes. `data-open` covers hover, focus
-   and either hold, and is also what the lane layout reads: `top` is set per
-   drawer so an open panel pushes the tabs below it down instead of covering
-   them, and both `top` and `transform` animate. `data-hold` distinguishes
-   `temporary` (a click inside; survives mouse-leave, dropped by the next
-   outside click) from `pinned` (survives outside clicks too).
-
-   An open drawer stacks above the parked ones so a tab sliding out of its way
-   passes behind the panel rather than across it. */
-.side-drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 6;
-  display: flex;
-  align-items: flex-start;
-  /* DOM order is panel then tab; reversing puts the tab on the inward edge. */
-  flex-direction: row-reverse;
-  /* A parked drawer's wrapper is as tall as its panel, so its empty column at
-     the right edge would steal hover from a neighbouring open drawer. A parked
-     drawer is therefore a hit target only through its tab; hovering that tab
-     opens the drawer, which hands pointer events back to the whole thing. */
-  pointer-events: none;
-  transform: translateX(calc(100% - 32px));
-  transition:
-    top 0.24s ease,
-    transform 0.24s ease;
-}
-
-.side-drawer-tab,
-.side-drawer[data-open="true"] {
-  pointer-events: auto;
-}
-
-.income-drawer {
-  width: min(760px, 100%);
-}
-
-.chat-drawer {
-  /* Server-rendered fallback for the lane layout: one tab down. */
-  top: 148px;
-  width: min(560px, 100%);
-}
-
-.side-drawer[data-open="true"] {
-  z-index: 7;
-  transform: translateX(0);
-}
-
-.side-drawer > .income-panel,
-.side-drawer > .expense-chat-panel {
-  min-width: 0;
-  max-height: min(68vh, 620px);
-  flex: 1;
-  overflow: auto;
-  border-radius: 8px 0 0 8px;
-  box-shadow: var(--shadow);
-}
-
-.side-drawer > .income-panel {
-  background: var(--panel);
-}
-
-.side-drawer-tab {
-  display: flex;
-  width: 32px;
-  min-height: 132px;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid var(--line);
-  border-right: 0;
-  border-radius: 8px 0 0 8px;
-  background: var(--panel);
-  box-shadow: var(--shadow);
-  color: var(--muted);
-  padding: 8px 0;
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  writing-mode: vertical-rl;
-}
-
-.side-drawer[data-open="true"] .side-drawer-tab {
-  color: var(--ink);
-}
-
-.side-drawer[data-hold="pinned"] .side-drawer-tab {
-  border-color: var(--accent-line);
-  color: var(--accent);
-}
-
-.drawer-pin[aria-pressed="true"] {
-  border-color: var(--accent-line);
-  color: var(--accent);
-}
-
+/* Income and Expense chat are now sections of their own (see `.app-nav`), so
+   the panels are ordinary panels. What used to live here - two wrappers parked
+   off the right edge of the table, a vertical tab each, a measured lane that
+   wrote their `top` on every scroll frame, and a hover/`temporary`/`pinned`
+   hold model - is gone: the panel was over the table on cursor drift, and on a
+   phone the tabs were unreachable anyway. */
 .panel-heading-actions {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .side-drawer {
-    transition: none;
-  }
 }
 
 .mini-icon-button {
@@ -2309,35 +2245,6 @@ meter {
   padding: 7px 9px;
 }
 
-.month-view-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 34px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  padding: 0 10px;
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.month-view-toggle:hover {
-  background: var(--hover);
-  color: var(--ink);
-}
-
-.month-view-toggle.active {
-  border-color: var(--accent-line);
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
 .month-stepper {
   display: grid;
   grid-template-columns: 34px minmax(180px, 1fr) 34px;
@@ -2422,50 +2329,103 @@ meter {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .header-month-anchor {
+  .header-month {
     grid-row: 2;
     grid-column: 1 / -1;
+    justify-self: center;
   }
 }
 
-@media (max-width: 980px) {
-  /* Too narrow to give up a lane, so a pinned rail keeps overlaying. */
-  .app-shell[data-rail-pinned="true"] {
-    padding-left: 18px;
+/*
+ * Small-screen layout. The nav leaves the side lane and becomes a fixed bottom
+ * tab bar - icon over label, six equal thumb targets - because a 196px column
+ * beside the content is most of a phone's width, and because the destinations
+ * are what the reviewer switches between constantly. The content reserves the
+ * bar's height so the last row of the table is never under it.
+ */
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "header"
+      "content";
+    padding-bottom: calc(var(--nav-bar-height) + 12px);
   }
 
-  /* Stacked layout has no gutter to hide in, so the drawers become plain
-     panels again and the tab lane is no longer needed. */
+  .app-nav {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 35;
+    flex-direction: row;
+    max-height: none;
+    overflow-x: auto;
+    border-top: 1px solid var(--line);
+    background: var(--panel-glass-strong);
+    backdrop-filter: blur(16px);
+    padding: 6px 8px;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+  }
+
+  .app-nav-item {
+    flex: 1 0 auto;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    /* Seven destinations have to fit a 390px bar without scrolling. */
+    min-width: 48px;
+    min-height: 50px;
+    padding: 4px 2px;
+    font-size: 10px;
+    letter-spacing: 0.02em;
+    text-align: center;
+  }
+
+  /* A count on a 58px tile would push the label out; the section itself shows
+     it. */
+  .app-nav-item em {
+    display: none;
+  }
+
+  .app-nav-item.active {
+    box-shadow: none;
+  }
+
+  /* No drawer lane to reserve any more. */
   .workspace {
     padding-right: 14px;
-  }
-
-  .side-drawer {
-    position: static;
-    width: auto;
-    flex-direction: row;
-    pointer-events: auto;
-    transform: none;
-  }
-
-  .side-drawer > .income-panel,
-  .side-drawer > .expense-chat-panel {
-    max-height: none;
-    border-radius: 8px;
-  }
-
-  .side-drawer-tab {
-    display: none;
   }
 }
 
 @media (max-width: 680px) {
   .app-shell {
     padding: 10px;
+    padding-bottom: calc(var(--nav-bar-height) + 10px);
   }
 
-  .app-shell[data-rail-pinned="true"] {
-    padding-left: 10px;
+  /* Three stacked rows of chrome is a third of a phone screen, and the nav
+     that matters is already fixed to the bottom, so the bar scrolls away with
+     the content instead of sticking. */
+  .app-header {
+    position: static;
+    margin: -10px -10px 0;
+    padding: 6px 10px 8px;
+  }
+
+  .brand-lockup {
+    padding: 2px 0 6px;
+  }
+
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+    font-size: 13px;
+  }
+
+  .brand-lockup h1 {
+    font-size: 21px;
   }
 
   .app-header {
@@ -2473,7 +2433,7 @@ meter {
     align-items: stretch;
   }
 
-  .header-month-anchor,
+  .header-month,
   .header-upload {
     justify-self: stretch;
   }
@@ -2483,10 +2443,15 @@ meter {
     flex: 1;
   }
 
-  .workspace-top,
-  .stats-strip {
+  .workspace-top {
     display: flex;
     flex-direction: column;
+  }
+
+  /* Two per row: a single column of 80px-wide boxes wasted the width and made
+     the six stats six screens' worth of scrolling. */
+  .stats-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .workspace-top h2 {
@@ -2582,16 +2547,120 @@ meter {
 
 .calendar-surface-amount { fill: var(--on-ink); stroke: var(--ink); stroke-width: 0.4; paint-order: stroke; font-size: 8px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
-.header-month-anchor { justify-self: center; min-width: 0; }
-.header-month { position: relative; z-index: 30; translate: 0 var(--month-float-offset, 0px); }
-.header-month[data-floating="true"] { background: var(--panel-glass-strong); backdrop-filter: blur(16px); }
-@media (max-width: 680px) { .header-month-anchor { justify-self: stretch; } }
+/*
+ * Phones: the review and income tables stop being tables. The review table is
+ * 1600px wide by design (nine editable columns), which on a phone meant
+ * two-axis scrolling to reach a single row's category. Below 760px each row
+ * becomes a card and each cell a labelled line, driven by the `data-label`
+ * every `<td>` carries - the same markup, no second render path.
+ *
+ * These rules need `td[data-label]` (0,1,1) rather than `td` to outrank the
+ * per-column `td:nth-child(n)` widths above; being later in the file settles
+ * the tie.
+ */
+@media (max-width: 760px) {
+  .table-frame {
+    max-height: none;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .table-frame table {
+    display: block;
+    min-width: 0;
+  }
+
+  .table-frame thead {
+    display: none;
+  }
+
+  .table-frame tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .table-frame tbody tr {
+    display: block;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 6px 10px;
+  }
+
+  .table-frame td[data-label] {
+    display: grid;
+    width: auto;
+    grid-template-columns: 84px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    padding: 5px 0;
+  }
+
+  .table-frame td[data-label]::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  /* The select-and-delete pair reads as one row of controls, not two labelled
+     lines. */
+  .table-frame td[data-label="Selected"],
+  .table-frame td[data-label="Actions"] {
+    display: inline-grid;
+    width: auto;
+    grid-template-columns: auto;
+    padding: 2px 0;
+  }
+
+  .table-frame td[data-label="Selected"]::before,
+  .table-frame td[data-label="Actions"]::before {
+    content: none;
+  }
+
+  .table-frame td[data-label="Actions"] {
+    float: right;
+  }
+
+  /* No hover on a touch screen, so the reimbursed line cannot hide behind
+     one. */
+  .amount-reimbursed {
+    opacity: 1;
+  }
+
+  .amount-input,
+  .table-frame td input,
+  .table-frame td select {
+    max-width: none;
+  }
+
+  /* A row card is its own column layout; the empty state is still one cell. */
+  .table-frame td[colspan] {
+    display: block;
+  }
+}
 
 /* Document manager (`/documents`). It reuses the workspace frame, but nothing
    parks in a right-hand drawer lane here, so the padding stays even and the
    card list is the only thing inside. */
+/* `/documents` has no section nav - it is one read-only list with a back
+   arrow - so it collapses the shell's nav lane instead of leaving a 196px
+   empty column beside the cards. */
 .docs-shell {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "header"
+    "content";
   padding-bottom: 28px;
+}
+
+.docs-workspace {
+  grid-area: content;
 }
 
 .docs-header {

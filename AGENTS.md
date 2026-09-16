@@ -215,25 +215,44 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   - `/?month=<YYYY-MM>` is honoured by `lib/monthsClientStore.ts` `initialize()`, which opens
     that month instead of the most recent one. An unfiled month in the link is ignored rather
     than opening a blank workspace.
-- `.app-header` is a three-column grid (`1fr auto 1fr`): the brand lockup left, the month
-  stepper (`.header-month`) centred on the page rather than on the leftover space, and the
-  upload (file picker + `Extract`) plus the theme toggle right. The month selector floats
-  12px from the viewport top after scrolling past its original position. Its anchor reserves
-  layout space; scroll updates its translation directly without rerendering the workspace.
-  Under 1100px the month
-  control drops to its own centred second row, and under 680px the header stacks entirely.
-  Every other control lives in `.side-rail`, a fixed
-  full-height overlay that is hidden by default: `StatementWorkspace` tracks the pointer and
-  writes `--rail-reveal` (0..1) plus `data-rail-open` straight onto the element, fading and
-  creeping the rail out from 20px of the left edge and landing it flush at 12px
-  (`RAIL_FADE_DISTANCE_PX` 20 / `RAIL_OPEN_DISTANCE_PX` 12). It is driven by DOM writes on
-  purpose: a mousemove-per-frame `setState` re-renders the whole workspace. Below full reveal
-  the rail has `pointer-events: none` so a half-faded panel never eats clicks meant for the
-  table; once open, hover and `focusin` hold it out regardless of cursor distance. The pin
-  button at the top of the rail (mirrored by the header handle, the only way in on touch)
-  stores `statement-ledger:rail-pinned` and switches the rail to a reserved layout lane
-  (`.app-shell[data-rail-pinned="true"]` pads left by the rail width) instead of an overlay,
-  above 980px.
+- **The workspace is one section at a time, and the nav is the only way between them.**
+  `SectionId` in `components/StatementWorkspace.tsx` is the whole model:
+  `review` (stats, filters, the transaction table), `cashflow` (the Sankey / pie / 3D
+  calendar panel), `income`, `chat`, `all` (`AllMonthsView`), `setup` (statements, the
+  active statement card, Notion, AI notes, the category catalog), plus a `Files` link to
+  `/documents`. `WORKSPACE_SECTIONS` is the nav order and carries each section's label,
+  its header title, and its icon; adding a section is an entry there plus one
+  `{section === id ? … : null}` branch in `.app-content`.
+  - The active section is browser state read through `useSyncExternalStore`
+    (`statement-ledger:section`, `subscribeToSectionPreference` / `readSectionPreference` /
+    `setSection`), the same shape as the app-category and review-history preferences. The
+    server renders `review` and the stored section arrives with hydration, so there is no
+    setState-in-effect cascade (`react-hooks/set-state-in-effect` rejects that).
+  - `.app-shell` is a grid of `header / nav / content`. `.app-nav` is **the same markup in
+    both layouts**: a sticky 196px column of destinations beside the content above 900px,
+    and a fixed bottom tab bar (icon over label, seven thumb targets, `env(safe-area-inset-
+    bottom)`) below it. Counts ride in the nav (`sectionCounts`) so a section's weight is
+    readable without opening it; the bar hides them, since the section itself shows them.
+  - This replaced a single scrolling page whose other controls appeared on their own: a
+    rail that faded in from 20px of the left edge on pointer proximity (plus a pin that
+    turned it into a layout lane) and two drawers parked off the right edge of the table
+    behind vertical tabs, arbitrated by a hover/`temporary`/`pinned` hold model and a
+    measured lane that rewrote their `top` on every scroll frame. All of that machinery is
+    gone. On a phone it was unusable - the tabs sat off-screen and the page was one 4000px
+    column - which is what the bottom bar fixes.
+- `.app-header` is a three-column grid (`1fr auto 1fr`): the brand lockup with the active
+  section's title and the identity chip, the month stepper (`.header-month`) centred on the
+  page, and the upload lane (file picker, `Extract`, theme). It is `position: sticky` and
+  stays put; the month control used to translate itself down the page on scroll and drifted
+  over the table. Stepping a month also returns to `review`, because a month is what that
+  section reviews. Under 1100px the month control drops to its own centred row; under 680px
+  the header stops being sticky (three stacked rows of chrome is a third of a phone screen,
+  and the nav that matters is already fixed to the bottom).
+- **Phones get cards, not a table.** The review table is 1600px wide by design (nine
+  editable columns), so below 760px `app/globals.css` turns each `<tr>` into a card and each
+  `<td>` into a labelled line, driven by the `data-label` every cell carries - same markup,
+  no second render path. The reimbursed line drops its hover-only fade there, because a
+  touch screen has no hover. The income table follows the same rule.
 - An uploaded statement is filed into the calendar month covering most of its period,
   falling back to its row dates, and the workspace switches to that month. There is no
   save-month action; months are derived. See `specs/month-scoped-statements.md`.
@@ -262,11 +281,11 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   cash-flow context, but nothing in the UI writes `cashFlowEntries` any more: inputs come
   from recognized income and outputs from the month's category spend, so a stored entry stays
   at whatever the `user_settings` row already holds.
-- The header month stepper has an `All` toggle (`allView` in `StatementWorkspace`).
-  It hides the review workspace (with `hidden`, not unmounting — the drawer lane
-  measures those panels) and shows `AllMonthsView`, which has two modes
-  (`OverviewMode`, a segmented toggle in its toolbar): `Compare`, the default,
-  and `Year`.
+- `All months` is a nav section (`section === "all"`), not a toggle on the month stepper,
+  and it renders `AllMonthsView` in place of the review table rather than hiding it. The
+  view has two modes (`OverviewMode`, a segmented toggle in its toolbar): `Compare`, the
+  default, and `Year`. Clicking a month's name returns to `review` on that month, and the
+  expense chat's `view.scope` is `all` exactly while this section is open.
   - `Compare` is every filed month's cash flow as its own Sankey, plus totals
     across months. The row scrolls horizontally and each card's width *is* the
     zoom level: `MONTH_CARD_WIDTH` (1040px) times the current stop, so 100%
@@ -410,36 +429,13 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
 - Bank statements also carry income: extraction returns an `incomes` array
   (payroll, interest, other deposits; never own-account transfers) alongside
   expenses, stored in the `incomes` table (`lib/migrations/005_income_rows.sql`)
-  and reviewed in the Income drawer. Notion save still covers expenses only.
-- Income and Expense chat are both *side drawers*: `.side-drawer` elements absolutely
-  positioned inside `.workspace`, parked off its *right* edge with only a 32px vertical tab
-  showing in the reserved `padding-right` lane, sliding over the transaction table when open.
-  They are on the right because the controls rail owns the left edge: it slid over a left tab
-  before the cursor could reach it. `flex-direction: row-reverse` keeps the tab on the inward
-  side, and `overflow: hidden` on `.workspace` is what hides a parked panel: remove it and the
-  income table bleeds outside the workspace. Below 980px both revert to plain stacked panels
-  and the tabs are hidden.
-  - `StatementWorkspace` writes `data-open` (hover, focus, or a hold) and `data-hold`
-    (`none` / `temporary` / `pinned`). A click inside a drawer takes the `temporary` hold: it
-    survives mouse-leave but the next click outside drops it. The pin button takes `pinned`,
-    which survives outside clicks until it is clicked again. One document `mousedown` listener
-    owns both transitions, so a single click can never be inside one drawer and outside
-    another inconsistently.
-  - Hover and focus are React state, not just CSS, because the tab lane layout needs to know
-    which drawers are open. A parked drawer's wrapper is as tall as its panel, so it is
-    `pointer-events: none` except for its tab; otherwise its empty column stole hover from the
-    neighbouring drawer's pin.
-  - `DRAWER_IDS` is the lane order. An effect lays the lane out top to bottom - a parked
-    drawer occupies one tab, an open one occupies its whole measured panel - and writes each
-    drawer's `top`, so opening Income slides the Chat tab down instead of covering it
-    (`transition: top` animates it, and an open drawer's `z-index` is higher so the tab passes
-    *behind* the panel). The same effect adds a scroll offset through `margin-top`, which is
-    deliberately *not* transitioned so the lane tracks the scroll frame for frame, keeping the
-    tabs on screen in a workspace taller than the viewport. Both are DOM writes for the same
-    reason as the rail: a scroll- or resize-per-frame `setState` re-renders the whole
-    workspace. A `ResizeObserver` re-runs it when an open panel grows. Adding a drawer is an
-    id in `DRAWER_IDS`, a wrapper spread with `drawerProps(id)`, a panel ref from
-    `registerDrawerPanel(id)`, and a `.side-drawer-tab`.
+  and reviewed in the Income section. Notion save still covers expenses only.
+- Income and Expense chat are **their own nav sections** (`section === "income"` /
+  `"chat"`), so both are ordinary panels that own the content area while they are open.
+  They used to be drawers parked off the right edge of the review table behind vertical
+  tabs; that is gone, along with `data-hold`, `DRAWER_IDS`, the measured tab lane and the
+  `pointer-events` juggling it needed. A panel no longer slides over the table on cursor
+  drift, and on a phone both are a tap on the bottom bar instead of a tab off-screen.
   - Expense chat can also *propose row edits*. `/api/expense-chat` loads every
     filed month itself (`listStoredMonthDocuments`), so a question sees the
     whole ledger, not just the rows on screen; the request carries only the
