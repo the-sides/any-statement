@@ -199,6 +199,22 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
 ## Current Behavior
 
 - `/` renders the upload/review/save workspace, scoped to one month at a time.
+- `/documents` is the document manager: every uploaded statement with the rows it produced,
+  its totals, and the months it covers. It is read-only - the review table on `/` owns the
+  optimistic write path and the undo history - so a month chip links to `/?month=<YYYY-MM>`
+  instead of editing in place. The header's `FileStack` button (beside `Extract`) is the way
+  in, and the page's back arrow the way out.
+  - A multi-month export is *folded back into one card*. Filing splits it into one statement
+    per month with id `<id>-<YYYY-MM>` (see `planStatementFiling`), which is storage, not
+    what the reviewer uploaded; `documentIdOf` strips that suffix, but only when it names the
+    month the segment was filed into, so an id merely ending in digits is left alone. A card
+    with several segments also lists a per-month table (period, rows, spend, income) and says
+    how many months it was split across.
+  - Expanding a card lists that document's expense rows and, when it has any, its income
+    rows. Totals are gross, net (gross minus reimbursements), and income.
+  - `/?month=<YYYY-MM>` is honoured by `lib/monthsClientStore.ts` `initialize()`, which opens
+    that month instead of the most recent one. An unfiled month in the link is ignored rather
+    than opening a blank workspace.
 - `.app-header` is a three-column grid (`1fr auto 1fr`): the brand lockup left, the month
   stepper (`.header-month`) centred on the page rather than on the leftover space, and the
   upload (file picker + `Extract`) plus the theme toggle right. The month selector floats
@@ -502,6 +518,12 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
 - `components/AllMonthsView.tsx` - the All view: fetches `/api/months/overview` and renders
   either one Sankey card per month (`Compare`) or one Sankey for a whole calendar year
   (`Year`), plus the read-only transactions table and its category filter.
+- `components/DocumentManager.tsx` - the `/documents` page: fetches `/api/documents` and
+  renders one expandable card per uploaded statement (`app/documents/page.tsx` mounts it).
+- `lib/documents.ts` - the pure fold behind it: `listLedgerDocuments` groups every filed
+  statement segment back into the file it came from, with per-segment and per-document
+  totals, and `documentIdOf` is the split-suffix rule; `lib/documents.test.ts` covers both.
+  `app/api/documents/route.ts` serves it.
 - `lib/allMonths.ts` - per-month cash flow summaries, per-year rollups (`summarizeYears`),
   the flattened transaction list (`listTransactions`), and cross-month totals;
   `lib/allMonths.test.ts` covers it. `app/api/months/overview/route.ts` serves it.
@@ -513,7 +535,8 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   `components/ThemeToggle.tsx` is the segmented light/dark/system control.
 - `lib/months.ts` - month determination, filing, reassignment, listing, and legacy draft
   migration as pure transforms; `lib/months.test.ts` covers it.
-- `lib/monthsClientStore.ts` - client-side month store: load, debounced writes, unload flush.
+- `lib/monthsClientStore.ts` - client-side month store: load, debounced writes, unload flush,
+  and the `?month=` deep link the document manager uses.
 - `lib/monthStore.ts` - server-side month document persistence in Postgres.
 - `lib/db.ts` - lazy Neon client (no Proxy wrapper) plus numeric/text column coercion.
 - `lib/migrations/*.sql` - schema history, applied in filename order and tracked in

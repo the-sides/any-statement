@@ -2487,3 +2487,207 @@ meter {
 .header-month { position: relative; z-index: 30; translate: 0 var(--month-float-offset, 0px); }
 .header-month[data-floating="true"] { background: var(--panel-glass-strong); backdrop-filter: blur(16px); }
 @media (max-width: 680px) { .header-month-anchor { justify-self: stretch; } }
+
+/* Document manager (`/documents`). It reuses the workspace frame, but nothing
+   parks in a right-hand drawer lane here, so the padding stays even and the
+   card list is the only thing inside. */
+.docs-shell {
+  padding-bottom: 28px;
+}
+
+.docs-header {
+  grid-template-columns: 1fr auto;
+}
+
+.docs-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.docs-back {
+  text-decoration: none;
+}
+
+.docs-workspace {
+  overflow: visible;
+  padding: 14px;
+}
+
+.docs-stats {
+  grid-template-columns: repeat(5, minmax(88px, 1fr));
+}
+
+.docs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.docs-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 4px 12px 10px;
+}
+
+/* The whole top row is the expand control: a small chevron-only hit area on a
+   row this wide is a miss most of the time. */
+.docs-card-top {
+  display: grid;
+  width: 100%;
+  align-items: center;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto 20px;
+  gap: 12px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  padding: 10px 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.docs-card-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.docs-card-title {
+  min-width: 0;
+}
+
+.docs-card-title strong {
+  display: block;
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docs-card-title small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.docs-card-period {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.docs-card-figure {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.docs-card-figure em {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.docs-card-figure strong {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.docs-card-figure .net-amount {
+  display: block;
+}
+
+.docs-card-chevron {
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.docs-card-chevron.open {
+  transform: rotate(180deg);
+}
+
+.docs-card-months {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+}
+
+/* Month chips are links here, so the global anchor colour would fight the
+   chip's own surface. */
+.docs-card-months a.statement-chip,
+.docs-card-body a.statement-chip {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.docs-split-note {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.docs-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.docs-table .eyebrow {
+  margin-bottom: 6px;
+}
+
+.docs-table .table-frame {
+  max-height: 420px;
+}
+
+/* The review table is 1600px wide by default; these projections have six
+   columns, so they fit a page instead of forcing a horizontal scroll. */
+.docs-table table {
+  min-width: 720px;
+}
+
+@media (max-width: 860px) {
+  .docs-card-top {
+    grid-template-columns: 34px minmax(0, 1fr) 20px;
+    row-gap: 6px;
+  }
+
+  .docs-card-period,
+  .docs-card-figure {
+    grid-column: 2;
+    text-align: left;
+  }
+}
+
+/* Dates, months, and amounts read as columns of figures, so they never wrap;
+   the frame scrolls sideways instead. Descriptions are the only free text. */
+.docs-table th,
+.docs-table td {
+  white-space: nowrap;
+}
+
+.docs-table td.docs-cell-text {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

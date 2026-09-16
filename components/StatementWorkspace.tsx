@@ -10,6 +10,7 @@ import {
   ChevronRight,
   ChevronUp,
   Database,
+  FileStack,
   FileText,
   Layers,
   ListChecks,
@@ -38,6 +39,7 @@ import {
   ZoomIn,
   ZoomOut
 } from "lucide-react";
+import Link from "next/link";
 import {
   useEffect,
   useMemo,
@@ -2568,6 +2570,14 @@ export function StatementWorkspace() {
             )}
             Extract
           </button>
+          <Link
+            className="mini-icon-button header-documents"
+            href="/documents"
+            title="Statement documents"
+            aria-label="Statement documents"
+          >
+            <FileStack size={16} {...hydrationSafeIconProps} />
+          </Link>
           <ThemeToggle />
         </div>
       </header>

@@ -354,7 +354,8 @@ async function initialize() {
   try {
     const migration = await migrateLegacyReviewDraft();
     const months = await fetchMonthSummaries();
-    const activeMonth = months[months.length - 1]?.month || "";
+    const activeMonth =
+      requestedMonth(months) || months[months.length - 1]?.month || "";
     const document = activeMonth ? await fetchMonthDocument(activeMonth) : null;
 
     setState({
@@ -370,6 +371,23 @@ async function initialize() {
       error: errorMessage(error, "Loading months failed.")
     });
   }
+}
+
+/**
+ * `/?month=YYYY-MM` opens that month instead of the most recent one, which is
+ * how the document manager hands a month back to the workspace. Ignored unless
+ * the month is actually filed, so a stale link still lands somewhere real.
+ */
+function requestedMonth(months: readonly MonthSummary[]) {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const requested = new URLSearchParams(window.location.search).get("month");
+
+  return requested && months.some((entry) => entry.month === requested)
+    ? requested
+    : "";
 }
 
 async function migrateLegacyReviewDraft(): Promise<MonthsMigration | null> {
