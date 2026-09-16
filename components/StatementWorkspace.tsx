@@ -20,8 +20,6 @@ import {
   NotebookPen,
   PanelLeft,
   Pencil,
-  Pin,
-  PinOff,
   Plug,
   Plus,
   RefreshCw,
@@ -240,73 +238,70 @@ type PendingUpload = {
 };
 
 /**
- * The controls rail is hidden until the pointer nears the left edge: it fades in
- * from `RAIL_FADE_DISTANCE_PX` and is fully out by `RAIL_OPEN_DISTANCE_PX`.
- * Pinning bypasses the whole ramp.
+ * The controls rail is an explicit surface with one state, and the state is
+ * the user's: it survives a reload and follows them across tabs.
  */
-const RAIL_FADE_DISTANCE_PX = 20;
-const RAIL_OPEN_DISTANCE_PX = 12;
-const RAIL_PIN_STORAGE_KEY = "statement-ledger:rail-pinned";
-const RAIL_PIN_STORAGE_EVENT = "statement-ledger:rail-pinned-change";
+const RAIL_OPEN_STORAGE_KEY = "statement-ledger:rail-open";
+const RAIL_OPEN_STORAGE_EVENT = "statement-ledger:rail-open-change";
 
 /**
  * Cached so `getSnapshot` is cheap and stable, and so a browser that refuses
- * localStorage still honours the pin for the session.
+ * localStorage still honours the toggle for the session.
  */
-let railPinnedCache: boolean | null = null;
+let railOpenCache: boolean | null = null;
 
-function subscribeToRailPinPreference(onStoreChange: () => void) {
+function subscribeToRailOpenPreference(onStoreChange: () => void) {
   if (typeof window === "undefined") {
     return () => {};
   }
 
   const onStorage = (event: StorageEvent) => {
-    if (event.key === RAIL_PIN_STORAGE_KEY) {
-      railPinnedCache = null;
+    if (event.key === RAIL_OPEN_STORAGE_KEY) {
+      railOpenCache = null;
       onStoreChange();
     }
   };
 
   window.addEventListener("storage", onStorage);
-  window.addEventListener(RAIL_PIN_STORAGE_EVENT, onStoreChange);
+  window.addEventListener(RAIL_OPEN_STORAGE_EVENT, onStoreChange);
 
   return () => {
     window.removeEventListener("storage", onStorage);
-    window.removeEventListener(RAIL_PIN_STORAGE_EVENT, onStoreChange);
+    window.removeEventListener(RAIL_OPEN_STORAGE_EVENT, onStoreChange);
   };
 }
 
-function readRailPinPreference() {
+function readRailOpenPreference() {
   if (typeof window === "undefined") {
     return false;
   }
 
-  if (railPinnedCache === null) {
+  if (railOpenCache === null) {
     try {
-      railPinnedCache =
-        window.localStorage.getItem(RAIL_PIN_STORAGE_KEY) === "1";
+      railOpenCache =
+        window.localStorage.getItem(RAIL_OPEN_STORAGE_KEY) === "1";
     } catch {
-      railPinnedCache = false;
+      railOpenCache = false;
     }
   }
 
-  return railPinnedCache;
+  return railOpenCache;
 }
 
-function writeRailPinPreference(value: boolean) {
-  railPinnedCache = value;
+function writeRailOpenPreference(value: boolean) {
+  railOpenCache = value;
 
   try {
     if (value) {
-      window.localStorage.setItem(RAIL_PIN_STORAGE_KEY, "1");
+      window.localStorage.setItem(RAIL_OPEN_STORAGE_KEY, "1");
     } else {
-      window.localStorage.removeItem(RAIL_PIN_STORAGE_KEY);
+      window.localStorage.removeItem(RAIL_OPEN_STORAGE_KEY);
     }
   } catch {
-    // Non-fatal: the pin just does not survive a reload.
+    // Non-fatal: the rail just does not survive a reload.
   }
 
-  window.dispatchEvent(new Event(RAIL_PIN_STORAGE_EVENT));
+  window.dispatchEvent(new Event(RAIL_OPEN_STORAGE_EVENT));
 }
 
 type ExtractionOutcome = {
@@ -369,17 +364,12 @@ const hydrationSafeIconProps = {
 // panel never covers a tab. Adding a drawer is: an id here, a wrapper with
 // `registerDrawer`, and a tab.
 type DrawerId = "income" | "chat";
-type DrawerHold = "none" | "temporary" | "pinned";
 const DRAWER_IDS: readonly DrawerId[] = ["income", "chat"];
 const DRAWER_TAB_HEIGHT_PX = 132;
 const DRAWER_STACK_GAP_PX = 16;
 // Gap kept between the viewport top and the lane once the page has scrolled
 // past the top of the workspace.
 const DRAWER_LANE_MARGIN_PX = 16;
-const CLOSED_DRAWER_HOLDS: Record<DrawerId, DrawerHold> = {
-  income: "none",
-  chat: "none"
-};
 
 type SortKey =
   | "statement"
@@ -650,17 +640,11 @@ function ExpenseChatEditList(props: {
 
 export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
   const [files, setFiles] = useState<File[]>([]);
-  const railRef = useRef<HTMLElement | null>(null);
-  // Both right-edge drawers (Income, Expense chat) reveal on hover. A click
-  // inside one takes a `temporary` hold: it survives mouse-leave but an
-  // outside click drops it. The pin button takes a `pinned` hold, which
-  // survives outside clicks too and is only released by clicking it again.
-  // Hover and focus are React state rather than CSS because the tab lane
-  // layout below has to know which drawers are open, not just paint them.
-  const [drawerHolds, setDrawerHolds] =
-    useState<Record<DrawerId, DrawerHold>>(CLOSED_DRAWER_HOLDS);
-  const [hoveredDrawer, setHoveredDrawer] = useState<DrawerId | null>(null);
-  const [focusedDrawer, setFocusedDrawer] = useState<DrawerId | null>(null);
+  // Both right-edge drawers (Income, Expense chat) open from their tab, and
+  // only one at a time: they share a vertical lane, so a second open panel
+  // would cover the first one's tab. React state rather than CSS because the
+  // lane layout below has to know which drawer is open, not just paint it.
+  const [openDrawer, setOpenDrawer] = useState<DrawerId | null>(null);
   const drawerRefs = useRef<Record<DrawerId, HTMLDivElement | null>>({
     income: null,
     chat: null
@@ -670,9 +654,9 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
     chat: null
   });
   const workspaceRef = useRef<HTMLElement | null>(null);
-  const railPinned = useSyncExternalStore(
-    subscribeToRailPinPreference,
-    readRailPinPreference,
+  const railOpen = useSyncExternalStore(
+    subscribeToRailOpenPreference,
+    readRailOpenPreference,
     () => false
   );
   // The connection lives on the server, per user. The token is never sent back
@@ -681,34 +665,6 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
     useState<NotionConnectionStatus>(EMPTY_NOTION_CONNECTION);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [dataSourceId, setDataSourceId] = useState("");
-  const monthAnchorRef = useRef<HTMLDivElement>(null);
-  const floatingMonthRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    let frame = 0;
-    function update() {
-      frame = 0;
-      const anchor = monthAnchorRef.current;
-      const control = floatingMonthRef.current;
-      if (!anchor || !control) return;
-      const offset = Math.max(0, 12 - anchor.getBoundingClientRect().top);
-      control.style.setProperty("--month-float-offset", `${offset}px`);
-      control.dataset.floating = String(offset > 0);
-    }
-    function schedule() {
-      if (!frame) frame = requestAnimationFrame(update);
-    }
-    const observer = new ResizeObserver(schedule);
-    if (monthAnchorRef.current) observer.observe(monthAnchorRef.current);
-    window.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", schedule);
-    update();
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      window.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
-    };
-  }, []);
   const [categoryDataSourceId, setCategoryDataSourceId] = useState("");
   const [notionBusy, setNotionBusy] = useState(false);
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
@@ -908,163 +864,31 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
     (settingsError ? { tone: "error" as const, message: settingsError } : null) ||
     notice;
 
-  // Pointer proximity drives the rail directly through a CSS variable instead
-  // of React state: a mousemove-per-frame re-render of this component would be
-  // visible jank, and nothing else needs to know where the cursor is.
+  // One Escape handler for both dismissible surfaces: a drawer sits over the
+  // workspace, so it unwinds before the rail behind it.
   useEffect(() => {
-    const rail = railRef.current;
-
-    if (!rail || railPinned) {
+    if (!openDrawer && !railOpen) {
       return;
     }
 
-    let frame = 0;
-    let pointerX = Number.POSITIVE_INFINITY;
-    // Once the rail is fully out it takes pointer events, so hover and focus
-    // hold it open even where the cursor sits past the fade distance.
-    let hovering = false;
-    let focused = false;
-
-    function apply() {
-      frame = 0;
-
-      const reveal =
-        hovering || focused
-          ? 1
-          : pointerX <= RAIL_OPEN_DISTANCE_PX
-            ? 1
-            : pointerX >= RAIL_FADE_DISTANCE_PX
-              ? 0
-              : (RAIL_FADE_DISTANCE_PX - pointerX) /
-                (RAIL_FADE_DISTANCE_PX - RAIL_OPEN_DISTANCE_PX);
-
-      const target = railRef.current;
-
-      if (!target) {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") {
         return;
       }
 
-      target.style.setProperty("--rail-reveal", reveal.toFixed(3));
-      target.dataset.railOpen = reveal >= 1 ? "true" : "false";
-    }
-
-    function schedule() {
-      if (!frame) {
-        frame = window.requestAnimationFrame(apply);
+      if (openDrawer) {
+        setOpenDrawer(null);
+      } else {
+        writeRailOpenPreference(false);
       }
     }
 
-    function onPointerMove(event: MouseEvent) {
-      pointerX = event.clientX;
-      schedule();
-    }
-
-    function onPointerLeaveWindow() {
-      pointerX = Number.POSITIVE_INFINITY;
-      schedule();
-    }
-
-    function onRailEnter() {
-      hovering = true;
-      schedule();
-    }
-
-    function onRailLeave() {
-      hovering = false;
-      schedule();
-    }
-
-    function onRailFocusIn() {
-      focused = true;
-      schedule();
-    }
-
-    function onRailFocusOut() {
-      focused = false;
-      schedule();
-    }
-
-    window.addEventListener("mousemove", onPointerMove);
-    document.addEventListener("mouseleave", onPointerLeaveWindow);
-    rail.addEventListener("mouseenter", onRailEnter);
-    rail.addEventListener("mouseleave", onRailLeave);
-    rail.addEventListener("focusin", onRailFocusIn);
-    rail.addEventListener("focusout", onRailFocusOut);
-    apply();
+    document.addEventListener("keydown", onKeyDown);
 
     return () => {
-      window.removeEventListener("mousemove", onPointerMove);
-      document.removeEventListener("mouseleave", onPointerLeaveWindow);
-      rail.removeEventListener("mouseenter", onRailEnter);
-      rail.removeEventListener("mouseleave", onRailLeave);
-      rail.removeEventListener("focusin", onRailFocusIn);
-      rail.removeEventListener("focusout", onRailFocusOut);
-
-      if (frame) {
-        window.cancelAnimationFrame(frame);
-      }
-
-      rail.style.removeProperty("--rail-reveal");
-      delete rail.dataset.railOpen;
+      document.removeEventListener("keydown", onKeyDown);
     };
-  }, [railPinned]);
-
-  // One document listener owns both hold transitions, so a click can never
-  // land inside one drawer and outside another without both seeing it.
-  // `mousedown` rather than `click`: a drag that starts inside the drawer and
-  // ends on the table would otherwise read as an outside click.
-  useEffect(() => {
-    function onPointerDown(event: MouseEvent) {
-      const target = event.target as Node | null;
-
-      setDrawerHolds((current) => {
-        let next: Record<DrawerId, DrawerHold> | null = null;
-
-        for (const id of DRAWER_IDS) {
-          const element = drawerRefs.current[id];
-          const inside = Boolean(
-            element && target && element.contains(target)
-          );
-          const hold =
-            inside && current[id] === "none"
-              ? "temporary"
-              : !inside && current[id] === "temporary"
-                ? "none"
-                : current[id];
-
-          if (hold !== current[id]) {
-            next = next || { ...current };
-            next[id] = hold;
-          }
-        }
-
-        return next || current;
-      });
-    }
-
-    document.addEventListener("mousedown", onPointerDown);
-
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, []);
-
-  const drawerOpenState = {
-    income:
-      drawerHolds.income !== "none" ||
-      hoveredDrawer === "income" ||
-      focusedDrawer === "income",
-    chat:
-      drawerHolds.chat !== "none" ||
-      hoveredDrawer === "chat" ||
-      focusedDrawer === "chat"
-  } satisfies Record<DrawerId, boolean>;
-  const drawerOpenRef = useRef(drawerOpenState);
-  drawerOpenRef.current = drawerOpenState;
-  // Primitive dep: the object above is a new identity every render.
-  const drawerOpenKey = DRAWER_IDS.map((id) =>
-    drawerOpenState[id] ? "1" : "0"
-  ).join("");
+  }, [openDrawer, railOpen]);
 
   // Lays the tab lane out top to bottom: a parked drawer occupies one tab, an
   // open one occupies its whole panel, and everything below it starts after
@@ -1077,7 +901,6 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
   // slide instead of jump. A ResizeObserver covers a panel that grows while it
   // is open, e.g. an income row being added.
   useEffect(() => {
-    const open = drawerOpenRef.current;
     let frame = 0;
 
     function layout() {
@@ -1101,7 +924,9 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
       const occupied = DRAWER_IDS.map((id) => {
         const panel = drawerPanelRefs.current[id];
 
-        return open[id] && panel ? panel.offsetHeight : DRAWER_TAB_HEIGHT_PX;
+        return openDrawer === id && panel
+          ? panel.offsetHeight
+          : DRAWER_TAB_HEIGHT_PX;
       });
       const laneHeight =
         occupied.reduce((total, height) => total + height, 0) +
@@ -1176,7 +1001,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
     };
     // `allView` hides the workspace, so every panel measures 0 while it is up;
     // coming back has to lay the lane out again.
-  }, [allView, drawerOpenKey]);
+  }, [allView, openDrawer]);
 
   useEffect(() => {
     let active = true;
@@ -1325,23 +1150,15 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
     }
   }
 
-  // Every drawer wrapper gets the same wiring: identity for the outside-click
-  // handler and the lane layout, plus the hover/focus tracking that decides
-  // whether it counts as open.
+  // Every drawer wrapper gets the same wiring: identity for the lane layout,
+  // plus the open flag the CSS paints from.
   function drawerProps(id: DrawerId) {
     return {
       className: `side-drawer ${id}-drawer`,
-      "data-hold": drawerHolds[id],
-      "data-open": drawerOpenState[id] ? "true" : "false",
+      "data-open": openDrawer === id ? "true" : "false",
       ref: (element: HTMLDivElement | null) => {
         drawerRefs.current[id] = element;
-      },
-      onMouseEnter: () => setHoveredDrawer(id),
-      onMouseLeave: () =>
-        setHoveredDrawer((current) => (current === id ? null : current)),
-      onFocus: () => setFocusedDrawer(id),
-      onBlur: () =>
-        setFocusedDrawer((current) => (current === id ? null : current))
+      }
     };
   }
 
@@ -1349,15 +1166,6 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
     return (element: HTMLElement | null) => {
       drawerPanelRefs.current[id] = element;
     };
-  }
-
-  function toggleDrawerPin(id: DrawerId) {
-    setDrawerHolds((current) => ({
-      ...current,
-      // Unpinning drops the hold outright rather than falling back to
-      // `temporary`, so the drawer collapses as soon as the cursor leaves.
-      [id]: current[id] === "pinned" ? "none" : "pinned"
-    }));
   }
 
   async function extractStatement() {
@@ -2450,16 +2258,16 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
   }
 
   return (
-    <main className="app-shell" data-rail-pinned={railPinned ? "true" : "false"}>
+    <main className="app-shell" data-rail-open={railOpen ? "true" : "false"}>
       <header className="app-header">
         <div className="brand-lockup">
           <button
-            className="mini-icon-button rail-handle"
+            className="icon-button rail-handle"
             type="button"
-            aria-pressed={railPinned}
-            title={railPinned ? "Unpin controls" : "Pin controls open"}
-            aria-label={railPinned ? "Unpin controls" : "Pin controls open"}
-            onClick={() => writeRailPinPreference(!railPinned)}
+            aria-expanded={railOpen}
+            title={railOpen ? "Hide controls" : "Show controls"}
+            aria-label={railOpen ? "Hide controls" : "Show controls"}
+            onClick={() => writeRailOpenPreference(!railOpen)}
           >
             <PanelLeft size={16} {...hydrationSafeIconProps} />
           </button>
@@ -2471,8 +2279,7 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
           <AuthStatus viewer={viewer} />
         </div>
 
-        <div className="header-month-anchor" ref={monthAnchorRef}>
-        <section className="header-month" ref={floatingMonthRef} aria-label="Active month">
+        <section className="header-month" aria-label="Active month">
           <div className="month-stepper">
             <button
               className="mini-icon-button"
@@ -2535,8 +2342,6 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
           </button>
         </section>
 
-        </div>
-
         <div className="header-upload">
           <label className="header-file" htmlFor="statement-upload">
             <Upload size={16} {...hydrationSafeIconProps} />
@@ -2585,29 +2390,23 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
         </div>
       </header>
 
-      {/* Hidden by default: pointer proximity (see the rail effect above) or
-          the pin slides it over the workspace. */}
+      {/* Closed by default; the header handle and this close button are the
+          only way in and out. */}
       <aside
         className="side-rail"
-        ref={railRef}
         aria-label="Statement controls"
-        data-rail-pinned={railPinned ? "true" : "false"}
+        data-open={railOpen ? "true" : "false"}
       >
         <div className="rail-top">
           <p className="eyebrow">Controls</p>
           <button
-            className="mini-icon-button"
+            className="icon-button"
             type="button"
-            aria-pressed={railPinned}
-            title={railPinned ? "Unpin controls" : "Pin controls open"}
-            aria-label={railPinned ? "Unpin controls" : "Pin controls open"}
-            onClick={() => writeRailPinPreference(!railPinned)}
+            title="Hide controls"
+            aria-label="Hide controls"
+            onClick={() => writeRailOpenPreference(false)}
           >
-            {railPinned ? (
-              <Pin size={16} {...hydrationSafeIconProps} />
-            ) : (
-              <PinOff size={16} {...hydrationSafeIconProps} />
-            )}
+            <X size={16} {...hydrationSafeIconProps} />
           </button>
         </div>
 
@@ -3169,9 +2968,8 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
         hidden={allView}
         ref={workspaceRef}
       >
-        {/* Off-screen by default: the drawer parks in the lane at the right of
-            the table and slides over it on hover, on a click-taken temporary
-            hold, or while pinned. */}
+        {/* Parked in the lane at the right of the table; its tab slides the
+            panel over the table and back. */}
         <div {...drawerProps("income")}>
           <section
             className="panel income-panel"
@@ -3193,21 +2991,13 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
                   <Plus size={18} {...hydrationSafeIconProps} />
                 </button>
                 <button
-                  className="icon-button drawer-pin"
+                  className="icon-button"
                   type="button"
-                  title={
-                    drawerHolds.income === "pinned"
-                      ? "Unpin income"
-                      : "Pin income open"
-                  }
-                  aria-pressed={drawerHolds.income === "pinned"}
-                  onClick={() => toggleDrawerPin("income")}
+                  title="Close income"
+                  aria-label="Close income"
+                  onClick={() => setOpenDrawer(null)}
                 >
-                  {drawerHolds.income === "pinned" ? (
-                    <Pin size={16} {...hydrationSafeIconProps} />
-                  ) : (
-                    <PinOff size={16} {...hydrationSafeIconProps} />
-                  )}
+                  <X size={16} {...hydrationSafeIconProps} />
                 </button>
               </div>
             </div>
@@ -3314,10 +3104,20 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
               </table>
             </div>
           </section>
-          <span className="side-drawer-tab">
+          <button
+            className="side-drawer-tab"
+            type="button"
+            aria-expanded={openDrawer === "income"}
+            aria-label="Income"
+            onClick={() =>
+              setOpenDrawer((current) =>
+                current === "income" ? null : "income"
+              )
+            }
+          >
             <Wallet size={14} {...hydrationSafeIconProps} />
             Income
-          </span>
+          </button>
         </div>
         <div className="workspace-top">
           <div>
@@ -3389,21 +3189,13 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
                     : `${items.length} rows`}
                 </span>
                 <button
-                  className="icon-button drawer-pin"
+                  className="icon-button"
                   type="button"
-                  title={
-                    drawerHolds.chat === "pinned"
-                      ? "Unpin expense chat"
-                      : "Pin expense chat open"
-                  }
-                  aria-pressed={drawerHolds.chat === "pinned"}
-                  onClick={() => toggleDrawerPin("chat")}
+                  title="Close expense chat"
+                  aria-label="Close expense chat"
+                  onClick={() => setOpenDrawer(null)}
                 >
-                  {drawerHolds.chat === "pinned" ? (
-                    <Pin size={16} {...hydrationSafeIconProps} />
-                  ) : (
-                    <PinOff size={16} {...hydrationSafeIconProps} />
-                  )}
+                  <X size={16} {...hydrationSafeIconProps} />
                 </button>
               </div>
             </div>
@@ -3489,10 +3281,18 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
               </button>
             </form>
           </section>
-          <span className="side-drawer-tab">
+          <button
+            className="side-drawer-tab"
+            type="button"
+            aria-expanded={openDrawer === "chat"}
+            aria-label="Expense chat"
+            onClick={() =>
+              setOpenDrawer((current) => (current === "chat" ? null : "chat"))
+            }
+          >
             <MessageCircle size={14} {...hydrationSafeIconProps} />
             Chat
-          </span>
+          </button>
         </div>
 
         <section className="cash-flow-panel" aria-label="Cash flow">
@@ -3808,18 +3608,21 @@ export function StatementWorkspace({ viewer }: { viewer: Viewer }) {
                   </td>
                   <td>
                     <div className="amount-cell">
-                      <input
-                        className="amount-input"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.amount}
-                        onChange={(event) =>
-                          updateItem(item.id, {
-                            amount: Number(event.target.value)
-                          })
-                        }
-                      />
+                      <span className="amount-field">
+                        <span aria-hidden="true">$</span>
+                        <input
+                          className="amount-input"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.amount}
+                          onChange={(event) =>
+                            updateItem(item.id, {
+                              amount: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </span>
                       <div
                         className="amount-reimbursed"
                         data-active={item.reimbursedAmount > 0 ? "true" : "false"}

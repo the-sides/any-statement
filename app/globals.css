@@ -1,133 +1,149 @@
 /*
- * Every colour the app paints comes from a token here, and every token is
- * redefined under [data-theme="dark"] below. Adding a raw hex to a rule breaks
- * the dark theme silently, so route new colours through a token instead.
+ * Design system. Three layers, in this order:
+ *   1. tokens   - colour, radius, control height, type. Both themes define the
+ *                 same names, so a rule never needs to know which is active.
+ *   2. base     - element defaults: one font stack, one focus ring, one weight
+ *                 ramp (400 body / 500 emphasis / 600 headings). Nothing here
+ *                 decorates.
+ *   3. patterns - the app's surfaces and controls, built only from layer 1.
+ *
+ * Rules of the system, all of them load-bearing:
+ *   - No raw colour in a rule. A hex outside this block breaks a theme silently.
+ *   - No decorative gradient on a surface. Depth comes from one hairline
+ *     (`--line`) and, for things that float, one shadow. Stacking tinted
+ *     gradients is what made the old UI read as busy.
+ *   - Radii come from `--r-*` and control heights from `--control-h*`, so a
+ *     button, a select and an input placed side by side line up exactly.
+ *   - Weight and size carry hierarchy; colour carries meaning (accent = the one
+ *     action, positive = kept, coral = overspent). Nothing else is tinted.
  */
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --canvas: #f4f6f1;
+  --canvas: #f5f5f7;
   --panel: #ffffff;
-  --panel-glass: rgba(255, 255, 255, 0.76);
   --panel-glass-strong: rgba(255, 255, 255, 0.92);
-  --surface: #fbfcf8;
-  --surface-sunken: #f5f6f2;
-  --surface-header: #f8faf5;
-  --paper: #fffefa;
+  --surface: #ffffff;
+  --surface-sunken: #f5f5f7;
+  --surface-header: #fafafc;
+  --paper: #ffffff;
   --field: #ffffff;
-  --hover: #eef2e9;
-  --halo: rgba(255, 254, 250, 0.9);
+  --hover: rgba(0, 0, 0, 0.05);
+  --halo: rgba(255, 255, 255, 0.92);
 
-  --ink: #171a16;
+  --ink: #1d1d1f;
   --on-ink: #ffffff;
   --on-accent: #ffffff;
-  --muted: #657064;
-  --quiet: #8a9488;
+  --muted: #6e6e73;
+  --quiet: #98989d;
 
-  --line: #d9dfd2;
-  --line-strong: #bdc7b7;
-  --line-mild: rgba(23, 26, 22, 0.12);
-  --line-soft: rgba(23, 26, 22, 0.1);
-  --line-faint: rgba(23, 26, 22, 0.08);
+  --line: rgba(0, 0, 0, 0.1);
+  --line-strong: rgba(0, 0, 0, 0.18);
+  --line-soft: rgba(0, 0, 0, 0.06);
+  --line-faint: rgba(0, 0, 0, 0.04);
 
-  --accent: #167357;
-  --accent-dark: #0d4f3b;
-  --accent-tint: #eff7f1;
-  --accent-line: rgba(22, 115, 87, 0.34);
-  --accent-line-soft: rgba(22, 115, 87, 0.24);
-  --accent-wash: rgba(22, 115, 87, 0.08);
+  --accent: #0071e3;
+  --accent-dark: #0059b8;
+  --accent-tint: rgba(0, 113, 227, 0.08);
+  --accent-line: rgba(0, 113, 227, 0.32);
+  --accent-line-soft: rgba(0, 113, 227, 0.18);
 
-  --cobalt: #2448c7;
-  --cobalt-tint: #eef2ff;
-  --cobalt-line: rgba(36, 72, 199, 0.22);
-  --cobalt-line-soft: rgba(36, 72, 199, 0.16);
-  --cobalt-wash: rgba(36, 72, 199, 0.08);
-  --focus-ring: rgba(36, 72, 199, 0.18);
+  /* Chart hues. One saturation and one lightness band, so no single category
+     shouts louder than the rest. `--cobalt` is spending, `--positive` is kept,
+     `--coral` is overspent; the others only ever separate categories. */
+  --cobalt: #3f6fd8;
+  --cobalt-tint: rgba(63, 111, 216, 0.1);
 
-  --coral: #d45735;
-  --coral-line: rgba(212, 87, 53, 0.26);
-  --coral-wash: rgba(212, 87, 53, 0.12);
-  --teal: #0ca4b8;
-  --teal-line: rgba(12, 164, 184, 0.28);
-  --teal-wash: rgba(12, 164, 184, 0.08);
-  --gold: #f2b705;
-  --gold-wash: rgba(242, 183, 5, 0.12);
-  --magenta: #c51f87;
-  --violet: #7a62c9;
-  --warning: #a44624;
+  --teal: #1b9c9c;
+  --gold: #c98a1f;
+  --magenta: #b8558f;
+  --violet: #7566d4;
+  --coral: #d9553f;
+  --coral-line: rgba(217, 85, 63, 0.28);
 
-  --positive: #2f9e4f;
-  --positive-bg: #edf8ed;
-  --positive-line: rgba(47, 158, 79, 0.22);
-  --success-bg: #e7f5ed;
-  --error-bg: #fff0eb;
+  --positive: #1f9d55;
+  --positive-bg: rgba(31, 157, 85, 0.1);
+  --positive-line: rgba(31, 157, 85, 0.26);
+  --success-bg: rgba(31, 157, 85, 0.1);
+  --error-bg: rgba(217, 85, 63, 0.1);
 
-  --shadow-color: rgba(22, 26, 22, 0.1);
-  --shadow: 0 18px 50px var(--shadow-color);
+  --shadow-color: rgba(0, 0, 0, 0.12);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-2: 0 10px 30px var(--shadow-color);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --canvas: #101310;
-  --panel: #1a1f19;
-  --panel-glass: rgba(31, 37, 30, 0.72);
-  --panel-glass-strong: rgba(31, 37, 30, 0.92);
-  --surface: #1e241d;
-  --surface-sunken: #171c16;
-  --surface-header: #212820;
-  --paper: #171c16;
-  --field: #131813;
-  --hover: #2a3228;
-  --halo: rgba(16, 19, 16, 0.85);
+  --canvas: #121214;
+  --panel: #1c1c1e;
+  --panel-glass-strong: rgba(28, 28, 30, 0.92);
+  --surface: #1c1c1e;
+  --surface-sunken: #17171a;
+  --surface-header: #232326;
+  --paper: #1c1c1e;
+  --field: #232326;
+  --hover: rgba(255, 255, 255, 0.07);
+  --halo: rgba(18, 18, 20, 0.88);
 
-  --ink: #e7ede4;
-  --on-ink: #101310;
-  --on-accent: #06170f;
-  --muted: #a3ada0;
-  --quiet: #7d887b;
+  --ink: #f5f5f7;
+  --on-ink: #17171a;
+  --on-accent: #ffffff;
+  --muted: #a1a1a6;
+  --quiet: #8a8a8f;
 
-  --line: #2e372c;
-  --line-strong: #46523f;
-  --line-mild: rgba(231, 237, 228, 0.14);
-  --line-soft: rgba(231, 237, 228, 0.11);
-  --line-faint: rgba(231, 237, 228, 0.08);
+  --line: rgba(255, 255, 255, 0.12);
+  --line-strong: rgba(255, 255, 255, 0.22);
+  --line-soft: rgba(255, 255, 255, 0.08);
+  --line-faint: rgba(255, 255, 255, 0.05);
 
-  --accent: #35b287;
-  --accent-dark: #7fdcb6;
-  --accent-tint: #17301f;
-  --accent-line: rgba(53, 178, 135, 0.42);
-  --accent-line-soft: rgba(53, 178, 135, 0.3);
-  --accent-wash: rgba(53, 178, 135, 0.12);
+  --accent: #0a84ff;
+  --accent-dark: #3d9bff;
+  --accent-tint: rgba(10, 132, 255, 0.16);
+  --accent-line: rgba(10, 132, 255, 0.42);
+  --accent-line-soft: rgba(10, 132, 255, 0.26);
 
-  --cobalt: #93aaff;
-  --cobalt-tint: #1c2440;
-  --cobalt-line: rgba(147, 170, 255, 0.34);
-  --cobalt-line-soft: rgba(147, 170, 255, 0.24);
-  --cobalt-wash: rgba(147, 170, 255, 0.09);
-  --focus-ring: rgba(147, 170, 255, 0.4);
+  --cobalt: #6e95ff;
+  --cobalt-tint: rgba(110, 149, 255, 0.16);
 
-  --coral: #f08a68;
-  --coral-line: rgba(240, 138, 104, 0.34);
-  --coral-wash: rgba(240, 138, 104, 0.11);
-  --teal: #3fc3d6;
-  --teal-line: rgba(63, 195, 214, 0.34);
-  --teal-wash: rgba(63, 195, 214, 0.1);
-  --gold: #f5c542;
-  --gold-wash: rgba(245, 197, 66, 0.11);
-  --magenta: #e46bb0;
-  --violet: #a795f0;
-  --warning: #f0a184;
+  --teal: #45c8c0;
+  --gold: #e8b45c;
+  --magenta: #dd7fb6;
+  --violet: #9b8cf0;
+  --coral: #ff6f56;
+  --coral-line: rgba(255, 111, 86, 0.34);
 
-  --positive: #4cc46e;
-  --positive-bg: #16301c;
-  --positive-line: rgba(76, 196, 110, 0.32);
-  --success-bg: #16301f;
-  --error-bg: #341c14;
+  --positive: #32d07a;
+  --positive-bg: rgba(50, 208, 122, 0.14);
+  --positive-line: rgba(50, 208, 122, 0.3);
+  --success-bg: rgba(50, 208, 122, 0.14);
+  --error-bg: rgba(255, 111, 86, 0.14);
 
-  --shadow-color: rgba(0, 0, 0, 0.55);
-  --shadow: 0 18px 50px var(--shadow-color);
+  --shadow-color: rgba(0, 0, 0, 0.5);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 12px 36px var(--shadow-color);
+}
+
+/* Theme-independent scales. Shared by every pattern below, which is the whole
+   reason a control from one panel matches a control from another. */
+:root {
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+
+  --control-h: 32px;
+  --control-h-sm: 26px;
+
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+  --gap-4: 16px;
+
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter",
+    "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 * {
@@ -136,10 +152,9 @@
 
 html {
   min-width: 320px;
-  background:
-    linear-gradient(135deg, var(--cobalt-wash), transparent 36%),
-    radial-gradient(circle at 92% 10%, var(--coral-wash), transparent 30%),
-    var(--canvas);
+  /* Flat on purpose: the old stacked cobalt/coral gradients tinted every
+     surface laid over them, so nothing read as a plain sheet of paper. */
+  background: var(--canvas);
 }
 
 html,
@@ -159,11 +174,17 @@ body {
 body {
   margin: 0;
   color: var(--ink);
-  font-family:
-    "Aptos",
-    "Segoe UI Variable",
-    "Helvetica Neue",
-    sans-serif;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 button,
@@ -179,48 +200,65 @@ button {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.64;
+  opacity: 0.4;
+}
+
+/* One focus ring for the whole app, keyboard-only. Individual controls do not
+   get to invent their own. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 a {
-  color: var(--cobalt);
-  font-weight: 700;
+  color: var(--accent);
+  font-weight: 500;
   text-decoration: none;
 }
 
 .app-shell {
-  --rail-width: 340px;
+  --rail-width: 320px;
+  --shell-gutter: 16px;
 
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
+  gap: var(--gap-3);
   min-height: 100vh;
-  padding: 18px;
-  transition: padding-left 0.18s ease;
+  padding: var(--shell-gutter);
+  transition: padding-left 0.2s ease;
 }
 
-/* Pinned, the rail is part of the layout again, so the shell yields the lane
-   it occupies instead of letting it cover the workspace. */
-.app-shell[data-rail-pinned="true"] {
-  padding-left: calc(var(--rail-width) + 18px);
+/* Open, the rail is part of the layout rather than something covering the
+   table, so the shell yields the lane it occupies. */
+.app-shell[data-rail-open="true"] {
+  padding-left: calc(var(--rail-width) + var(--shell-gutter));
 }
 
-/* Three columns so the month stepper is centred on the page itself, not on
-   whatever space the brand lockup and the upload controls leave over. */
+/* One bar, always in the same place: brand left, the month being reviewed in
+   the middle, the actions right. It sticks instead of the month control
+   floating down the page on scroll, which used to drift over the table. The
+   negative margins let the translucent bar run to the window edges while the
+   shell keeps its gutter. */
 .app-header {
   display: grid;
+  position: sticky;
+  top: 0;
+  z-index: 30;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 16px;
-  padding: 0 2px;
+  gap: var(--gap-3);
+  margin:
+    calc(var(--shell-gutter) * -1) calc(var(--shell-gutter) * -1)
+    calc(var(--gap-1) * -1);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-glass-strong);
+  backdrop-filter: saturate(180%) blur(20px);
+  padding: var(--gap-2) var(--shell-gutter);
 }
 
-/* The rail overlays the workspace: it is fixed, full height, and driven by
-   `--rail-reveal` (0 = hidden, 1 = fully out) which the workspace component
-   sets from pointer distance to the left edge. */
+/* The controls rail is a sheet, not a hover surprise: it is closed until the
+   header's panel button opens it, and Escape closes it. */
 .side-rail {
-  --rail-reveal: 0;
-
   display: flex;
   position: fixed;
   top: 0;
@@ -229,31 +267,24 @@ a {
   width: min(var(--rail-width), 92vw);
   height: 100vh;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--gap-3);
   overflow-y: auto;
   border-right: 1px solid var(--line);
   background: var(--panel);
-  box-shadow: var(--shadow);
-  padding: 14px;
-  opacity: var(--rail-reveal);
-  /* Fades and creeps out together, then lands flush once reveal hits 1. */
-  transform: translateX(calc((var(--rail-reveal) - 1) * 88%));
-  transition:
-    transform 0.14s ease-out,
-    opacity 0.14s ease-out;
-  /* Untouchable until fully out, so a half-faded rail never eats clicks meant
+  box-shadow: var(--shadow-2);
+  padding: var(--gap-3);
+  transform: translateX(-100%);
+  transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+  /* Untouchable while closed, so the off-screen sheet never eats clicks meant
      for the table underneath. */
   pointer-events: none;
+  visibility: hidden;
 }
 
-.side-rail[data-rail-open="true"],
-.side-rail[data-rail-pinned="true"] {
-  pointer-events: auto;
-}
-
-.side-rail[data-rail-pinned="true"] {
-  opacity: 1;
+.side-rail[data-open="true"] {
   transform: none;
+  pointer-events: auto;
+  visibility: visible;
 }
 
 .rail-top {
@@ -267,13 +298,6 @@ a {
   margin: 0;
 }
 
-.side-rail[data-rail-pinned="true"] .rail-top .mini-icon-button,
-.app-shell[data-rail-pinned="true"] .rail-handle {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--on-ink);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .app-shell,
   .side-rail {
@@ -281,82 +305,71 @@ a {
   }
 }
 
-.brand-lockup {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 2px 8px;
-}
-
-.brand-mark {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  border: 1px solid var(--ink);
-  border-radius: 6px;
-  background: var(--ink);
-  color: var(--on-ink);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 15px;
-  letter-spacing: 0;
-}
-
-.theme-toggle {
+/* Segmented control, one implementation. Theme, graph type and overview mode
+   are the same interaction, so they are the same object. */
+.theme-toggle,
+.graph-type-control,
+.all-months-modes {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
   border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--panel);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
   padding: 2px;
 }
 
-.theme-toggle button {
-  display: inline-grid;
-  width: 28px;
-  height: 26px;
-  place-items: center;
+.theme-toggle button,
+.graph-type-control button,
+.all-months-modes button {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-1);
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--muted);
+  padding: 0 var(--gap-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.theme-toggle button {
+  width: 26px;
   padding: 0;
 }
 
-.theme-toggle button:hover:not(.active) {
-  background: var(--hover);
+.theme-toggle button:hover:not(.active),
+.graph-type-control button:hover:not(.active),
+.all-months-modes button:hover:not(.active) {
   color: var(--ink);
 }
 
-.theme-toggle button.active {
-  background: var(--ink);
-  color: var(--on-ink);
+.theme-toggle button.active,
+.graph-type-control button.active,
+.all-months-modes button.active {
+  background: var(--panel);
+  box-shadow: var(--shadow-1);
+  color: var(--ink);
 }
 
-/* Whose ledger this is, plus the way in or out of it. It sits in the brand
-   lockup, not the upload lane: `.header-month` is centred on the *page*, so it
-   already runs within ~50px of `.header-upload` and anything added on the right
-   lands underneath it. */
+/* Whose ledger this is, plus the way in or out of it. Borderless: the bar
+   already carries enough outlined controls, and identity is information, not
+   an action. */
 .auth-status {
   display: inline-flex;
-  /* The email gives way before the brand title does: the lockup shares a 1fr
-     column with nothing else, so an unshrinkable chip wrapped `Expense intake`
-     onto two lines at 1440px. No `min-width: 0` here on purpose - the floor is
-     the chip's min-content width, so the shrinking stops at the ellipsized
-     address and never crushes the sign-out button. */
+  /* The email gives way before the brand title does. No `min-width: 0` here
+     on purpose - the floor is the chip's min-content width, so shrinking
+     stops at the ellipsized address and never crushes the sign-out button. */
   flex: 0 1 auto;
   align-items: center;
-  gap: 6px;
+  gap: var(--gap-1);
   margin: 0;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--panel);
   color: var(--muted);
-  padding: 3px 4px 3px 8px;
-  font-size: 11px;
-  font-weight: 800;
+  padding-left: var(--gap-1);
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -372,43 +385,30 @@ a {
   white-space: nowrap;
 }
 
-/* No trailing button in these two states, so the right padding is symmetric. */
-.auth-status[data-status="demo"],
-.auth-status[data-status="signed-out"] {
-  padding-right: 8px;
-}
-
 .auth-status-link {
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.auth-status-link:hover {
-  background: var(--hover);
+  color: var(--accent);
 }
 
 .auth-status-action {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-1);
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   background: transparent;
-  color: var(--ink);
-  padding: 3px 6px;
-  font-size: 11px;
-  font-weight: 800;
+  color: var(--muted);
+  padding: 2px var(--gap-2);
+  font-size: 12px;
 }
 
 .auth-status-action:hover:not(:disabled) {
   background: var(--hover);
+  color: var(--ink);
 }
 
-/* The header's left column is a `1fr` share, so the chip sheds detail in the
-   order it can afford to lose it: the address first, then the button's label,
-   then the title's one-line guarantee. Without this it simply overflowed the
-   column and sat under the upload controls between 800px and 1000px. */
+/* The bar sheds detail in the order it can afford to lose it: the address
+   first, then the button's label. */
 @media (max-width: 1100px) {
   .auth-status[data-status="signed-in"] .auth-status-name {
     display: none;
@@ -421,15 +421,34 @@ a {
   }
 
   .auth-status-action {
-    padding: 3px 4px;
+    padding: 2px var(--gap-1);
   }
+}
+
+.brand-lockup {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--gap-2);
+}
+
+.brand-mark {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .brand-lockup h1,
 .workspace-top h2,
 .panel h2 {
   margin: 0;
-  letter-spacing: 0;
 }
 
 .brand-title {
@@ -438,37 +457,100 @@ a {
   min-width: 0;
 }
 
+/* In a 48px-tall bar the app name is a label, not a headline, and the eyebrow
+   above it only repeated it. */
+.brand-title .eyebrow {
+  display: none;
+}
+
 .brand-lockup h1 {
   overflow: hidden;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 28px;
-  line-height: 1;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.eyebrow {
-  margin: 0 0 4px;
+@media (prefers-reduced-motion: reduce) {
+  .app-shell,
+  .side-rail {
+    transition: none;
+  }
+}
+
+/* Segmented control, one implementation. Theme, graph type and overview mode
+   are the same interaction, so they are the same object. */
+.theme-toggle,
+.graph-type-control,
+.all-months-modes {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  padding: 2px;
+}
+
+.theme-toggle button,
+.graph-type-control button,
+.all-months-modes button {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-1);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
   color: var(--muted);
+  padding: 0 var(--gap-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.theme-toggle button {
+  width: 26px;
+  padding: 0;
+}
+
+.theme-toggle button:hover:not(.active),
+.graph-type-control button:hover:not(.active),
+.all-months-modes button:hover:not(.active) {
+  color: var(--ink);
+}
+
+.theme-toggle button.active,
+.graph-type-control button.active,
+.all-months-modes button.active {
+  background: var(--panel);
+  box-shadow: var(--shadow-1);
+  color: var(--ink);
+}
+
+
+.eyebrow {
+  margin: 0 0 var(--gap-1);
+  color: var(--quiet);
   font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .panel {
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-glass-strong);
-  box-shadow: 0 1px 0 var(--panel-glass) inset;
-  padding: 14px;
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  padding: var(--gap-4);
 }
 
 .panel-heading {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: var(--gap-2);
+  margin-bottom: var(--gap-3);
 }
 
 .panel-heading-split {
@@ -479,53 +561,46 @@ a {
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: 8px;
+  gap: var(--gap-2);
 }
 
+/* A count is a quiet fact, so it is quiet: no box around it. */
 .panel-count {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--muted);
-  padding: 2px 7px;
-  font-size: 11px;
-  font-weight: 900;
+  color: var(--quiet);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .panel h2 {
-  font-size: 15px;
+  font-size: 14px;
 }
 
-/* Simplified upload: one compact picker plus Extract, top right. */
+/* The bar's right lane: file picker, Extract, documents, identity, theme. */
 .header-upload {
   display: flex;
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
   justify-self: end;
-  gap: 8px;
+  gap: var(--gap-2);
 }
 
+/* The picker is a secondary button that happens to be a label. Solid, not
+   dashed: dashed borders read as unfinished and drew the eye off Extract. */
 .header-file {
   display: inline-flex;
-  min-width: 0;
-  max-width: 320px;
-  /* Center, not baseline: the 16px icon and the 11px size text have no shared
-     baseline, so baseline alignment hangs the icon below the filename. */
+  height: var(--control-h);
+  max-width: 260px;
   align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  border: 1px dashed var(--line-strong);
-  border-radius: 6px;
-  background:
-    linear-gradient(90deg, var(--accent-wash), transparent),
-    var(--surface);
-  padding: 0 12px;
-  cursor: pointer;
+  gap: var(--gap-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: 0 var(--gap-3);
 }
 
 .header-file:hover {
-  border-color: var(--accent-line);
+  background: var(--hover);
 }
 
 .header-file svg {
@@ -533,42 +608,40 @@ a {
   color: var(--muted);
 }
 
-.header-file:hover svg {
-  color: var(--accent);
-}
-
 .header-file span,
 .header-file small {
   min-width: 0;
   overflow: hidden;
+  font-size: 12px;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
-  line-height: 1.1;
 }
 
 .header-file span {
-  font-size: 14px;
-  font-weight: 800;
+  color: var(--ink);
+  font-weight: 500;
 }
 
 .header-file small {
   flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
+  color: var(--quiet);
 }
 
+/* Buttons. One height, one radius, one label size; only fill separates the
+   primary from the secondary from the plain. */
 .primary-button,
 .secondary-button {
   display: inline-flex;
+  height: var(--control-h);
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 40px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  font-weight: 800;
+  gap: var(--gap-2);
+  border: 0;
+  border-radius: var(--r-md);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 0 var(--gap-4);
 }
 
 .primary-button {
@@ -581,47 +654,43 @@ a {
 }
 
 .header-extract {
-  width: auto;
   flex: 0 0 auto;
-  padding: 0 16px;
 }
 
 .secondary-button {
-  border-color: var(--ink);
+  border: 1px solid var(--line);
   background: var(--panel);
   color: var(--ink);
 }
 
 .secondary-button:hover:not(:disabled),
-.icon-button:hover {
+.icon-button:hover,
+.mini-icon-button:hover {
   background: var(--hover);
 }
 
 .field {
   display: grid;
-  gap: 6px;
-  margin-top: 10px;
+  gap: var(--gap-1);
+  margin-top: var(--gap-2);
 }
 
 .field span {
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 12px;
 }
 
 .field-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: var(--gap-2);
 }
 
 .panel-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0 10px;
+  gap: var(--gap-2);
+  margin: var(--gap-3) 0 var(--gap-2);
 }
 
 .panel-actions .secondary-button {
@@ -630,8 +699,8 @@ a {
 
 .category-panel-actions {
   display: flex;
-  gap: 8px;
-  margin: 0 0 10px;
+  gap: var(--gap-2);
+  margin: 0 0 var(--gap-2);
 }
 
 .category-panel-actions .secondary-button {
@@ -641,23 +710,23 @@ a {
 
 .category-form {
   display: grid;
-  gap: 6px;
-  margin-bottom: 10px;
-  border: 1px solid var(--accent-line);
-  border-radius: 6px;
-  background: var(--surface);
-  padding: 9px;
+  gap: var(--gap-2);
+  margin-bottom: var(--gap-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  padding: var(--gap-2);
 }
 
 .category-form input {
-  min-height: 32px;
+  min-height: var(--control-h);
   font-size: 13px;
 }
 
 .category-form-actions {
   display: flex;
-  gap: 8px;
   align-items: center;
+  gap: var(--gap-2);
 }
 
 .category-form-actions .secondary-button {
@@ -668,14 +737,14 @@ a {
 .category-source-toggle {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
-  gap: 8px;
   align-items: center;
+  gap: var(--gap-2);
   min-height: 44px;
-  margin-bottom: 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
+  margin-bottom: var(--gap-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
   background: var(--surface-sunken);
-  padding: 9px 10px;
+  padding: var(--gap-2) var(--gap-3);
   color: var(--quiet);
 }
 
@@ -702,13 +771,14 @@ a {
   min-width: 0;
   overflow-wrap: anywhere;
   font-size: 13px;
+  font-weight: 500;
 }
 
 .category-source-copy small {
   min-width: 0;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 400;
   line-height: 1.25;
 }
 
@@ -723,13 +793,13 @@ a {
 .category-toggle {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
   align-items: start;
+  gap: var(--gap-2);
   min-height: 38px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--surface-sunken);
-  padding: 8px;
+  padding: var(--gap-2);
   color: var(--quiet);
 }
 
@@ -781,22 +851,41 @@ a {
 .category-toggle small {
   flex: 0 0 auto;
   color: var(--quiet);
-  font-size: 10px;
-  font-weight: 900;
+  font-size: 11px;
+  font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
+/* Inputs and selects are the same object everywhere: 32px, one radius, the
+   field surface. Inside a table cell they hide their box until hover or focus,
+   so a column of rows reads as text first and a form only on interaction. */
 input,
 select,
 textarea {
   width: 100%;
-  min-height: 36px;
+  height: var(--control-h);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--field);
   color: var(--ink);
-  padding: 7px 9px;
+  padding: 0 var(--gap-2);
+}
+
+textarea {
+  height: auto;
+  padding: var(--gap-2);
+}
+
+/* Checkboxes are not text fields: the shared sizing above would blow them up
+   to a 32px full-width block. */
+input[type="checkbox"],
+input[type="radio"] {
+  width: 15px;
+  height: 15px;
+  border: 0;
+  padding: 0;
+  accent-color: var(--accent);
 }
 
 /*
@@ -814,10 +903,10 @@ select optgroup {
 input:focus,
 select:focus,
 textarea:focus,
-button:focus-visible,
 .header-file:focus-within {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: transparent;
 }
 
 .note-textarea {
@@ -829,30 +918,31 @@ button:focus-visible,
 .note-meta {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
-  margin-top: 7px;
-  color: var(--muted);
+  gap: var(--gap-2);
+  margin-top: var(--gap-1);
+  color: var(--quiet);
   font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
 }
 
+/* One surface for the working area. The right padding is the lane the parked
+   income drawer's tab sits in; the left edge belongs to the rail's lane.
+   `clip`, not `hidden`: the parked drawers are absolutely positioned past the
+   right edge, so with `hidden` they extend the scrollable area and any
+   `scrollIntoView` inside the workspace slid a parked panel into view. `clip`
+   hides them without making this a scroll container - the table and the graph
+   own their own scrollers. */
 .workspace {
   display: flex;
   position: relative;
   min-width: 0;
   flex-direction: column;
-  gap: 12px;
-  /* The parked income drawer hangs off the right edge; clipping here is what
-     keeps it hidden, and the wide right padding is the lane its tab sits in.
-     It lives on the right because the left edge now belongs to the controls
-     rail, which would slide over the tab before it could be reached. */
-  overflow: hidden;
-  border: 1px solid var(--line-mild);
-  border-radius: 8px;
-  background: var(--panel-glass);
-  box-shadow: var(--shadow);
-  padding: 14px 46px 14px 14px;
+  gap: var(--gap-3);
+  overflow: clip;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  padding: var(--gap-4) 46px var(--gap-4) var(--gap-4);
 }
 
 /* `display: flex` above beats the UA `[hidden]` rule, so the all-months view
@@ -865,18 +955,18 @@ button:focus-visible,
    parks in its right lane, so it keeps an even padding. */
 .all-months {
   overflow: visible;
-  padding: 14px;
+  padding: var(--gap-4);
 }
 
 .all-months-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  border: 1px solid var(--line-mild);
-  border-radius: 8px;
-  background: var(--surface);
-  padding: 8px 10px;
+  gap: var(--gap-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  padding: var(--gap-2) var(--gap-3);
 }
 
 .all-months-toolbar p {
@@ -896,7 +986,7 @@ button:focus-visible,
 .all-months-modes {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--gap-3);
   min-width: 0;
 }
 
@@ -913,12 +1003,9 @@ button:focus-visible,
   position: relative;
   min-height: 360px;
   overflow: auto;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, var(--teal-wash), transparent 24%),
-    linear-gradient(270deg, var(--gold-wash), transparent 34%),
-    var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
 }
 
 /* The rows behind the graphs. The review table's global `table` rules assume
@@ -943,7 +1030,7 @@ button:focus-visible,
   margin: 0;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .all-months-transactions .table-frame {
@@ -1020,8 +1107,8 @@ button:focus-visible,
   border: none;
   background: none;
   padding: 0 2px;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--muted);
   text-align: left;
   cursor: pointer;
@@ -1042,7 +1129,7 @@ button:focus-visible,
   flex: 1 1 auto;
   overflow: hidden;
   border: 1px solid var(--line-soft);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--paper);
 }
 
@@ -1054,66 +1141,73 @@ button:focus-visible,
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--gap-4);
 }
 
 .workspace-top h2 {
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 30px;
-  line-height: 1.05;
+  font-size: 22px;
+  line-height: 1.1;
 }
 
+/* Six tracks, because the month view has six stats; `.all-months-stats` and
+   `.docs-stats` override the count for their own views. Not `auto-fit`: this
+   is a flex item with no definite width, so an `auto-fit` track collapses to
+   one column and stacks the stats vertically. */
 .stats-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(92px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(6, minmax(84px, auto));
+  flex: 0 1 auto;
+  gap: var(--gap-2);
 }
 
 .stat {
   min-width: 92px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: var(--gap-2) var(--gap-3);
 }
 
 .stat span {
   display: block;
-  color: var(--muted);
+  color: var(--quiet);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 500;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .stat strong {
   display: block;
-  margin-top: 4px;
-  font-size: 17px;
+  margin-top: 2px;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .notice {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--gap-2);
   min-height: 38px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  padding: var(--gap-2) var(--gap-3);
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .notice.success {
-  border-color: var(--accent-line-soft);
+  border-color: var(--positive-line);
   background: var(--success-bg);
-  color: var(--accent-dark);
+  color: var(--positive);
 }
 
 .notice.error {
   border-color: var(--coral-line);
   background: var(--error-bg);
-  color: var(--warning);
+  color: var(--coral);
 }
 
 .notice span {
@@ -1121,81 +1215,79 @@ button:focus-visible,
   overflow-wrap: anywhere;
 }
 
+/* A panel like any other. The old cobalt/teal gradient tinted the chat before
+   the user had written anything, and tint on tint fought every message in it. */
 .expense-chat-panel {
   display: grid;
-  gap: 10px;
+  gap: var(--gap-2);
   overflow: hidden;
-  border: 1px solid var(--focus-ring);
-  border-radius: 8px;
-  background:
-    linear-gradient(110deg, var(--cobalt-wash), transparent 44%),
-    linear-gradient(290deg, var(--teal-wash), transparent 38%),
-    var(--surface);
-  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  padding: var(--gap-3);
 }
 
 .expense-chat-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--gap-3);
 }
 
 .expense-chat-heading h3 {
   margin: 0;
-  font-size: 16px;
-  letter-spacing: 0;
+  font-size: 14px;
 }
 
 .expense-chat-log {
   display: grid;
   max-height: 286px;
   overflow: auto;
-  gap: 8px;
-  border: 1px solid var(--line-faint);
-  border-radius: 8px;
-  background: var(--panel-glass);
-  padding: 10px;
+  gap: var(--gap-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  padding: var(--gap-2);
 }
 
 .expense-chat-suggestions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--gap-2);
 }
 
 .expense-chat-suggestion {
-  min-height: 34px;
-  border: 1px solid var(--cobalt-line);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--cobalt);
-  padding: 6px 10px;
-  font-size: 13px;
-  font-weight: 900;
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--accent);
+  padding: 0 var(--gap-3);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .expense-chat-suggestion:hover:not(:disabled) {
-  background: var(--cobalt-tint);
+  background: var(--accent-tint);
 }
 
 .expense-chat-message {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 26px minmax(0, 1fr);
   align-items: start;
+  gap: var(--gap-2);
 }
 
 .expense-chat-message p {
   min-width: 0;
   margin: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--panel);
-  padding: 9px 10px;
+  padding: var(--gap-2) var(--gap-3);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
@@ -1204,70 +1296,62 @@ button:focus-visible,
   background: var(--accent-tint);
 }
 
-.expense-chat-message.assistant p {
-  border-color: var(--cobalt-line-soft);
-}
-
 .expense-chat-avatar {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--accent-dark);
-}
-
-.expense-chat-message.assistant .expense-chat-avatar {
-  color: var(--cobalt);
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-size: 11px;
 }
 
 .expense-chat-edits {
   grid-column: 2;
   display: grid;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--gap-2);
+  margin-top: var(--gap-2);
 }
 
 .expense-chat-edits-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--gap-2);
   font-size: 12px;
   color: var(--muted);
 }
 
 .expense-chat-edits-bulk {
   display: inline-flex;
-  gap: 6px;
+  gap: var(--gap-1);
 }
 
 .expense-chat-edit {
   display: grid;
-  gap: 4px;
+  gap: var(--gap-1);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--panel);
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: var(--gap-2) var(--gap-3);
+  font-size: 12px;
 }
 
 .expense-chat-edit.is-applied {
-  border-color: var(--accent-line-soft);
-  opacity: 0.75;
+  opacity: 0.6;
 }
 
 .expense-chat-edit.is-dismissed {
-  opacity: 0.5;
+  opacity: 0.45;
 }
 
 .expense-chat-edit-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--gap-2);
 }
 
 .expense-chat-edit-target {
@@ -1275,63 +1359,65 @@ button:focus-visible,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .expense-chat-edit-actions {
   display: inline-flex;
   flex-shrink: 0;
-  gap: 6px;
+  gap: var(--gap-1);
 }
 
 .expense-chat-edit-actions button,
 .expense-chat-edits-bulk button {
   display: inline-flex;
+  height: var(--control-h-sm);
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-1);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--panel);
-  color: var(--text);
-  padding: 3px 8px;
+  color: var(--ink);
+  padding: 0 var(--gap-2);
   font-size: 12px;
-  cursor: pointer;
+  font-weight: 500;
 }
 
 .expense-chat-edit-actions button:hover:not(:disabled),
 .expense-chat-edits-bulk button:hover:not(:disabled) {
-  border-color: var(--accent-line-soft);
+  background: var(--hover);
 }
 
 .expense-chat-edit-approve {
-  color: var(--accent-dark);
+  color: var(--accent);
 }
 
 .expense-chat-edit-state {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
 }
 
 .expense-chat-edit-change {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--gap-2);
   min-width: 0;
 }
 
 .expense-chat-edit-field {
   flex-shrink: 0;
-  font-size: 12px;
-  color: var(--muted);
+  font-size: 11px;
+  color: var(--quiet);
 }
 
 .expense-chat-edit-diff {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--gap-1);
   min-width: 0;
   overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
 }
 
 .expense-chat-edit-diff del {
@@ -1339,8 +1425,8 @@ button:focus-visible,
 }
 
 .expense-chat-edit-diff ins {
-  color: var(--accent-dark);
-  font-weight: 600;
+  color: var(--accent);
+  font-weight: 500;
   text-decoration: none;
 }
 
@@ -1351,46 +1437,46 @@ button:focus-visible,
   line-height: 1.4;
 }
 
- .expense-chat-form {
+.expense-chat-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 40px;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) var(--control-h);
   align-items: center;
+  gap: var(--gap-2);
 }
 
 .expense-chat-form input {
-  min-height: 40px;
+  min-height: var(--control-h);
 }
 
 .expense-chat-send {
-  width: 40px;
-  height: 40px;
+  width: var(--control-h);
+  height: var(--control-h);
 }
 
 .statement-list {
   display: grid;
-  gap: 8px;
+  gap: var(--gap-2);
 }
 
 .statement-empty {
   display: grid;
   min-height: 54px;
   place-items: center;
-  border: 1px dashed var(--line-strong);
-  border-radius: 7px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
   color: var(--muted);
   font-size: 12px;
-  font-weight: 800;
 }
 
 .statement-source {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  align-items: start;
+  gap: var(--gap-2);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  padding: 9px;
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+  padding: var(--gap-2) var(--gap-3);
 }
 
 .statement-source.active {
@@ -1420,46 +1506,43 @@ button:focus-visible,
 
 .statement-source-main strong {
   font-size: 13px;
+  font-weight: 500;
 }
 
 .statement-source-main small,
 .statement-source-main span {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 400;
 }
 
 .statement-source-actions {
   display: flex;
   align-items: flex-start;
-  gap: 5px;
+  gap: var(--gap-1);
 }
 
 .statement-scope-control {
   display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--accent-dark);
-  padding: 0 8px;
-}
-
-.statement-scope-control {
   min-width: 210px;
   max-width: min(320px, 100%);
+  min-height: var(--control-h);
+  align-items: center;
+  gap: var(--gap-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  padding: 0 var(--gap-1);
 }
 
 .statement-scope-control select {
-  min-height: 32px;
+  min-height: var(--control-h);
   border: 0;
   background: transparent;
   color: var(--ink);
   padding: 0 2px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .statement-scope-control select:focus {
@@ -1473,19 +1556,15 @@ button:focus-visible,
 
 /* The income table and the expense chat park off the right edge of the review
    table, showing only the tab that sits in the lane at the right of the
-   transactions, and slide over the transactions when open. They are
-   right-parked because the left edge belongs to the proximity-revealed
-   controls rail, which would slide over a left tab before it could be reached.
+   transactions, and slide over the transactions when opened by clicking that
+   tab. They are right-parked because the left edge belongs to the controls
+   rail's reserved lane.
 
-   StatementWorkspace writes both attributes. `data-open` covers hover, focus
-   and either hold, and is also what the lane layout reads: `top` is set per
-   drawer so an open panel pushes the tabs below it down instead of covering
-   them, and both `top` and `transform` animate. `data-hold` distinguishes
-   `temporary` (a click inside; survives mouse-leave, dropped by the next
-   outside click) from `pinned` (survives outside clicks too).
-
-   An open drawer stacks above the parked ones so a tab sliding out of its way
-   passes behind the panel rather than across it. */
+   StatementWorkspace writes `data-open`. It is also what the lane layout
+   reads: `top` is set per drawer so an open panel pushes the tabs below it
+   down instead of covering them. An open drawer stacks above the parked ones
+   so a tab sliding out of its way passes behind the panel rather than across
+   it. */
 .side-drawer {
   position: absolute;
   top: 0;
@@ -1495,15 +1574,11 @@ button:focus-visible,
   align-items: flex-start;
   /* DOM order is panel then tab; reversing puts the tab on the inward edge. */
   flex-direction: row-reverse;
-  /* A parked drawer's wrapper is as tall as its panel, so its empty column at
-     the right edge would steal hover from a neighbouring open drawer. A parked
-     drawer is therefore a hit target only through its tab; hovering that tab
-     opens the drawer, which hands pointer events back to the whole thing. */
   pointer-events: none;
   transform: translateX(calc(100% - 32px));
   transition:
-    top 0.24s ease,
-    transform 0.24s ease;
+    top 0.24s cubic-bezier(0.32, 0.72, 0, 1),
+    transform 0.24s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .side-drawer-tab,
@@ -1532,53 +1607,40 @@ button:focus-visible,
   max-height: min(68vh, 620px);
   flex: 1;
   overflow: auto;
-  border-radius: 8px 0 0 8px;
-  box-shadow: var(--shadow);
-}
-
-.side-drawer > .income-panel {
-  background: var(--panel);
+  border-radius: var(--r-lg) 0 0 var(--r-lg);
+  box-shadow: var(--shadow-2);
 }
 
 .side-drawer-tab {
   display: flex;
-  width: 32px;
-  min-height: 132px;
+  width: 28px;
+  min-height: 120px;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: var(--gap-1);
   border: 1px solid var(--line);
   border-right: 0;
-  border-radius: 8px 0 0 8px;
-  background: var(--panel);
-  box-shadow: var(--shadow);
+  border-radius: var(--r-lg) 0 0 var(--r-lg);
+  background: var(--surface-sunken);
   color: var(--muted);
-  padding: 8px 0;
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  padding: var(--gap-2) 0;
+  font-size: 12px;
+  font-weight: 500;
   writing-mode: vertical-rl;
 }
 
-.side-drawer[data-open="true"] .side-drawer-tab {
+.side-drawer-tab:hover {
   color: var(--ink);
 }
 
-.side-drawer[data-hold="pinned"] .side-drawer-tab {
-  border-color: var(--accent-line);
-  color: var(--accent);
-}
-
-.drawer-pin[aria-pressed="true"] {
-  border-color: var(--accent-line);
+.side-drawer[data-open="true"] .side-drawer-tab {
   color: var(--accent);
 }
 
 .panel-heading-actions {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--gap-2);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1587,20 +1649,38 @@ button:focus-visible,
   }
 }
 
-.mini-icon-button {
+/* Small square buttons, one shape. Danger only tints the glyph. */
+.icon-button {
   display: inline-grid;
-  width: 28px;
-  height: 28px;
+  width: var(--control-h);
+  height: var(--control-h);
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--panel);
+  color: var(--muted);
+}
+
+.icon-button:hover {
+  background: var(--hover);
   color: var(--ink);
 }
 
-.mini-icon-button:hover {
-  background: var(--hover);
+.icon-button.danger {
+  color: var(--coral);
+}
+
+.mini-icon-button {
+  display: inline-grid;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
 }
 
 .mini-icon-button.danger {
@@ -1610,37 +1690,33 @@ button:focus-visible,
 .cash-flow-panel {
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background:
-    linear-gradient(115deg, var(--teal-wash), transparent 36%),
-    linear-gradient(285deg, var(--gold-wash), transparent 42%),
-    var(--paper);
-  padding: 14px;
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  padding: var(--gap-4);
 }
 
 .cash-flow-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 12px;
+  gap: var(--gap-3);
+  margin-bottom: var(--gap-3);
 }
 
 .cash-flow-heading h3 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 24px;
-  line-height: 1.05;
-  letter-spacing: 0;
+  font-size: 14px;
 }
 
+/* Kept money is a green fact, overspent is a coral fact; the tab is quiet and
+   the number does the talking. */
 .cash-flow-balance {
   min-width: 154px;
   border: 1px solid var(--positive-line);
-  border-left: 8px solid var(--positive);
-  border-radius: 8px;
+  border-left: 3px solid var(--positive);
+  border-radius: var(--r-sm);
   background: var(--positive-bg);
-  padding: 8px 10px;
+  padding: var(--gap-2) var(--gap-3);
   text-align: right;
 }
 
@@ -1653,21 +1729,23 @@ button:focus-visible,
 .cash-flow-balance span {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .cash-flow-balance strong {
   display: block;
-  margin-top: 3px;
-  font-size: 18px;
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .cash-flow-body {
   display: grid;
-  gap: 12px;
   align-items: stretch;
+  gap: var(--gap-3);
 }
 
 .flow-visual {
@@ -1675,18 +1753,13 @@ button:focus-visible,
   display: block;
   min-height: 360px;
   overflow: auto;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, var(--teal-wash), transparent 24%),
-    linear-gradient(270deg, var(--gold-wash), transparent 34%),
-    var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
 }
 
-.flow-visual::before {
-  content: none;
-}
-
+/* The graph's own toolbar: what kind of graph, and how far zoomed. Sticky so
+   it stays reachable while the chart is scrolled. */
 .flow-visual-toolbar {
   position: sticky;
   top: 0;
@@ -1694,68 +1767,38 @@ button:focus-visible,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
   flex-wrap: wrap;
-  padding: 8px;
-  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-glass) 100%);
+  gap: var(--gap-2);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  padding: var(--gap-2);
 }
 
-.graph-type-control,
 .graph-zoom-controls {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-}
-
-.graph-type-control {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  padding: 2px;
-}
-
-.graph-type-control button {
-  min-width: 52px;
-  height: 24px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  padding: 0 9px;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.graph-type-control button:hover:not(.active) {
-  background: var(--hover);
-  color: var(--ink);
-}
-
-.graph-type-control button.active {
-  background: var(--ink);
-  color: var(--on-ink);
-}
-
-.graph-zoom-controls {
   margin-left: auto;
+  gap: var(--gap-1);
 }
 
 .graph-zoom-reset {
   display: inline-flex;
-  min-width: 48px;
-  height: 28px;
+  min-width: 52px;
+  height: var(--control-h-sm);
   align-items: center;
   justify-content: center;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--panel);
-  color: var(--ink);
+  color: var(--muted);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .graph-zoom-reset:hover:not(:disabled) {
   background: var(--hover);
+  color: var(--ink);
 }
 
 .sankey-chart {
@@ -1771,33 +1814,30 @@ button:focus-visible,
   height: auto;
 }
 
-.sankey-stage {
-  fill: var(--paper);
+.sankey-stage,
+.pie-stage {
+  fill: var(--surface-sunken);
 }
 
 .sankey-title,
 .pie-title,
 .pie-legend-heading {
   fill: var(--muted);
-  font-size: 15px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .sankey-empty,
 .pie-empty {
   fill: var(--muted);
-  font-size: 18px;
-  font-weight: 800;
-}
-
-.pie-stage {
-  fill: var(--paper);
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .pie-slice {
-  stroke: var(--paper);
+  stroke: var(--surface-sunken);
   stroke-width: 2.5;
   transition:
     opacity 0.16s ease,
@@ -1817,14 +1857,14 @@ button:focus-visible,
 }
 
 .pie-label-dot {
-  stroke: var(--paper);
+  stroke: var(--surface-sunken);
   stroke-width: 1.5;
 }
 
 .pie-slice-label {
   fill: var(--ink);
-  font-size: 14px;
-  font-weight: 900;
+  font-size: 13px;
+  font-weight: 500;
   paint-order: stroke;
   stroke: var(--halo);
   stroke-linejoin: round;
@@ -1833,17 +1873,18 @@ button:focus-visible,
 
 .pie-slice-label-value {
   fill: var(--muted);
-  font-size: 13px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
 
 .pie-slice-label.inside {
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .pie-slice-label-value.inside {
   fill: var(--ink);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .pie-legend-row {
@@ -1851,20 +1892,20 @@ button:focus-visible,
 }
 
 .pie-legend-swatch {
-  stroke: var(--panel-glass);
+  stroke: var(--surface-sunken);
   stroke-width: 1.5;
 }
 
 .pie-legend-label {
   fill: var(--ink);
-  font-size: 18px;
-  font-weight: 900;
+  font-size: 15px;
+  font-weight: 500;
 }
 
 .pie-legend-value {
   fill: var(--muted);
-  font-size: 15px;
-  font-weight: 800;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Ribbons are translucent so overlapping bands read as stacked volume rather
@@ -1895,11 +1936,11 @@ button:focus-visible,
 
 .sankey-node-mark.selected .sankey-node-name,
 .sankey-node-mark.selected .sankey-node-value {
-  fill: var(--accent-dark);
+  fill: var(--accent);
 }
 
 .sankey-node-mark:focus-visible {
-  outline: 2px solid var(--accent-dark);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -1908,33 +1949,35 @@ button:focus-visible,
 .sankey-node-name,
 .sankey-node-value {
   paint-order: stroke;
-  stroke: var(--paper);
+  stroke: var(--surface-sunken);
   stroke-linejoin: round;
   stroke-width: 3px;
 }
 
 .sankey-node-name {
   fill: var(--ink);
-  font-size: 19px;
-  font-weight: 900;
+  font-size: 15px;
+  font-weight: 500;
 }
 
 .sankey-node-value {
   fill: var(--ink);
-  font-size: 17px;
-  font-weight: 800;
+  font-size: 13px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The saved/overspent riser label rides its own ribbon, so it gets the same
    halo as the node labels and the tone of the shape it names. */
 .sankey-riser-label {
   paint-order: stroke;
-  stroke: var(--paper);
+  stroke: var(--surface-sunken);
   stroke-linejoin: round;
   stroke-width: 3px;
   fill: var(--ink);
-  font-size: 17px;
-  font-weight: 800;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .sankey-riser-label.incoming {
@@ -1945,60 +1988,40 @@ button:focus-visible,
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--gap-2);
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
 }
 
-.icon-button {
-  display: inline-grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--ink);
-}
-
-.icon-button.danger {
-  color: var(--coral);
-}
-
+/* A select wrapped so it looks like a labelled control, not a bare dropdown.
+   Same shape as `.statement-scope-control`. */
 .bulk-category-control,
 .category-filter-control {
   display: inline-flex;
   min-width: 210px;
   max-width: min(280px, 100%);
+  min-height: var(--control-h);
   align-items: center;
-  gap: 7px;
+  gap: var(--gap-1);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--panel);
-  color: var(--accent-dark);
-  padding: 0 8px;
+  padding: 0 var(--gap-1);
 }
 
 .category-filter-control {
   min-width: 190px;
 }
 
-.bulk-category-control:focus-within,
-.category-filter-control:focus-within {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
 .bulk-category-control select,
 .category-filter-control select {
-  min-height: 32px;
+  min-height: var(--control-h);
   border: 0;
   background: transparent;
   color: var(--ink);
   padding: 0 2px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .bulk-category-control select:focus,
@@ -2017,23 +2040,23 @@ button:focus-visible,
   min-width: 0;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--gap-1);
 }
 
 .category-filter-chip,
 .filter-clear-button {
   display: inline-flex;
-  min-height: 28px;
+  height: var(--control-h-sm);
   max-width: 220px;
   align-items: center;
-  gap: 5px;
+  gap: var(--gap-1);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--paper);
+  border-radius: var(--r-pill);
+  background: var(--panel);
   color: var(--ink);
-  padding: 0 8px;
+  padding: 0 var(--gap-2);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .category-filter-chip span {
@@ -2049,14 +2072,14 @@ button:focus-visible,
 }
 
 .filter-clear-button {
-  color: var(--accent-dark);
+  color: var(--accent);
 }
 
 .table-frame {
   min-height: 0;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--panel);
 }
 
@@ -2068,10 +2091,11 @@ table {
 
 th,
 td {
-  border-bottom: 1px solid var(--line);
-  padding: 8px;
+  border-bottom: 1px solid var(--line-faint);
+  padding: 6px var(--gap-2);
   text-align: left;
   vertical-align: middle;
+  font-size: 13px;
 }
 
 th {
@@ -2081,13 +2105,13 @@ th {
   background: var(--surface-header);
   color: var(--muted);
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 tbody tr:hover {
-  background: var(--surface);
+  background: var(--hover);
 }
 
 .empty-state {
@@ -2095,8 +2119,7 @@ tbody tr:hover {
   min-height: 92px;
   place-items: center;
   color: var(--muted);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 13px;
   text-align: center;
 }
 
@@ -2110,7 +2133,7 @@ th:last-child {
 .sort-header {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-1);
   padding: 0;
   border: none;
   background: none;
@@ -2132,6 +2155,15 @@ td:nth-child(2) {
 th:nth-child(3),
 td:nth-child(3) {
   width: 150px;
+}
+
+/* Figures right-align, so their heading does too. */
+th:nth-child(3) {
+  text-align: right;
+}
+
+td:nth-child(3) .amount-cell {
+  align-items: flex-end;
 }
 
 th:nth-child(4),
@@ -2162,18 +2194,40 @@ td:nth-child(8) {
 td input,
 td select {
   min-width: 0;
+  height: 26px;
   border-color: transparent;
   background: transparent;
 }
 
+td input:hover,
+td select:hover {
+  border-color: var(--line);
+}
+
 td input:focus,
 td select:focus {
-  border-color: var(--line-strong);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-color: transparent;
   background: var(--field);
 }
 
+/* Amount reads as money, not as a bare number: the symbol sits outside the
+   input (a number input cannot hold it) and the figures are tabular so the
+   column lines up. */
+.amount-field {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 1px;
+  color: var(--quiet);
+  font-size: 12px;
+}
+
 .amount-input {
-  max-width: 110px;
+  max-width: 96px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /*
@@ -2192,7 +2246,7 @@ td select:focus {
 .amount-reimbursed {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--gap-2);
   min-height: 20px;
   opacity: 0;
   transition: opacity 120ms ease;
@@ -2207,23 +2261,23 @@ tr:hover .amount-reimbursed,
 .reimbursed-field {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-1);
   color: var(--muted);
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .reimbursed-input {
   max-width: 68px;
-  padding: 1px 4px;
+  padding: 1px var(--gap-1);
   font-size: 11px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .net-amount {
-  color: var(--muted);
+  color: var(--positive);
   font-size: 11px;
-  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .income-frame th:nth-child(1),
@@ -2254,31 +2308,32 @@ tr:hover .amount-reimbursed,
 .statement-chip {
   display: inline-flex;
   max-width: 150px;
-  min-height: 30px;
+  height: var(--control-h-sm);
   align-items: center;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface-header);
-  color: var(--accent-dark);
-  padding: 4px 8px;
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+  color: var(--muted);
+  padding: 0 var(--gap-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 500;
 }
 
 .statement-chip:hover {
   background: var(--hover);
+  color: var(--ink);
 }
 
 .confidence {
   display: grid;
   width: 86px;
-  gap: 4px;
+  gap: var(--gap-1);
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 meter {
@@ -2300,71 +2355,67 @@ meter {
 .header-month {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--gap-1);
   justify-self: center;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-glass);
-  box-shadow: var(--shadow);
-  padding: 7px 9px;
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: 3px;
 }
 
 .month-view-toggle {
   display: inline-flex;
+  height: var(--control-h);
   align-items: center;
-  gap: 5px;
-  min-height: 34px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  padding: 0 10px;
+  gap: var(--gap-1);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  padding: 0 var(--gap-3);
   color: var(--muted);
-  font: inherit;
   font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-weight: 500;
   cursor: pointer;
 }
 
 .month-view-toggle:hover {
-  background: var(--hover);
   color: var(--ink);
 }
 
 .month-view-toggle.active {
-  border-color: var(--accent-line);
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--ink);
+  color: var(--on-ink);
 }
 
 .month-stepper {
   display: grid;
-  grid-template-columns: 34px minmax(180px, 1fr) 34px;
-  gap: 8px;
+  grid-template-columns: var(--control-h) minmax(180px, auto) var(--control-h);
   align-items: center;
+  gap: var(--gap-1);
 }
 
 .month-stepper .mini-icon-button {
-  width: 34px;
-  height: 34px;
+  width: var(--control-h);
+  height: var(--control-h);
 }
 
 .month-stepper-label {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: 0;
   text-align: center;
 }
 
 .month-stepper-label strong {
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .month-stepper-label small {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
 
 .statement-source-month {
@@ -2372,37 +2423,36 @@ meter {
   grid-column: 1 / -1;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--gap-2);
   border-top: 1px solid var(--line);
-  padding-top: 7px;
+  padding-top: var(--gap-2);
 }
 
 .statement-source-month span {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .statement-source-month input {
   max-width: 150px;
-  min-height: 32px;
+  min-height: var(--control-h);
 }
 
 .month-prompt-copy {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 700;
   line-height: 1.45;
 }
 
 .month-prompt-panel .secondary-button {
-  margin-top: 10px;
+  margin-top: var(--gap-2);
 }
 
 .month-prompt-panel .filter-clear-button {
-  margin-top: 8px;
+  margin-top: var(--gap-2);
 }
 
 .spin {
@@ -2422,22 +2472,23 @@ meter {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .header-month-anchor {
+  .header-month {
     grid-row: 2;
     grid-column: 1 / -1;
+    justify-self: center;
   }
 }
 
 @media (max-width: 980px) {
-  /* Too narrow to give up a lane, so a pinned rail keeps overlaying. */
-  .app-shell[data-rail-pinned="true"] {
-    padding-left: 18px;
+  /* Too narrow to give up a lane, so the rail overlays instead. */
+  .app-shell[data-rail-open="true"] {
+    padding-left: var(--shell-gutter);
   }
 
   /* Stacked layout has no gutter to hide in, so the drawers become plain
      panels again and the tab lane is no longer needed. */
   .workspace {
-    padding-right: 14px;
+    padding-right: var(--gap-4);
   }
 
   .side-drawer {
@@ -2451,7 +2502,7 @@ meter {
   .side-drawer > .income-panel,
   .side-drawer > .expense-chat-panel {
     max-height: none;
-    border-radius: 8px;
+    border-radius: var(--r-md);
   }
 
   .side-drawer-tab {
@@ -2464,7 +2515,7 @@ meter {
     padding: 10px;
   }
 
-  .app-shell[data-rail-pinned="true"] {
+  .app-shell[data-rail-open="true"] {
     padding-left: 10px;
   }
 
@@ -2473,9 +2524,16 @@ meter {
     align-items: stretch;
   }
 
-  .header-month-anchor,
+  .header-month,
   .header-upload {
     justify-self: stretch;
+  }
+
+  /* Five controls never fit one 430px line; wrapping beats clipping the file
+     picker off the left edge. */
+  .header-upload {
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .header-file {
@@ -2483,14 +2541,19 @@ meter {
     flex: 1;
   }
 
-  .workspace-top,
-  .stats-strip {
+  .workspace-top {
     display: flex;
     flex-direction: column;
   }
 
+  /* Two per row, not one column of half-width boxes: the strip is a flex item
+     here, so its tracks need to be stated. */
+  .stats-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .workspace-top h2 {
-    font-size: 24px;
+    font-size: 20px;
   }
 
   .cash-flow-heading {
@@ -2509,47 +2572,47 @@ meter {
 
 /* A calendar model: a quiet floor, saturated category blocks, crisp readable labels. */
 .spending-calendar { width: 100%; min-width: 0; }
-.calendar-heading { display: flex; justify-content: space-between; align-items: start; gap: 20px; padding: 24px 24px 16px; }
-.calendar-heading h3 { margin: 5px 0 0; font-size: 24px; letter-spacing: -0.04em; }
+.calendar-heading { display: flex; justify-content: space-between; align-items: start; gap: var(--gap-4); padding: var(--gap-4) var(--gap-4) var(--gap-3); }
+.calendar-heading h3 { margin: 2px 0 0; font-size: 17px; }
 .calendar-total { display: grid; gap: 6px; text-align: right; }
-.calendar-total strong { font-size: 24px; font-variant-numeric: tabular-nums; }
+.calendar-total strong { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .calendar-total span, .calendar-controls, .calendar-scale, .calendar-excluded { color: var(--muted); font-size: 12px; }
 .calendar-controls { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 24px 12px; flex-wrap: wrap; }
 .calendar-controls > div, .calendar-overview-zoom { display: inline-flex; align-items: center; gap: 6px; }
 .calendar-overview-zoom[hidden] { display: none; }
-.calendar-controls button { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); padding: 7px 11px; cursor: pointer; }
+.calendar-controls button { height: var(--control-h); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel); color: var(--ink); padding: 0 var(--gap-3); font-size: 12px; cursor: pointer; }
 .calendar-controls button:hover { background: var(--hover); }
 .calendar-controls button:disabled { opacity: 0.4; cursor: default; }
-.calendar-stage { position: relative; background: radial-gradient(ellipse at center, var(--surface), var(--surface-sunken)); border-block: 1px solid var(--line); overflow: hidden; }
+.calendar-stage { position: relative; background: var(--surface-sunken); border-block: 1px solid var(--line); overflow: hidden; }
 .calendar-stage svg { width: 100%; height: auto; min-height: 300px; max-height: 680px; display: block; cursor: grab; touch-action: none; user-select: none; }
 .calendar-stage svg:active { cursor: grabbing; }
 .calendar-foundation { fill: var(--line); stroke: var(--line-strong); stroke-width: 1; }
 .calendar-tile { fill: var(--panel); stroke: var(--line-strong); stroke-width: 0.7; }
 .calendar-day { cursor: pointer; outline: none; }
 .calendar-day:hover .calendar-tile, .calendar-day:focus .calendar-tile, .calendar-tile.selected { fill: var(--cobalt-tint); stroke: var(--cobalt); stroke-width: 2; }
-.calendar-weekday { fill: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 1px; pointer-events: none; }
+.calendar-weekday { fill: var(--quiet); font-size: 10px; font-weight: 500; letter-spacing: 0.06em; pointer-events: none; }
 .calendar-day-number { fill: var(--ink); font-size: 11px; font-weight: 600; pointer-events: none; }
 .calendar-scale { position: absolute; bottom: 16px; left: 24px; line-height: 1.6; pointer-events: none; }
 .calendar-bottom { display: grid; grid-template-columns: 1fr 280px; gap: 28px; padding: 24px; }
 .calendar-legend { display: flex; flex-wrap: wrap; align-content: start; gap: 8px; }
-.calendar-legend button { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 9px 11px; font-size: 12px; cursor: pointer; text-align: left; }
+.calendar-legend button { display: flex; align-items: center; gap: var(--gap-2); border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: var(--r-pill); padding: var(--gap-1) var(--gap-3); font-size: 12px; cursor: pointer; text-align: left; }
 .calendar-legend button[aria-pressed="true"] { border-color: var(--ink); background: var(--hover); }
 .calendar-legend button.dimmed { opacity: 0.5; }
-.calendar-legend i { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.calendar-legend i { width: 10px; height: 10px; border-radius: var(--r-sm); flex-shrink: 0; }
 .calendar-legend strong { font-size: 11px; font-weight: 500; color: var(--muted); }
 .calendar-detail { border-left: 1px solid var(--line); padding-left: 24px; min-width: 0; }
-.calendar-detail > strong { display: block; margin-top: 15px; font-size: 24px; }
+.calendar-detail > strong { display: block; margin-top: var(--gap-3); font-size: 17px; font-weight: 600; }
 .calendar-detail p { font-size: 12px; color: var(--muted); line-height: 1.6; }
 .calendar-detail label, .calendar-month-picker { display: grid; gap: 8px; font-size: 12px; color: var(--muted); }
-.calendar-detail select, .calendar-month-picker select { width: 100%; background: var(--field); color: var(--ink); border: 1px solid var(--line); padding: 9px; border-radius: 6px; }
+.calendar-detail select, .calendar-month-picker select { width: 100%; background: var(--field); color: var(--ink); border: 1px solid var(--line); padding: 0 var(--gap-2); border-radius: var(--r-sm); }
 .calendar-detail-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; padding-block: 5px; }
 .calendar-detail-row span { overflow-wrap: anywhere; }
 .calendar-excluded { padding: 0 24px 16px; line-height: 1.6; }
 .calendar-month-picker { max-width: 240px; margin: 18px 24px; }
-.calendar-overview { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.calendar-overview { border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
 @media (max-width: 680px) {
   .calendar-heading { padding: 18px 12px; }
-  .calendar-heading h3, .calendar-total strong { font-size: 19px; }
+  .calendar-heading h3, .calendar-total strong { font-size: 16px; }
   .calendar-total span { max-width: 145px; font-size: 10px; }
   .calendar-controls { padding-inline: 12px; }
   .calendar-bottom { grid-template-columns: 1fr; padding: 16px 12px; gap: 16px; }
@@ -2563,7 +2626,7 @@ meter {
 .calendar-volume-control { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 0 24px 16px; color: var(--muted); font-size: 12px; }
 .calendar-volume-control input { width: 180px; max-width: 45%; accent-color: var(--cobalt); }
 .calendar-volume-control output { min-width: 38px; font-variant-numeric: tabular-nums; }
-.calendar-volume-control button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; background: var(--panel); color: var(--ink); cursor: pointer; }
+.calendar-volume-control button { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 6px 9px; background: var(--panel); color: var(--ink); cursor: pointer; }
 .calendar-volume-control button:disabled { opacity: 0.4; cursor: default; }
 
 .calendar-stage[data-has-income="true"] .calendar-foundation { fill-opacity: 0.18; }
@@ -2580,12 +2643,7 @@ meter {
 .calendar-stage svg[data-pan-ready="true"], .calendar-stage svg[data-pan-ready="true"] .calendar-day { cursor: grab; }
 .calendar-stage svg[data-pan-ready="true"]:active, .calendar-stage svg[data-pan-ready="true"]:active .calendar-day { cursor: grabbing; }
 
-.calendar-surface-amount { fill: var(--on-ink); stroke: var(--ink); stroke-width: 0.4; paint-order: stroke; font-size: 8px; font-weight: 700; font-variant-numeric: tabular-nums; }
-
-.header-month-anchor { justify-self: center; min-width: 0; }
-.header-month { position: relative; z-index: 30; translate: 0 var(--month-float-offset, 0px); }
-.header-month[data-floating="true"] { background: var(--panel-glass-strong); backdrop-filter: blur(16px); }
-@media (max-width: 680px) { .header-month-anchor { justify-self: stretch; } }
+.calendar-surface-amount { fill: var(--on-ink); stroke: var(--ink); stroke-width: 0.4; paint-order: stroke; font-size: 8px; font-weight: 500; font-variant-numeric: tabular-nums; }
 
 /* Document manager (`/documents`). It reuses the workspace frame, but nothing
    parks in a right-hand drawer lane here, so the padding stays even and the
@@ -2626,7 +2684,7 @@ meter {
 
 .docs-card {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--panel);
   padding: 4px 12px 10px;
 }
@@ -2653,7 +2711,7 @@ meter {
   height: 34px;
   place-items: center;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: var(--surface);
   color: var(--muted);
 }
@@ -2675,7 +2733,7 @@ meter {
   margin-top: 2px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: capitalize;
 }
 
@@ -2683,7 +2741,7 @@ meter {
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -2697,7 +2755,7 @@ meter {
   color: var(--muted);
   font-size: 11px;
   font-style: normal;
-  font-weight: 800;
+  font-weight: 500;
   text-transform: uppercase;
 }
 
@@ -2739,7 +2797,7 @@ meter {
 .docs-split-note {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -2790,3 +2848,4 @@ meter {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+

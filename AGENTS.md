@@ -215,25 +215,24 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   - `/?month=<YYYY-MM>` is honoured by `lib/monthsClientStore.ts` `initialize()`, which opens
     that month instead of the most recent one. An unfiled month in the link is ignored rather
     than opening a blank workspace.
-- `.app-header` is a three-column grid (`1fr auto 1fr`): the brand lockup left, the month
-  stepper (`.header-month`) centred on the page rather than on the leftover space, and the
-  upload (file picker + `Extract`) plus the theme toggle right. The month selector floats
-  12px from the viewport top after scrolling past its original position. Its anchor reserves
-  layout space; scroll updates its translation directly without rerendering the workspace.
-  Under 1100px the month
-  control drops to its own centred second row, and under 680px the header stacks entirely.
-  Every other control lives in `.side-rail`, a fixed
-  full-height overlay that is hidden by default: `StatementWorkspace` tracks the pointer and
-  writes `--rail-reveal` (0..1) plus `data-rail-open` straight onto the element, fading and
-  creeping the rail out from 20px of the left edge and landing it flush at 12px
-  (`RAIL_FADE_DISTANCE_PX` 20 / `RAIL_OPEN_DISTANCE_PX` 12). It is driven by DOM writes on
-  purpose: a mousemove-per-frame `setState` re-renders the whole workspace. Below full reveal
-  the rail has `pointer-events: none` so a half-faded panel never eats clicks meant for the
-  table; once open, hover and `focusin` hold it out regardless of cursor distance. The pin
-  button at the top of the rail (mirrored by the header handle, the only way in on touch)
-  stores `statement-ledger:rail-pinned` and switches the rail to a reserved layout lane
-  (`.app-shell[data-rail-pinned="true"]` pads left by the rail width) instead of an overlay,
-  above 980px.
+- The chrome follows one rule: **nothing appears or moves unless it was asked for.** There is
+  no hover-revealed surface and no scroll-following control anywhere in the app.
+  - `.app-header` is a three-column grid (`1fr auto 1fr`) - brand lockup, the month stepper
+    (`.header-month`) centred on the page, then the upload (file picker + `Extract`),
+    `/documents`, the identity chip and the theme toggle. It is `position: sticky` with a
+    translucent blurred background and negative margins so the bar bleeds to the window edges
+    while `.app-shell` keeps its gutter. It replaced a month control that translated itself
+    down the page on scroll and drifted over the transaction table. Under 1100px the month
+    control drops to its own centred second row; under 680px the header stacks and the upload
+    lane wraps.
+  - Every other control lives in `.side-rail`, a fixed full-height sheet that is **closed
+    until the header's panel button opens it**. `railOpen` is one persisted boolean
+    (`statement-ledger:rail-open`, read through `useSyncExternalStore`), the rail's own `X`
+    closes it, and Escape closes it. Open above 980px it is a reserved layout lane
+    (`.app-shell[data-rail-open="true"]` pads left by `--rail-width`); below that the shell
+    keeps its gutter and the sheet overlays. There is no pin, no pointer-proximity ramp and no
+    `--rail-reveal`: the old model faded the rail in from 20px of the left edge, which meant a
+    panel could appear over the table from a stray mouse movement.
 - An uploaded statement is filed into the calendar month covering most of its period,
   falling back to its row dates, and the workspace switches to that month. There is no
   save-month action; months are derived. See `specs/month-scoped-statements.md`.
@@ -335,6 +334,30 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   A small inline script in `app/layout.tsx` resolves it onto `<html data-theme>` before first
   paint, so there is no flash of the light theme. Every colour in `app/globals.css` comes from
   a token defined for both themes; a raw hex in a rule breaks dark mode silently.
+- `app/globals.css` is a **three-layer design system**, and its header comment is the
+  contract: tokens, then element defaults, then the app's patterns built only from tokens.
+  The rules that keep the UI consistent, all of them load-bearing:
+  - No raw colour in a rule; a hex outside the token blocks breaks a theme silently.
+  - No decorative gradient on a surface. Depth is one hairline (`--line`) plus, for things
+    that float, one shadow (`--shadow-1` / `--shadow-2`). The previous UI stacked tinted
+    `linear-gradient`s on the canvas, the workspace, the chat panel and every chart frame,
+    so nothing read as a plain sheet and every panel tinted the panel above it.
+  - Radii come from `--r-sm` / `--r-md` / `--r-lg` / `--r-pill` and control heights from
+    `--control-h` (32px) / `--control-h-sm` (26px), so a button, a select and an input placed
+    side by side line up exactly. Spacing is `--gap-1`..`--gap-4` (4/8/12/16).
+  - Weight and size carry hierarchy - 400 body, 500 emphasis, 600 headings, nothing heavier -
+    and colour carries meaning: `--accent` is the one action, `--positive` is money kept,
+    `--coral` is overspent. The old sheet ran 700/800/900 weights and a serif display face on
+    four different headings, which is what made a page of numbers feel loud.
+  - One focus ring for the whole app (`:focus-visible`, 2px `--accent`); controls do not
+    invent their own.
+  - Every figure is `font-variant-numeric: tabular-nums`, and amounts right-align with the
+    `$` outside the number input (`.amount-field`), so a column of money reads as a column.
+  - Segmented controls (theme, graph type, overview mode) share one implementation, as do
+    the wrapped selects (`.bulk-category-control`, `.category-filter-control`,
+    `.statement-scope-control`) and the chips (`.statement-chip`, `.category-filter-chip`).
+    There is exactly one `.icon-button` and one `.mini-icon-button` definition; a second
+    copy with different sizes is what let four button shapes exist at once.
 - Auth state is visible in both headers (`/` and `/documents`): `components/AuthStatus.tsx`
   renders a chip in the brand lockup showing the signed-in address with a `Sign out` button,
   `Demo tenant` in the demo build (no button - there is no session to end), or a `Sign in`
@@ -412,34 +435,31 @@ extraction, and Notion (unconnected for the demo user, so the Notion panel shows
   expenses, stored in the `incomes` table (`lib/migrations/005_income_rows.sql`)
   and reviewed in the Income drawer. Notion save still covers expenses only.
 - Income and Expense chat are both *side drawers*: `.side-drawer` elements absolutely
-  positioned inside `.workspace`, parked off its *right* edge with only a 32px vertical tab
-  showing in the reserved `padding-right` lane, sliding over the transaction table when open.
-  They are on the right because the controls rail owns the left edge: it slid over a left tab
-  before the cursor could reach it. `flex-direction: row-reverse` keeps the tab on the inward
-  side, and `overflow: hidden` on `.workspace` is what hides a parked panel: remove it and the
-  income table bleeds outside the workspace. Below 980px both revert to plain stacked panels
-  and the tabs are hidden.
-  - `StatementWorkspace` writes `data-open` (hover, focus, or a hold) and `data-hold`
-    (`none` / `temporary` / `pinned`). A click inside a drawer takes the `temporary` hold: it
-    survives mouse-leave but the next click outside drops it. The pin button takes `pinned`,
-    which survives outside clicks until it is clicked again. One document `mousedown` listener
-    owns both transitions, so a single click can never be inside one drawer and outside
-    another inconsistently.
-  - Hover and focus are React state, not just CSS, because the tab lane layout needs to know
-    which drawers are open. A parked drawer's wrapper is as tall as its panel, so it is
-    `pointer-events: none` except for its tab; otherwise its empty column stole hover from the
-    neighbouring drawer's pin.
-  - `DRAWER_IDS` is the lane order. An effect lays the lane out top to bottom - a parked
-    drawer occupies one tab, an open one occupies its whole measured panel - and writes each
+  positioned inside `.workspace`, parked off its *right* edge with only a vertical tab showing
+  in the reserved `padding-right` lane, sliding over the transaction table when open. They are
+  on the right because the controls rail owns the left edge. `flex-direction: row-reverse`
+  keeps the tab on the inward side, and `overflow: clip` on `.workspace` is what hides a
+  parked panel: remove it and the income table bleeds outside the workspace. It is `clip`
+  rather than `hidden` because the parked drawers extend the scrollable area, so with `hidden`
+  any `scrollIntoView` inside the workspace slid a parked panel into view. Below 980px both
+  revert to plain stacked panels and the tabs are hidden.
+  - **A drawer opens on a click and nothing else.** `openDrawer: DrawerId | null` is the whole
+    model: the tab is a `<button>` that toggles it, opening one closes the other, the panel's
+    `X` closes it and so does Escape. `StatementWorkspace` writes `data-open` from it. The
+    previous model (hover plus a `temporary`/`pinned` hold arbitrated by a document
+    `mousedown` listener, with per-drawer pin buttons) opened panels over the table on cursor
+    drift and needed three states to explain one.
+  - `DRAWER_IDS` is the lane order. An effect lays the lane out top to bottom - a closed
+    drawer occupies one tab, the open one occupies its whole measured panel - and writes each
     drawer's `top`, so opening Income slides the Chat tab down instead of covering it
     (`transition: top` animates it, and an open drawer's `z-index` is higher so the tab passes
     *behind* the panel). The same effect adds a scroll offset through `margin-top`, which is
     deliberately *not* transitioned so the lane tracks the scroll frame for frame, keeping the
-    tabs on screen in a workspace taller than the viewport. Both are DOM writes for the same
-    reason as the rail: a scroll- or resize-per-frame `setState` re-renders the whole
-    workspace. A `ResizeObserver` re-runs it when an open panel grows. Adding a drawer is an
-    id in `DRAWER_IDS`, a wrapper spread with `drawerProps(id)`, a panel ref from
-    `registerDrawerPanel(id)`, and a `.side-drawer-tab`.
+    tabs on screen in a workspace taller than the viewport. Both are DOM writes on purpose: a
+    scroll- or resize-per-frame `setState` re-renders the whole workspace. A `ResizeObserver`
+    re-runs it when an open panel grows. Adding a drawer is an id in `DRAWER_IDS`, a wrapper
+    spread with `drawerProps(id)`, a panel ref from `registerDrawerPanel(id)`, and a
+    `.side-drawer-tab` button.
   - Expense chat can also *propose row edits*. `/api/expense-chat` loads every
     filed month itself (`listStoredMonthDocuments`), so a question sees the
     whole ledger, not just the rows on screen; the request carries only the
